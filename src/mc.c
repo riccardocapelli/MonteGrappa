@@ -863,6 +863,7 @@ void CopyResiduePositions(struct s_back *from, struct s_back *to)
 	(to->sph).ang = (from->sph).ang;
 	(to->sph).dih = (from->sph).dih;
 	(to->sph).r = (from->sph).r;
+	to->ext = from->ext;
 
 	//sidechain
 	for (k=0;k<from->nside;++k)
@@ -905,6 +906,7 @@ void CopyResiduePositions_NOCONT(struct s_back *from, struct s_back *to)
         (to->sph).ang = (from->sph).ang;
         (to->sph).dih = (from->sph).dih;
         (to->sph).r = (from->sph).r;
+	to->ext = from->ext;
 	
 	 for (k=0;k<from->nside;++k)
         {

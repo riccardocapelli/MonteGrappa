@@ -567,7 +567,11 @@ int AddSidechain(struct s_polymer *p, int istart, int istop, int ch)
 	int i,iside,irot,ib1,ib2,ib3,out;
 //	int flag;
 	//quite slow for a small system #pragma omp parallel for private(iside,irot,ib1,ib2,ib3,b1,b2,b3,ang,out) shared(flag)
+	double e2,e2max;
+
 	for (i=istart;i<=istop;++i)
+	{
+		e2max = 0;
 		for (iside=0;iside<(((p+ch)->back)+i)->nside;++iside)
 		{
 			irot = (((p+ch)->back)+i)->irot;								// which is the rotamer to insert
@@ -581,7 +585,11 @@ int AddSidechain(struct s_polymer *p, int istart, int istop, int ch)
  			(((((p+ch)->back)+i)->side)+iside)->pos = Spherical2Cartesian(b1,b2,b3,ang,p->tables,&out);
 			//if (out==0) flag=0; 
 			if(out==0)	return 0;
+			e2 = Dist2( (((((p+ch)->back)+i)->side)+iside)->pos, (((p+ch)->back)+i)->pos );
+			if (e2 > e2max) e2max = e2;
 		}
+		(((p+ch)->back)+i)->ext = sqrt(e2max);					// used to skip far pairs in EnergyPair
+	}
 	//if(flag==0) return flag; else return 1;
 	return 1;
 }
@@ -921,6 +929,7 @@ void CopyPolymer(struct s_polymer *from, struct s_polymer *to, int cfrom, int ct
 		(((to+cto)->back)+i)->e_ang = (((from+cfrom)->back)+i)->e_ang;
 		(((to+cto)->back)+i)->e_dih = (((from+cfrom)->back)+i)->e_dih;
 		(((to+cto)->back)+i)->e_hfs = (((from+cfrom)->back)+i)->e_hfs;
+		(((to+cto)->back)+i)->ext = (((from+cfrom)->back)+i)->ext;
 		(((to+cto)->back)+i)->d2_next = (((from+cfrom)->back)+i)->d2_next;
 		(((to+cto)->back)+i)->d_next = (((from+cfrom)->back)+i)->d_next;
 		(((to+cto)->back)+i)->iapdb = (((from+cfrom)->back)+i)->iapdb;

@@ -333,6 +333,8 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	SetPairCutoff(u,ntypes);
+	SetSidechainExtents(startp,parms->npol,parms->nosidechains);
 	CheckOverlaps(startp,u,parms,parms->npol,parms->nosidechains,1,fproc);
 
 	// calculate initial distances, angles and dihedrals to constrain loose moves
@@ -400,6 +402,9 @@ int main(int argc, char *argv[])
 		#ifdef ACTIVE_MPI
 		replica->etot = TotalEnergy(replica,u,parms,parms->npol,1,parms->nosidechains,parms->debug,my_rank);
 		#endif
+		if (polymer->etot >= LARGE)
+			fprintf(stderr,"WARNING: the structure has overlapping atoms (E=%g); the energy reported during the run keeps\n"
+				"         their hard-core terms also after they are resolved (consider the keyword disentangle)\n",polymer->etot);
 		if(my_rank==0)
 		{
 			fprintf(stderr,"\nPolymer energy=%lf\tstep=%d\n",polymer->etot,irun);

@@ -37,10 +37,55 @@
 
 #include "montegrappa.h"
 
+/********************************************************************
+ Largest distance at which two atoms interact (well or hard core):
+ EnergyPair skips pairs of residues farther than this plus the
+ extent of their sidechains
+ ********************************************************************/
+void SetPairCutoff(struct s_potential *u, int ntypes)
+{
+	int i,j;
+	double r2max = u->g_r0hard * u->g_r0hard;
+
+	for (i=0;i<ntypes;++i)
+		for (j=0;j<ntypes;++j)
+		{
+			if ((u->r_2)[i][j] > r2max) r2max = (u->r_2)[i][j];
+			if ((u->r0_2)[i][j] > r2max) r2max = (u->r0_2)[i][j];
+		}
+	u->rcut = sqrt(r2max);
+}
+
+/********************************************************************
+ Largest distance of the sidechain atoms of each residue from its
+ backbone atom (also kept up to date by AddSidechain)
+ ********************************************************************/
+void SetSidechainExtents(struct s_polymer *p, int npol, int nosidechains)
+{
+	int ci,i,is;
+	double e2,e2max;
+
+	for (ci=0;ci<npol;++ci)
+		for (i=0;i<(p+ci)->nback;++i)
+		{
+			e2max = 0;
+			if (!nosidechains)
+				for (is=0;is<(((p+ci)->back)+i)->nside;++is)
+				{
+					e2 = Dist2( (((((p+ci)->back)+i)->side)+is)->pos, (((p+ci)->back)+i)->pos );
+					if (e2 > e2max) e2max = e2;
+				}
+			(((p+ci)->back)+i)->ext = sqrt(e2max);
+		}
+}
+
 double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms, int npol, int update, int nosidechains, int debug, int iproc)
 {
 	int i,j,ci,cj,tooclose;
 	double etot=0,eang=0,edih=0,ehfs=0,ebox=0;
+
+	SetSidechainExtents(p,npol,nosidechains);			// coordinates may have been loaded in bulk (start, exchange, restart)
+
 	if (update)
 		#pragma omp parallel for private(i,j)
 		  for (ci=0;ci<npol;++ci)
@@ -151,10 +196,15 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
 double EnergyPair(struct s_polymer *p, struct s_potential *u, int i, int j, int ci, int cj, int update, int nosidechains, int disentangle, int tooclose, int hb)
 {
 	int is,js,a1,a2,ia1,ia2,out;
-	double r2,etot=0,e,r02,cos1,cos2,mul;
+	double r2,etot=0,e,r02,cos1,cos2,mul,rmax,r2bb;
 	
 	// within same aa do not interact
 	if (ci==cj && (((p+ci)->back)+i)->iaa == (((p+cj)->back)+j)->iaa) return 0;
+
+	// no atom of the two residues can be within the interaction range
+	r2bb = Dist2( (((p+ci)->back)+i)->pos, (((p+cj)->back)+j)->pos );
+	rmax = u->rcut + (((p+ci)->back)+i)->ext + (((p+cj)->back)+j)->ext;
+	if (r2bb > rmax*rmax) return 0;
 
 	// interaction backbone-backbone (i-j)
 	if ( ci!=cj || (i!=(j+1) && i!=(j-1)) )						// if not consecutive (i.e., no covalent interaction)
@@ -162,7 +212,7 @@ double EnergyPair(struct s_polymer *p, struct s_potential *u, int i, int j, int 
 		a1 = (((p+ci)->back)+i)->itype;
 		a2 = (((p+cj)->back)+j)->itype;
 
-		r2 = Dist2( (((p+ci)->back)+i)->pos, (((p+cj)->back)+j)->pos );
+		r2 = r2bb;
 
 		if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
 		else r02 = (u->r0_2)[a1][a2];

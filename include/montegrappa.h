@@ -324,6 +324,8 @@ int EnergyBox(struct s_polymer *p, struct s_potential *u, int iw, int ic);
 int EnergyBoxPolymer(struct s_polymer *p, struct s_potential *u, int ic);
 double EnergyHFields(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms, int iw, int ic, int update);
 double GetHFields(struct s_polymer *p, int npol);
+void SetPairCutoff(struct s_potential *u, int ntypes);
+void SetSidechainExtents(struct s_polymer *p, int npol, int nosidechains);
 double EnergyHFieldsAll(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms);
 
 

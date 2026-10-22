@@ -90,6 +90,7 @@ struct s_back
 	double e_ang;			// angular energy
 	double e_dih;			// dihedral energy
 	double e_hfs;			// H fields energy
+	double ext;			// largest distance of its sidechain atoms from this backbone atom
 	int nshell;			// number of backbone atoms in the shell
 	int *shell;			// atoms in the shell
 	int *shell_p;			// ... which chain it belongs to
@@ -180,6 +181,8 @@ struct s_potential
 	
 	int h_fields;				//h-fields for CoCaInE potential
 	double *h_values;
+
+	double rcut;				// largest distance at which two atoms interact (incl. hard core)
 };
 
 ////////struct st_restart

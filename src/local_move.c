@@ -79,6 +79,7 @@ void FreeFragment(struct s_polymer *fragment,struct s_mc_parms *parms)
 {
 
 	int i;
+	if (!fragment) return;
 	for(i=0;i<parms->npol;++i)
         {
 	        FreeDoubleMatrix((fragment+i)->A,parms->nmul_local);

@@ -105,7 +105,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 	#ifdef STEMPERING
 	int st_iprint=0;
 	int st_o=0;
-	int nconf;
+	int nconf=0;
 	#endif
        
 

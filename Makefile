@@ -69,12 +69,15 @@ GRAPPINO_OBJ = $(GRAPPINO_SRC:%=obj/TOOLS/%.o)
 MGP2PDB_SRC  = mgp2pdb io memory geometry misc
 MGP2PDB_OBJ  = $(MGP2PDB_SRC:%=obj/TOOLS/%.o)
 
-.PHONY: montegrappa grappino mgp2pdb mhistogram all clean cleanobj
+.PHONY: montegrappa grappino mgp2pdb mhistogram all clean cleanobj FORCE
 
 montegrappa: $(MC_BIN)
 
-$(MC_BIN): $(MC_OBJ) | $(BINDIR)
-	$(CCV) $(CFLAGS) $^ -o $@ $(LDLIBS)
+# always relinked: SERIAL and STEMPERING both produce bin/montegrappa
+$(MC_BIN): $(MC_OBJ) FORCE | $(BINDIR)
+	$(CCV) $(CFLAGS) $(MC_OBJ) -o $@ $(LDLIBS)
+
+FORCE:
 
 $(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
 	$(CCV) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@

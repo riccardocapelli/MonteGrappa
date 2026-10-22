@@ -53,6 +53,7 @@
         #define NCONTMAX	200		// maximum number of other atoms in contact with a given one (in polymer structure)
         #define NCONTMAX2	10000		// twice the number of other atoms in contact with a given one (in the moving structure, i.e. >>NCONTMAX)
         #define NSHELLMAX	1000		// maximum number of atoms in the shell of a given one
+        #define FNAMEMAX	256		// maximum length of file names
         #define SHELL_SKIN	2.		// minimum distance (A) between shell radius and interaction range
         #define NMOVES		13		// number of types of allowed moves
         #define NDIHFMAX	361		// maximum number of bins in tabled dihedral potential
@@ -167,7 +168,8 @@ void PrintStructure(struct s_polymer *p, int npol, FILE *fp, int shell);
 void ReadParD(char *s, char key[20], int *par);
 void ReadParL(char *s, char key[20], long *par);
 void ReadParF(char *s, char key[20], double *par);
-void ReadParS(char *s, char key[20], char *par);
+void ReadParSn(char *s, char *key, char *par, size_t size);
+#define ReadParS(s,key,par) ReadParSn((s),(key),(par),sizeof(par))		// par must be an array
 void ReadParN(char *s, char key[20], int *par);
 void ReadParLLU(char *s, char key[20], unsigned long long *par);
 void ComputeIAPDB(struct s_polymer *p,struct s_mc_parms *mc_parms);

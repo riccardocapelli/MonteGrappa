@@ -294,10 +294,10 @@ struct s_mc_parms
 	double dw_mpivot;	// maximum angle allowed in a flip
 	double dw_lpivot;	// maximum angle allowed in a flip
 	double dw_mflip;	// maximum angle allowed in a multiple flip
-	char fntrj[50];		// name of trajectory file
-	char fne[50];		// name of energy file
-	char flastp[50];	// name of last conformation;
-	char fnproc[50];	// name of the log file
+	char fntrj[FNAMEMAX];		// name of trajectory file
+	char fne[FNAMEMAX];		// name of energy file
+	char flastp[FNAMEMAX];	// name of last conformation;
+	char fnproc[FNAMEMAX];	// name of the log file
 	int nprinttrj;		// when to print trajectory file
 	int nprintlog;		// when to print log
 	int nprinte;		// when to print energy
@@ -340,7 +340,7 @@ struct s_mc_parms
 	double r_contact;	// threshold for contact distance in residue-residue interaction (H Field)
 	#ifdef OPTIMIZEPOT
 	 struct s_optimizepot_input *op_input;
-	 char fnop[50];		// name of file of experimental restrains
+	 char fnop[FNAMEMAX];		// name of file of experimental restrains
 	 char op_minim[50];	// optimize procedure: none, sample, steep
 	 int op_itermax;	// # of iteration steps
 	 double op_step;
@@ -377,7 +377,7 @@ struct s_mc_parms
 
 	int iT_bias; 	//if replica index > iT_bias, no local move -> no shells
 	int nreplicas; // if nreplicas==ntemp, load a different polymer for each replica; if nreplicas==1 load the same polymer for each replica
-	char input_names[NREPMAX][30];
+	char input_names[NREPMAX][FNAMEMAX];
 };
 
 struct s_tables

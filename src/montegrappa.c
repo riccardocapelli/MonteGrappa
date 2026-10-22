@@ -43,7 +43,7 @@ int main(int argc, char *argv[])
 	struct s_polymer *polymer, *startp, *oldp,*fragment=NULL,*replica;
 	struct s_mc_parms *parms=0;
 	struct s_potential *u;
-	char polname[50],potname[50],fname[50],aux[50];
+	char polname[FNAMEMAX],potname[FNAMEMAX],fname[2*FNAMEMAX],aux[500];
 	int i,nat,ntypes,irun,ci,out,nrestr;
 	unsigned long long int chkp_step=0;
 
@@ -83,6 +83,8 @@ int main(int argc, char *argv[])
 	mpiparms->nprocs=nprocs;
 	#endif
 
+	if (argc<4) Error("Usage: montegrappa <polymer file | checkpoint> <potential file> <parameter file>");
+	if (strlen(argv[1])>=FNAMEMAX || strlen(argv[2])>=FNAMEMAX) Error("File name too long (FNAMEMAX)");
 	strcpy(polname,argv[1]);
 	
 	if(!strcmp(polname,"checkpoint")){
@@ -90,6 +92,7 @@ int main(int argc, char *argv[])
 		MPI_Barrier(MPI_COMM_WORLD);
 		if(my_rank == 0){
 			fp = fopen("checkpoint.dat","r");
+			if (!fp) Error("Cannot open checkpoint.dat");
 			while(fgets(aux,500,fp)!=NULL){
 				chkp_step = strtoull(aux,NULL,10);
 			}
@@ -99,6 +102,7 @@ int main(int argc, char *argv[])
 		MPI_Barrier(MPI_COMM_WORLD);
 	#else
 		fp = fopen("checkpoint.dat","r");
+		if (!fp) Error("Cannot open checkpoint.dat");
 		while(fgets(aux,500,fp)!=NULL){
 			chkp_step = strtoull(aux,NULL,10);
 		}
@@ -163,7 +167,7 @@ int main(int argc, char *argv[])
 	parms=send_parms(mpiparms->my_rank,nprocs,parms);
 	if (strcmp(parms->fnproc,""))
 	{
-            sprintf(fname,"%s_%d.log",parms->fnproc,my_rank);
+            snprintf(fname,sizeof(fname),"%s_%d.log",parms->fnproc,my_rank);
             fproc = fopen(fname,"w");
             if (!fproc)
 		      Error("Cannot open log-process file for writing");
@@ -212,7 +216,7 @@ int main(int argc, char *argv[])
 		{
 			if(my_rank == 0)
 			{
-				sprintf(polname,"checkpoint_proc%d.pol",i);
+				snprintf(polname,sizeof(polname),"checkpoint_proc%d.pol",i);
 				ReadPolymer(polname,startp,parms->flog,parms->npol, parms->debug, &nat, &ntypes);
 				ComputeIAPDB(startp,parms);
 			}
@@ -230,14 +234,14 @@ int main(int argc, char *argv[])
 		}
 		if(my_rank==0)
 		{
-			sprintf(polname,"checkpoint_proc%d.pol",i);
+			snprintf(polname,sizeof(polname),"checkpoint_proc%d.pol",i);
 			ReadPolymer(polname,startp,parms->flog,parms->npol, parms->debug, &nat, &ntypes);
 			ComputeIAPDB(startp,parms);
-			sprintf(polname,"checkpoint");
+			snprintf(polname,sizeof(polname),"checkpoint");
 		}
 		#else
 		fprintf(stderr,"WARNING! Using checkpoint.pol as input polymer file\n");
-		sprintf(polname,"checkpoint.pol");
+		snprintf(polname,sizeof(polname),"checkpoint.pol");
 		fprintf(stderr,"Corrected starting step: %llu\n",chkp_step);
 		ReadPolymer(polname,startp,parms->flog,parms->npol, parms->debug, &nat, &ntypes);
 		ComputeIAPDB(startp,parms);
@@ -351,9 +355,9 @@ int main(int argc, char *argv[])
 	#ifdef OPTIMIZEPOT
 	char fname_op[50];
 	#ifdef ACTIVE_MPI
-	sprintf(fname_op,"op_log_proc%d.pdb",my_rank);
+	snprintf(fname_op,sizeof(fname_op),"op_log_proc%d.pdb",my_rank);
 	#else
-	sprintf(fname_op,"op_log");
+	snprintf(fname_op,sizeof(fname_op),"op_log");
 	#endif
 	fp = fopen(fname_op,"w");
 	startp->op = InitializeOptimizePot(parms,ntypes,u,fproc,my_rank,fp,&nrestr);	
@@ -472,19 +476,19 @@ int main(int argc, char *argv[])
 		// open trajectory file
 		#ifdef ACTIVE_MPI
 		if (parms->nrun>1)
-			sprintf(fname,"%s_run%d_proc%d.pdb",parms->fntrj,irun,my_rank);
+			snprintf(fname,sizeof(fname),"%s_run%d_proc%d.pdb",parms->fntrj,irun,my_rank);
 		else
-			sprintf(fname,"%s_proc%d.pdb",parms->fntrj,my_rank);
+			snprintf(fname,sizeof(fname),"%s_proc%d.pdb",parms->fntrj,my_rank);
 		#else
 		if (parms->nrun>1)
-			sprintf(fname,"%s_run%d.pdb",parms->fntrj,irun);
+			snprintf(fname,sizeof(fname),"%s_run%d.pdb",parms->fntrj,irun);
 		else
-			sprintf(fname,"%s.pdb",parms->fntrj);
+			snprintf(fname,sizeof(fname),"%s.pdb",parms->fntrj);
 		#endif
 		ftrj = fopen(fname,"w");
 		if (!ftrj)
 			Error("Cannot open trajectory file for writing");
-		sprintf(polymer->title,"initial\tE=%lf",polymer->etot);
+		snprintf(polymer->title,sizeof(polymer->title),"initial\tE=%lf",polymer->etot);
 		PrintPDBStream(polymer,parms->npol,ftrj);
 
 		// open energy file
@@ -492,14 +496,14 @@ int main(int argc, char *argv[])
 		{
 			#ifdef ACTIVE_MPI
 			if (parms->nrun>1)
-				sprintf(fname,"%s_run%d_proc%d.ene",parms->fne,irun,my_rank);
+				snprintf(fname,sizeof(fname),"%s_run%d_proc%d.ene",parms->fne,irun,my_rank);
 			else
-				sprintf(fname,"%s_proc%d.ene",parms->fne,my_rank);
+				snprintf(fname,sizeof(fname),"%s_proc%d.ene",parms->fne,my_rank);
 			#else
 			if (parms->nrun>1)
-				sprintf(fname,"%s_run%d.ene",parms->fne,irun);
+				snprintf(fname,sizeof(fname),"%s_run%d.ene",parms->fne,irun);
 			else
-				sprintf(fname,"%s.ene",parms->fne);
+				snprintf(fname,sizeof(fname),"%s.ene",parms->fne);
 			#endif
 			fe = fopen(fname,"w");
 			if (!fe) 
@@ -557,7 +561,7 @@ int main(int argc, char *argv[])
             #endif
 			if(my_rank==0)
 			{
-				sprintf(fname,"newpot_%d.pot",irun);
+				snprintf(fname,sizeof(fname),"newpot_%d.pot",irun);
 				PrintPotential(u,fname,nat,ntypes,parms->noangpot,parms->nodihpot,parms->hb,parms->nohfields);
 			}
 		}
@@ -569,17 +573,17 @@ int main(int argc, char *argv[])
 		#ifdef ACTIVE_MPI
              	
 		if (parms->nrun>1) 
-			sprintf(fname,"%s_run%d_proc%d.pol",parms->flastp,irun,my_rank);
+			snprintf(fname,sizeof(fname),"%s_run%d_proc%d.pol",parms->flastp,irun,my_rank);
 		else
-			sprintf(fname,"%s_proc%d.pol",parms->flastp,my_rank);
+			snprintf(fname,sizeof(fname),"%s_proc%d.pol",parms->flastp,my_rank);
             	
 		#else
              
 		if (parms->nrun>1)
-			sprintf(fname,"%s_run%d.pol",parms->flastp,irun);
+			snprintf(fname,sizeof(fname),"%s_run%d.pol",parms->flastp,irun);
 		else
 		{
-			sprintf(fname,"%s.pol",parms->flastp);
+			snprintf(fname,sizeof(fname),"%s.pol",parms->flastp);
 		}
 		#endif
 

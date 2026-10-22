@@ -53,6 +53,7 @@
         #define NCONTMAX	200		// maximum number of other atoms in contact with a given one (in polymer structure)
         #define NCONTMAX2	10000		// twice the number of other atoms in contact with a given one (in the moving structure, i.e. >>NCONTMAX)
         #define NSHELLMAX	1000		// maximum number of atoms in the shell of a given one
+        #define SHELL_SKIN	2.		// minimum distance (A) between shell radius and interaction range
         #define NMOVES		13		// number of types of allowed moves
         #define NDIHFMAX	361		// maximum number of bins in tabled dihedral potential
 

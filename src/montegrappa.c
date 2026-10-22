@@ -360,6 +360,24 @@ int main(int argc, char *argv[])
 
 	ematold = AlloDoubleMatrix(ntypes,ntypes);
 	#endif
+	// the shell list is rebuilt only every nshell steps: its radius must exceed the
+	// interaction range by a skin, otherwise pairs entering the range are missed
+	if (parms->shell)
+	{
+		double r2max=0., rshell;
+		int it,jt;
+		for (it=0;it<ntypes;++it)
+			for (jt=0;jt<ntypes;++jt)
+				if ((u->r_2)[it][jt] > r2max) r2max = (u->r_2)[it][jt];
+		rshell = sqrt(r2max) + SHELL_SKIN;
+		if (parms->r2shell < rshell*rshell)
+		{
+			if (my_rank==0) fprintf(stderr,"WARNING: r2shell=%lf is too small for interactions up to %lf A: using %lf\n",
+						sqrt(parms->r2shell),sqrt(r2max),rshell);
+			parms->r2shell = rshell*rshell;
+		}
+	}
+
 	CheckOverlaps(startp,u,parms,parms->npol,parms->nosidechains,1,fproc);
 
 	// calculate initial distances, angles and dihedrals to constrain loose moves

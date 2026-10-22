@@ -79,7 +79,7 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
 	}
 	if (debug>0 && iproc==0) fprintf(parms->flog," Epairs = %lf\n",etot);
 
-	if (!parms->noangpot || !parms->nodihpot || !parms->nohfields)
+	if (!parms->noangpot || !parms->nodihpot || !parms->nohfields || u->boxtype != 'n')
 	{
 		if(update)
 		{
@@ -105,7 +105,7 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
 		}
 		else
 		{
-		#pragma omp parallel for shared(ebox) private(i) reduction(+:eang,edih)
+		#pragma omp parallel for shared(ebox) private(i) reduction(+:eang,edih,ehfs)
 			for (ci=0;ci<npol;++ci)
 			{
 				for (i=0;i<(p+ci)->nback;++i)
@@ -263,7 +263,7 @@ double EnergyPair(struct s_polymer *p, struct s_potential *u, int i, int j, int 
 
 						ia1 = (((((p+ci)->back)+i)->side)+is)->ia;
 						ia2 = (((((p+cj)->back)+j)->side)+js)->ia;
-						if ((u->hb)[ia1]*(u->hb)[ia2]==2)
+						if ((u->hb)[ia1]*(u->hb)[ia2]==2 && mul>0)	// donor-acceptor pair within the first half of splice
 						{
 							cos1 = CosAngle( (*(*(((p+ci)->vback)+(u->hb_iam)[ia1]))), (*(*(((p+ci)->vback)+ia1))), 
 									(*(*(((p+cj)->vback)+ia2))), p->tables, &out );
@@ -278,7 +278,6 @@ double EnergyPair(struct s_polymer *p, struct s_potential *u, int i, int j, int 
 					#ifdef OPTIMIZEPOT
 					if (p->op->record && mul>0) OP_AddEnergy(p,a1,a2,mul);
 					#endif
-					if(i==10 && j==43 && r2< 2.) fprintf(stderr,"dist = %lf\n",r2);					
 					e *= mul;
 					etot += e;
 					if (update) AddContact(p,i,j,ci,cj,e);
@@ -532,12 +531,10 @@ void AddShell(struct s_polymer *p, int i, int j, int ci, int cj)
 		if ( ((((p+ci)->back)+i)->shell)[k] == j && ((((p+ci)->back)+i)->shell_p)[k] == cj) ok=0;
 	if (ok==1) // if not, add it
 	{
+		if ( (((p+ci)->back)+i)->nshell >= NSHELLMAX) Error("NSHELLMAX too small");
 		((((p+ci)->back)+i)->shell)[ (((p+ci)->back)+i)->nshell ] = j;
 		((((p+ci)->back)+i)->shell_p)[ (((p+ci)->back)+i)->nshell ] = cj;
 		(((p+ci)->back)+i)->nshell ++;
-		#ifdef DEBUG
-			if ( (((p+ci)->back)+i)->ncontacts >= NSHELLMAX) Error("NSHELLMAX too small");
-		#endif
 	}
 
 	// check if i is already among the shell of j
@@ -546,12 +543,10 @@ void AddShell(struct s_polymer *p, int i, int j, int ci, int cj)
 		if ( ((((p+cj)->back)+j)->shell)[k] == i && ((((p+cj)->back)+j)->shell_p)[k] == ci) ok=0;
 	if (ok==1) // if not, add it
 	{
+		if ( (((p+cj)->back)+j)->nshell >= NSHELLMAX) Error("NSHELLMAX too small");
 		((((p+cj)->back)+j)->shell)[ (((p+cj)->back)+j)->nshell ] = i;
 		((((p+cj)->back)+j)->shell_p)[ (((p+cj)->back)+j)->nshell ] = ci;
 		(((p+cj)->back)+j)->nshell ++;
-		#ifdef DEBUG
-			if ( (((p+cj)->back)+j)->ncontacts >= NSHELLMAX) Error("NSHELLMAX too small");
-		#endif
 	}
 }
 

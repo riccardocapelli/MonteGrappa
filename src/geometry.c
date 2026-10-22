@@ -367,7 +367,7 @@ struct angles Cartesian2Spherical( struct vector A, struct vector B,
 struct vector Spherical2Cartesian(struct vector A, struct vector B,
                                   struct vector C, struct angles W, struct s_tables *tables, int *out)
 {
-  struct vector Z;
+  struct vector Z = {0.,0.,0.};				// returned (with *out=0) when the geometry is degenerate
   double dumb[3],sb;
   double ZR[3];
   double M[3][3];
@@ -714,11 +714,13 @@ double Angle( struct vector B, struct vector C, struct vector D, struct s_tables
 
   dotprod = (B.x-C.x)*(D.x-C.x) + (B.y-C.y)*(D.y-C.y) + (B.z-C.z)*(D.z-C.z);
 
+  if (BC2*length2 < EPSILON*EPSILON) return ang;	// overlapping atoms: angle undefined (*out=0)
+
   temp = dotprod/FastSqrt(BC2*length2,tables);
 
-//  if(temp >=  1) { fprintf(stderr,"temp>1 in Angle"); return ang; }
-
+  // rounding can push |temp| slightly beyond 1
   if(temp <= -1)  { ang = 180.;  }
+  else if (temp >= 1) { ang = 0.; }
   else ang = FastAcos(temp,tables);
 
   *out = 1;

@@ -762,6 +762,13 @@ struct s_mc_parms *ReadMcParms(char *fname)
 	chk=-1;
 	for (i=0;i<NMOVES;++i) if ( x->movetype[i] != -1 ) chk=1;
 	if (chk==-1) Error("No move type defined");
+	#ifdef ACTIVE_MPI
+	if (x->ntemp<1) Error("ntemp and temperatures must be defined");
+	for (i=0;i<x->ntemp;++i)
+		if (x->T[i] <= 0) Error("Temperatures must be positive");
+	#else
+	if (x->T <= 0) Error("Temperature (keyword Temp) must be defined and positive");
+	#endif
 
 
 	x->flog=fopen(nlog,"w");

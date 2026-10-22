@@ -1419,7 +1419,7 @@ int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, 
 	double e,r,r0,k0,d1,d3,d01,d03,kr_splice,pa,pb,sigma,h_value;//r0vec[ntype];
 	char aux[500],keyword[100],ccc,c_ab,c_dihtype;
 	FILE *fp;
-	int c_d=0,c_a=0;
+	int hfields_read=0;
 	u->splice = 0;
 	u->g_r0hard = 0;
 	u->g_dihe=-1.;
@@ -1501,6 +1501,7 @@ int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, 
 		if ( FindKeyword(aux,keyword)==1 && !strcmp(keyword,"hfields") )
 		{
 			chapt = 11;
+			hfields_read = 1;
 			if (parms->nohfields)
 			{
 				fprintf(stderr,"WARNING: you defined nohfields in par file, but pot file contains h_fields potential (ignoring latter)\n");
@@ -1711,8 +1712,8 @@ int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, 
 	    {
 	    	if (sscanf(aux,"%d %c %d",&i,&ccc,&j)==3)
 	    	{
-	    		if (ccc=='d') { (u->hb)[i]=1; c_d++; }
-	    		if (ccc=='a') { (u->hb)[i]=2; c_a++; }
+	    		if (ccc=='d') { (u->hb)[i]=1; }
+	    		if (ccc=='a') { (u->hb)[i]=2; }
 	    		u->hb_iam[i] = j;
 	    	}
 	    }
@@ -1765,6 +1766,14 @@ int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, 
 	}
 	fclose(fp);
 
+	// without a [hfields] chapter all fields would be zero: switch them off
+	if (!parms->nohfields && !hfields_read)
+	{
+		fprintf(parms->flog,"No [hfields] in potential file: H fields switched off\n");
+		parms->nohfields = 1;
+	}
+	if (!parms->nohfields && parms->nosidechains)
+		Error("H fields are defined on sidechain atom types: they cannot be used with nosidechain");
 
 	if (k==0) fprintf(parms->flog,"WARNING: no pair interaction read in potential file.\n");
 	else fprintf(parms->flog,"Read %d pair interaction in potential file\n",k);

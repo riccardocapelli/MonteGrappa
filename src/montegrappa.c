@@ -320,6 +320,7 @@ int main(int argc, char *argv[])
 	}
 
 	#ifdef ACTIVE_MPI
+	MPI_Bcast(&(parms->nohfields),1,MPI_INT,0,MPI_COMM_WORLD);	// ReadPotential may switch H fields off
 	u = send_pot(nat,ntypes,parms->noangpot,parms->nodihpot,parms->nohfields,parms->hb, my_rank, nprocs,mpiparms-> Pot_mpi, u, astatus);
 	//POTENZIALE SUI DIEDRI 
 	if(u->dih_ram)

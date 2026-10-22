@@ -1273,3 +1273,62 @@ void RotationClusterZ(struct s_polymer *p,int ip,double dtheta,int icluster,int 
 
 }
 
+
+
+/*****************************************************************************
+ Difference between two dihedrals (degrees), folded into [-180,180]
+ *****************************************************************************/
+double DihedralDiff(double a, double b)
+{
+	double d = a - b;
+
+	while (d > 180.) d -= 360.;
+	while (d < -180.) d += 360.;
+	return d;
+}
+
+/*****************************************************************************
+ Check that the locked (move==0) dihedrals of chain ip with index in
+ [kfrom,kto] are within tol of their reference d_next (dihedral k is defined
+ by backbone atoms k-2..k+1). tol<=0 disables the check.
+ *****************************************************************************/
+int CheckLockedDihedralRange(struct s_polymer *p, int ip, int kfrom, int kto, double tol)
+{
+	int k,out;
+	double dih;
+	struct s_back *b = (p+ip)->back;
+
+	if (tol <= 0) return 1;
+	if (kfrom < 2) kfrom = 2;
+	if (kto > (p+ip)->nback-2) kto = (p+ip)->nback-2;
+
+	for (k=kfrom;k<=kto;++k)
+		if ((b+k)->move == 0)
+		{
+			dih = Dihedral( (b+k-2)->pos, (b+k-1)->pos, (b+k)->pos, (b+k+1)->pos, (p+ip)->tables, &out);
+			if (out==0 || DAbs(DihedralDiff(dih,(b+k)->d_next)) > tol) return 0;
+		}
+	return 1;
+}
+
+/*****************************************************************************
+ Check that the bond angles of chain ip centred on backbone atoms in
+ [kfrom,kto] are within tol of their reference a_next. tol<=0 disables it.
+ *****************************************************************************/
+int CheckAngleRange(struct s_polymer *p, int ip, int kfrom, int kto, double tol)
+{
+	int k,out;
+	double ang;
+	struct s_back *b = (p+ip)->back;
+
+	if (tol <= 0) return 1;
+	if (kfrom < 1) kfrom = 1;
+	if (kto > (p+ip)->nback-2) kto = (p+ip)->nback-2;
+
+	for (k=kfrom;k<=kto;++k)
+	{
+		ang = Angle( (b+k-1)->pos, (b+k)->pos, (b+k+1)->pos, (p+ip)->tables, &out);
+		if (out==0 || DAbs(ang - (b+k)->a_next) > tol) return 0;
+	}
+	return 1;
+}

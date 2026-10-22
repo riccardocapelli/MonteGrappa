@@ -708,65 +708,6 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
  Make a flip in a random backbone atom
 	 returns 1 if it could make the move, 0 if nothing was done
  *****************************************************************************/
-/*****************************************************************************
- Difference between two dihedrals (degrees), folded into [-180,180]
- *****************************************************************************/
-static double DihedralDiff(double a, double b)
-{
-	double d = a - b;
-
-	while (d > 180.) d -= 360.;
-	while (d < -180.) d += 360.;
-	return d;
-}
-
-/*****************************************************************************
- Check the d_cloose constraint on the locked (move==0) dihedrals of chain ip
- with index in [kfrom,kto] (dihedral k is defined by backbone atoms k-2..k+1)
- *****************************************************************************/
-static int CheckLockedDihedrals(struct s_polymer *p, int ip, int kfrom, int kto, struct s_mc_parms *parms)
-{
-	int k,out;
-	double dih;
-	struct s_back *b = (p+ip)->back;
-
-	if (parms->d_cloose <= 0) return 1;
-	if (kfrom < 2) kfrom = 2;
-	if (kto > (p+ip)->nback-2) kto = (p+ip)->nback-2;
-
-	for (k=kfrom;k<=kto;++k)
-		if ((b+k)->move == 0)
-		{
-			dih = Dihedral( (b+k-2)->pos, (b+k-1)->pos, (b+k)->pos, (b+k+1)->pos, (p+ip)->tables, &out);
-			if (out==0 || DAbs(DihedralDiff(dih,(b+k)->d_next)) > parms->d_cloose) return 0;
-		}
-	return 1;
-}
-
-
-/*****************************************************************************
- Check the a_cloose constraint on the bond angles of chain ip centred on
- the backbone atoms in [kfrom,kto]
- *****************************************************************************/
-static int CheckAngles(struct s_polymer *p, int ip, int kfrom, int kto, struct s_mc_parms *parms)
-{
-	int k,out;
-	double ang;
-	struct s_back *b = (p+ip)->back;
-
-	if (parms->a_cloose <= 0) return 1;
-	if (kfrom < 1) kfrom = 1;
-	if (kto > (p+ip)->nback-2) kto = (p+ip)->nback-2;
-
-	for (k=kfrom;k<=kto;++k)
-	{
-		ang = Angle( (b+k-1)->pos, (b+k)->pos, (b+k+1)->pos, (p+ip)->tables, &out);
-		if (out==0 || DAbs(ang - (b+k)->a_next) > parms->a_cloose) return 0;
-	}
-	return 1;
-}
-
-
 int MoveBackboneFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,
 		unsigned long long istep, int debug, double t)
 {
@@ -831,7 +772,7 @@ int MoveBackboneFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 			if ( DAbs( Angle( (((p+ip)->back)+iw)->pos, (((p+ip)->back)+iw+1)->pos, (((p+ip)->back)+iw+2)->pos, (p+ip)->tables, &out)
 					- (((p+ip)->back)+iw+1)->a_next) > parms->a_cloose || out==0) ok=0;
 	}
-	if (ok) ok = CheckLockedDihedrals(p,ip,iw-1,iw+2,parms);			// a flip of iw changes the dihedrals iw-1..iw+2
+	if (ok) ok = CheckLockedDihedralRange(p,ip,iw-1,iw+2,parms->d_cloose);			// a flip of iw changes the dihedrals iw-1..iw+2
 
 	// calculate new energy
 	if (ok)
@@ -970,7 +911,7 @@ int MoveBackbonePivot(struct s_polymer *p,struct s_polymer *oldp, struct s_poten
 	iw = 1 + irand((p+ip)->nback-2);
 
 	if (parms->randdw==1) dw = parms->dw_pivot * (0.5 - frand());						// dihedral to pivot
-	else if (parms->randdw==2) dw = parms->dw_pivot * gasdev(&(parms->seed));
+	else if (parms->randdw==2) dw = parms->dw_pivot * gauss(0.,1.);
 
 	#ifdef DEBUG
 		if (parms->debug>2) fprintf(stderr,"pivot ip = %d iw=%d dw=%lf half=%d\n",ip,iw,dw,half);
@@ -1117,7 +1058,7 @@ int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_pote
 			if ( (((p+ip)->back)+iw-m+1)->move == 1 )						// check if it you can move it
 			{
 				if (parms->randdw==1) dw = parms->dw_mpivot * (0.5 - frand());				// dihedral to pivot
-				else if (parms->randdw==2) dw = parms->dw_mpivot *gasdev(&(parms->seed));
+				else if (parms->randdw==2) dw = parms->dw_mpivot *gauss(0.,1.);
 
  				ok *= PivotBackward((p+ip),iw+1-m,dw,iw-m,parms);				// moves in [0,iw-1]
 			}
@@ -1149,7 +1090,7 @@ int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_pote
 			if ( (((p+ip)->back)+iw+m)->move == 1 )								// check if it you can move it
 			{
 				if (parms->randdw==1) dw = parms->dw_mpivot * (0.5 - frand());					// dihedral to pivot
-				else if (parms->randdw==2) dw = parms->dw_mpivot * gasdev(&(parms->seed));
+				else if (parms->randdw==2) dw = parms->dw_mpivot * gauss(0.,1.);
 
 				ok *= PivotForward((p+ip),iw-1+m,dw,(p+ip)->nback-iw-1-m,parms);	// moves in [iw+1,nback-1]
 			}
@@ -1544,14 +1485,14 @@ int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potenti
                   if ( (((p+ip)->back)+iw+1-m)->move == 1 )                                           // PivotBackward(k) changes dihedral k
                   {
                         if (parms->randdw==1) dw = parms->dw_lpivot * (0.5 - frand());                            // dihedral to pivot
-                        else if (parms->randdw==2) dw = parms->dw_lpivot * gasdev(&(parms->seed));
+                        else if (parms->randdw==2) dw = parms->dw_lpivot * gauss(0.,1.);
 
                         ok *= PivotBackward((p+ip),iw+1-m,dw,nmul-m,parms);                     // moves iw-1-m => overall moves in [iw-nmul,iw-1] (and sidechains of iw-imul-1 and iw)
                   }
             if (iw-nmul-1>=0)
                   if ( DAbs(Dist2( (((p+ip)->back)+iw-nmul)->pos, (((p+ip)->back)+iw-nmul-1)->pos ) - (((p+ip)->back)+iw-nmul-1)->d2_next) > rc2 ) ok=0;           // if covalent bond is broken
             // the stretched bond changes the angles at iw-nmul-1, iw-nmul and the dihedrals iw-nmul-1..iw-nmul+1
-            if (ok) ok = CheckAngles(p,ip,iw-nmul-1,iw-nmul,parms) && CheckLockedDihedrals(p,ip,iw-nmul-1,iw-nmul+1,parms);
+            if (ok) ok = CheckAngleRange(p,ip,iw-nmul-1,iw-nmul,parms->a_cloose) && CheckLockedDihedralRange(p,ip,iw-nmul-1,iw-nmul+1,parms->d_cloose);
 
             if (ok==1)
             {
@@ -1592,14 +1533,14 @@ int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potenti
 				if ( (((p+ip)->back)+iw+m)->move == 1 )                                        // PivotForward(k) changes dihedral k+1
 				{
 					if (parms->randdw==1) dw = parms->dw_lpivot * (0.5 - frand());                      // dihedral to pivot
-					else if (parms->randdw==2) dw = parms->dw_lpivot * gasdev(&(parms->seed));
+					else if (parms->randdw==2) dw = parms->dw_lpivot * gauss(0.,1.);
 
 					ok *= PivotForward((p+ip),iw-1+m,dw,nmul-m,parms);                            // moves iw+1+m => overall moves in [iw+1,iw+nmul]
 				}
             if (iw+nmul+1<(p+ip)->nback)
                   if ( DAbs(Dist2( (((p+ip)->back)+iw+nmul)->pos, (((p+ip)->back)+iw+nmul+1)->pos ) - (((p+ip)->back)+iw+nmul)->d2_next) > rc2 ) ok=0;           // if covalent bond is broken
             // the stretched bond changes the angles at iw+nmul, iw+nmul+1 and the dihedrals iw+nmul..iw+nmul+2
-            if (ok) ok = CheckAngles(p,ip,iw+nmul,iw+nmul+1,parms) && CheckLockedDihedrals(p,ip,iw+nmul,iw+nmul+2,parms);
+            if (ok) ok = CheckAngleRange(p,ip,iw+nmul,iw+nmul+1,parms->a_cloose) && CheckLockedDihedralRange(p,ip,iw+nmul,iw+nmul+2,parms->d_cloose);
 
             if (ok==1)
             {
@@ -1725,7 +1666,7 @@ int MoveMultipleFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 					- (((p+ip)->back)+iw2+1)->a_next) > parms->a_cloose  || out==0 ) ok=0;
 	}
 	// flipping [iw1,iw2] changes the dihedrals iw1-1, iw1, iw2+1 and iw2+2
-	if (ok) ok = CheckLockedDihedrals(p,ip,iw1-1,iw1,parms) && CheckLockedDihedrals(p,ip,iw2+1,iw2+2,parms);
+	if (ok) ok = CheckLockedDihedralRange(p,ip,iw1-1,iw1,parms->d_cloose) && CheckLockedDihedralRange(p,ip,iw2+1,iw2+2,parms->d_cloose);
 
 	if (ok) ok = AddSidechain(p,iw1-1,iw2+1,ip);
 

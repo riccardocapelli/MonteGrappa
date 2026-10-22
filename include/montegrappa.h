@@ -227,21 +227,14 @@ double Squared_n_Norma( double *vect, int dim );
 void TransposedMatOnVect( double **Mat, double *vect, double *risu, int n);
 int print_square_matrix(double **m,int n);
 int print_vector(double *v,int n);
-int Gaussian_Angles(double *angles,int n);
 void MatA( double **A, double **G, int dim,double a,double b);
 void Cholesky_2( double **L, double **A, int dim);
+double DetTriang( double **Mat, int n );
 
 
-void CopyResidueCoordinates(struct s_back *from,struct s_back *to);
-int ComputeG(double **g,struct s_polymer *fragment,struct s_polymer *p,int ip,int k,int n,int npol,struct s_mc_parms *parms);
-int MoveBiasedGaussian(struct s_polymer *p,struct s_polymer *oldp,struct s_polymer *fragment,struct s_potential *pot,int nmul,struct s_mc_parms *mc_parms,double t);
-int MoveReallyLocal(struct s_polymer *p,struct s_polymer *oldp,struct s_potential *pot,int nmul,struct s_mc_parms *mc_parms,double t);
-void CopyFragment(struct s_polymer *p,struct s_polymer *f,int iw,int natom_fragment,int ip);
-int B_Metropolis(double deltaE,double T,double WN,double WD,struct s_tables *t);
 //local_move.c
 struct s_polymer *Allo_Fragment(int npol, int nback,int nang, FILE *flog);
 int LocalMove(struct s_polymer *p, struct s_polymer *oldp,struct s_polymer *fragment,struct s_potential *pot,int nmul,struct s_mc_parms *parms, double t);
-int Compute_G(struct s_polymer *fragment,struct s_polymer *p,int ip,int istart,int natom_fragment,int nang,struct s_mc_parms *parms);
 void FreeFragment(struct s_polymer *f,struct s_mc_parms *parms);
 int BackRub(struct s_polymer *p, struct s_polymer *oldp,struct s_potential *pot,struct s_mc_parms *parms,double t);
 int BackSideRub(struct s_polymer *p, struct s_polymer *oldp,struct s_potential *pot,struct s_mc_parms *parms,double t);
@@ -329,6 +322,9 @@ double EnergyHFieldsAll(struct s_polymer *p, struct s_potential *u, struct s_mc_
 // constants for gaussian random generator
 float ran1(long *idum);
 double gasdev(long *idum);
+double DihedralDiff(double a, double b);
+int CheckLockedDihedralRange(struct s_polymer *p, int ip, int kfrom, int kto, double tol);
+int CheckAngleRange(struct s_polymer *p, int ip, int kfrom, int kto, double tol);
 
 #define IA 16807
 #define IM 2147483647

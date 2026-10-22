@@ -544,7 +544,7 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
     if (!parms->nodihpot)
       deltaE -= (((p+ip)->back)+iw+1)->e_dih;							// old dihedral energy
     if (!parms->nohfields)
-      deltaE -= GetHFields(p,ip);										// old H fields energy
+      deltaE -= GetHFields(p,parms->npol);										// old H fields energy
   
     ok = PivotBackward((p+ip),iw+1,0.2*(0.5-frand()),iw,parms);							// moved atoms are in [0,iw-1]; changed dihedral is iw+1
 
@@ -555,8 +555,7 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
     if (!parms->nodihpot)
       deltaE += EnergyDihedrals(p,pot,iw+1,ip,1);
     if (!parms->nohfields)
-	for(i=0;i<(p+ip)->nback;++i)
-          deltaE += EnergyHFields(p,pot,parms,i,ip,1);
+	deltaE += EnergyHFieldsAll(p,pot,parms);
 
     ok *= Metropolis(deltaE,t,p->tables);
 
@@ -587,7 +586,7 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
      if (!parms->nodihpot)
         deltaE -= (((p+ip)->back)+iw)->e_dih;		
     if (!parms->nohfields)
-       deltaE -= GetHFields(p,ip);
+       deltaE -= GetHFields(p,parms->npol);
 
     ok = PivotForward((p+ip),iw-1,0.2*(0.5-frand()),(p+ip)->nback-iw-1,parms);			// moved atoms are in [iw+1,nback-1]; changed dihedral of iw
    
@@ -600,10 +599,7 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
    
     if (!parms->nohfields)
     {
-      for(i=0;i<(p+ip)->nback;++i)
-      {
-	deltaE += EnergyHFields(p,pot,parms,i,ip,1);
-      }
+      deltaE += EnergyHFieldsAll(p,pot,parms);
       
     }
 
@@ -643,7 +639,7 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
         deltaE -= (((p+ip)->back)+iw+i)->e_dih;							// old dihedral energy
     
     if (!parms->nohfields)
-      deltaE -= GetHFields(p,ip);
+      deltaE -= GetHFields(p,parms->npol);
     
     Gaussian_Angles((fragment+ip)->g_ang,nang);        
     G_Matrix(fragment,p,ip,iw,nmul,nang,parms);    
@@ -682,8 +678,7 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
       
       
       if (!parms->nohfields)
-      	for(i=0;i<(p+ip)->nback;++i)
-	  deltaE += EnergyHFields(p,pot,parms,i,ip,1);
+      	deltaE += EnergyHFieldsAll(p,pot,parms);
 	            
       
       G_Matrix(fragment,p,ip,iw,nmul,nang,parms);
@@ -724,7 +719,7 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
 
 int LocalMove(struct s_polymer *p, struct s_polymer *oldp,struct s_polymer *fragment,struct s_potential *pot,int nmul,struct s_mc_parms *parms, double t)
 {
-        int ip,iw,idir;
+        int ip,iw;
 	int ok=1;
 	
 	
@@ -751,7 +746,7 @@ static int BackRubMove(struct s_polymer *p, struct s_polymer *oldp,struct s_pote
 {
   int ok=1;
   int iw,ip;
-  int i,out;
+  int out;
 
   double dw,deltaE;
 
@@ -780,7 +775,7 @@ static int BackRubMove(struct s_polymer *p, struct s_polymer *oldp,struct s_pote
       deltaE -= (((p+ip)->back)+iw+3)->e_ang;
   }
   if (!parms->nohfields)
-      deltaE -= GetHFields(p,ip);
+      deltaE -= GetHFields(p,parms->npol);
 
   ok=BackFlip(p+ip,iw,dw);
 
@@ -817,8 +812,7 @@ static int BackRubMove(struct s_polymer *p, struct s_polymer *oldp,struct s_pote
       deltaE += EnergyAngles(p,pot,iw+3,ip,1);
     }
     if (!parms->nohfields)
-      for(i=0;i<(p+ip)->nback;++i)
-        deltaE += EnergyHFields(p,pot,parms,i,ip,1);
+      deltaE += EnergyHFieldsAll(p,pot,parms);
 
     ok *= Metropolis(deltaE,t,p->tables);
   }

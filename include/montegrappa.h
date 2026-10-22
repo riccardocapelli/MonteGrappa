@@ -320,7 +320,8 @@ void CompareStructures(struct s_polymer *a, struct s_polymer *b, int nc, int nat
 int EnergyBox(struct s_polymer *p, struct s_potential *u, int iw, int ic);
 int EnergyBoxPolymer(struct s_polymer *p, struct s_potential *u, int ic);
 double EnergyHFields(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms, int iw, int ic, int update);
-double GetHFields(struct s_polymer *p, int ip);
+double GetHFields(struct s_polymer *p, int npol);
+double EnergyHFieldsAll(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms);
 
 
 // constants for gaussian random generator

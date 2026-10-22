@@ -636,16 +636,29 @@ double GetEnergyMonomerRange(struct s_polymer *p, int from, int to, int ip)
  Read the H Fields interaction energy
  from its energy structure
  ********************************************************************/
-double GetHFields(struct s_polymer *p, int ip)
+double GetHFields(struct s_polymer *p, int npol)
 {
 	double e=0.;
-	int iw;
-	
-	for (iw=0;iw<(p+ip)->nback;++iw)
-	{
-	e += (((p+ip)->back)+iw)->e_hfs;
-	
-	}
+	int ic,iw;
+
+	// a move changes the number of contacts also of residues of other chains
+	for (ic=0;ic<npol;++ic)
+		for (iw=0;iw<(p+ic)->nback;++iw)
+			e += (((p+ic)->back)+iw)->e_hfs;
+	return e;
+}
+
+/********************************************************************
+ Calculate (and store) the H fields energy of all the chains
+ ********************************************************************/
+double EnergyHFieldsAll(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms)
+{
+	double e=0.;
+	int ic,iw;
+
+	for (ic=0;ic<parms->npol;++ic)
+		for (iw=0;iw<(p+ic)->nback;++iw)
+			e += EnergyHFields(p,u,parms,iw,ic,1);
 	return e;
 }
 

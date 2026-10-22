@@ -652,6 +652,9 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
                  //       parms->ishell ++;
                 }
 
+		// rebuild the cell list from time to time (the shape of the system changes, see cells.c)
+		if (p->cells && istep%10000==0) CellsBuild(p,pot->rcut);
+
 		// checkpoint at the end of a step, so that a restart continues exactly from here
 		// (by default on wall-clock time: writing a checkpoint does not change the trajectory)
 		if (parms->ncheckpoint>0 ? icheckpoint >= parms->ncheckpoint :
@@ -1317,6 +1320,7 @@ void UpdateChainRanges(struct s_polymer *from, struct s_polymer *to, int nr, int
 		wt = (wto[r]>(from+p)->nback-1) ? (from+p)->nback-1 : wto[r];
 		for (w=wf;w<=wt;++w)
 			CopyResiduePositions( ((from+p)->back)+w, ((to+p)->back)+w) ;
+		if (to->cells) CellsUpdateRange(to,p,wf,wt);
 	}
 }
 
@@ -2176,6 +2180,11 @@ int MoveClusterRot(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms
 		RotationClusterY(p,ip,dtheta,ic,cluster,npol_cluster[ic]);
 	else
 		RotationClusterZ(p,ip,dtheta,ic,cluster,npol_cluster[ic]);
+
+	// all chains have moved before their energies are computed: update the cell list now
+	if (p->cells)
+		for(i=0;i<npol_cluster[ic];++i)
+			CellsUpdateRange(p,cluster[ic][i],0,(p+cluster[ic][i])->nback-1);
 
 	for(i=0;i<npol_cluster[ic];++i)
 	{

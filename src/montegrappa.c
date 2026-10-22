@@ -335,6 +335,14 @@ int main(int argc, char *argv[])
 
 	SetPairCutoff(u,ntypes);
 	SetSidechainExtents(startp,parms->npol,parms->nosidechains);
+
+	// cell list for the energy of moved residues (not with shells, which play the same role)
+	{
+		int nres=0;
+		for (i=0;i<parms->npol;++i) nres += (startp+i)->nback;
+		if (!parms->shell && (parms->cells==1 || (parms->cells==-1 && nres>=CELLS_AUTO_MIN)))
+			CellsAlloc(polymer,startp,parms->npol,parms->cells==1);
+	}
 	CheckOverlaps(startp,u,parms,parms->npol,parms->nosidechains,1,fproc);
 
 	// calculate initial distances, angles and dihedrals to constrain loose moves
@@ -590,6 +598,7 @@ int main(int argc, char *argv[])
 	#endif
 
 	
+	CellsFree(polymer);
 	FreePolymer(polymer,parms->npol, NRESMAX, NSIDEMAX, parms->shell, parms->nosidechains);
 	FreePolymer(oldp,parms->npol, NRESMAX, NSIDEMAX, parms->shell, parms->nosidechains);	
 	

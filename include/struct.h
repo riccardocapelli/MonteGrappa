@@ -63,6 +63,8 @@ struct s_polymer
 	#ifdef OPTIMIZEPOT
 	struct s_optimizepot *op;
 	#endif
+
+	struct s_cells *cells;		// cell list of the system (only in polymer+0 of the simulated system, see cells.c)
 };
 
 struct s_back
@@ -327,6 +329,7 @@ struct s_mc_parms
 	int nodihpot;		//0=there is a potential on dihedrals, 1; there is not
 	int nohfields;		//0=there is a H fields potential, 1: there is not
 	int echeck;		//1=check incremental energy against TotalEnergy after every move (slow, for debugging)
+	int cells;		//cell list for the energy: 1=on, 0=off, -1=automatic (on for large systems)
 	int nrun;		// number of repetitions of the MC
 	int always_restart;	//1=in different irun, start always from input structure
 	int record_native; //1=records the input (native( structure as first snapshot
@@ -410,3 +413,21 @@ struct s_checkpoint
 	int mcount[NMOVES],macc[NMOVES],mdone[NMOVES];
 };
 
+/********************************************************************
+ Cell list of backbone atoms (see cells.c)
+ ********************************************************************/
+struct s_cells
+{
+	int npol,nres;			// chains and residues of the system
+	int *offset;			// global index of residue i of chain ic is offset[ic]+i
+	int *chain,*res;		// ... and back
+	double rcut,extcap;		// interaction range and bound on sidechain extents
+	double L,invL;			// cell side
+	int hsize,mask;			// buckets of the hash table (a power of 2)
+	int *head;			// first residue in each bucket
+	int *next,*prev,*bucket;	// linked lists, bucket of each residue
+	int *cand;			// candidates returned by CellsCandidates
+	int dirty;			// 1 = to be rebuilt before use
+	int forced;			// 1 = always used (keyword cells 1)
+	int active;			// 1 = used by EnergyMonomerRange (decided at each rebuild)
+};

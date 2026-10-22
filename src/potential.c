@@ -85,6 +85,7 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
 	double etot=0,eang=0,edih=0,ehfs=0,ebox=0;
 
 	SetSidechainExtents(p,npol,nosidechains);			// coordinates may have been loaded in bulk (start, exchange, restart)
+	if (p->cells) CellsBuild(p,u->rcut);
 
 	if (update)
 		#pragma omp parallel for private(i,j)
@@ -486,8 +487,52 @@ double EnergyMonomerRange(struct s_polymer *p, struct s_potential *u, int from, 
         	for (i=from;i<=to;++i)
 			if (EnergyBox(p,u,i,ip) == 1) return LARGE;
 
+	if (shell == 0 && p->cells)
+	{
+		CellsUpdateRange(p,ip,from,to);
+		if (p->cells->dirty) CellsBuild(p,u->rcut);
+	}
+
+	// if not shell, with cell list
+	if (shell == 0 && p->cells && p->cells->active)
+	{
+		struct s_back *bi,*bj;
+		struct s_cells *c = p->cells;
+		double rmax;
+		int ncand,k;
+
+		for (i=from;i<=to;++i)
+		{
+			bi = ((p+ip)->back)+i;
+			ncand = CellsCandidates(p,ip,i);
+			if (ncand<0)						// too many: all residues, in the same order
+			{
+				ncand = c->nres;
+				for (k=0;k<ncand;++k) c->cand[k] = k;
+			}
+			for (k=0;k<ncand;++k)
+			{
+				cj = c->chain[c->cand[k]];
+				j = c->res[c->cand[k]];
+				bj = ((p+cj)->back)+j;
+				rmax = u->rcut + bi->ext + bj->ext;
+				if ( (bi->pos.x-bj->pos.x)*(bi->pos.x-bj->pos.x) + (bi->pos.y-bj->pos.y)*(bi->pos.y-bj->pos.y)
+					+ (bi->pos.z-bj->pos.z)*(bi->pos.z-bj->pos.z) > rmax*rmax ) continue;
+
+				if ( ip!=cj || j<from || j>to || i<j )				// if j in [from,to] of the same chain, require i<j to count only once
+				{
+					tooclose = 0;
+					if (ip == cj && Abs(i-j) <= u->g_imin) tooclose = 1;
+					e = EnergyPair(p,u,i,j,ip,cj,update,nosidechains,disentangle,tooclose,hb);
+					if (e>=LARGE && !disentangle) return LARGE;
+					etot += e;
+				}
+			}
+		}
+	}
+
 	// if not shell
-	if (shell == 0)
+	else if (shell == 0)
 	{
 		struct s_back *bi,*bj;
 		double rmax;

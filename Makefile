@@ -38,7 +38,7 @@ CPPFLAGS += -Iinclude
 
 version ?= SERIAL
 
-MC_SRC = geometry io mc local_move memory misc potential optimizepot checkpoint montegrappa
+MC_SRC = geometry io mc local_move memory misc potential optimizepot checkpoint cells montegrappa
 
 ifeq ($(version),MPI)
   CCV       = $(MPICC)
@@ -64,7 +64,7 @@ endif
 OBJDIR = obj/$(version)
 MC_OBJ = $(MC_SRC:%=$(OBJDIR)/%.o)
 
-GRAPPINO_SRC = geometry io memory misc potential energy pdb rotamers grappino optimizepot
+GRAPPINO_SRC = geometry io memory misc potential energy pdb rotamers grappino optimizepot cells
 GRAPPINO_OBJ = $(GRAPPINO_SRC:%=obj/TOOLS/%.o)
 MGP2PDB_SRC  = mgp2pdb io memory geometry misc
 MGP2PDB_OBJ  = $(MGP2PDB_SRC:%=obj/TOOLS/%.o)

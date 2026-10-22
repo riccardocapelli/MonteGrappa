@@ -55,6 +55,7 @@
         #define NSHELLMAX	1000		// maximum number of atoms in the shell of a given one
         #define FNAMEMAX	256		// maximum length of file names
         #define SHELL_SKIN	2.		// minimum distance (A) between shell radius and interaction range
+        #define CELLS_AUTO_MIN	100		// cells=-1 considers a cell list from this number of residues (see cells.c)
         #define NMOVES		13		// number of types of allowed moves
         #define NDIHFMAX	361		// maximum number of bins in tabled dihedral potential
 
@@ -330,6 +331,11 @@ int EnergyBoxPolymer(struct s_polymer *p, struct s_potential *u, int ic);
 double EnergyHFields(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms, int iw, int ic, int update);
 double GetHFields(struct s_polymer *p, int npol);
 void SetPairCutoff(struct s_potential *u, int ntypes);
+void CellsAlloc(struct s_polymer *p, struct s_polymer *topo, int npol, int forced);
+void CellsFree(struct s_polymer *p);
+void CellsBuild(struct s_polymer *p, double rcut);
+void CellsUpdateRange(struct s_polymer *p, int ic, int from, int to);
+int CellsCandidates(struct s_polymer *p, int ic, int i);
 void SetSidechainExtents(struct s_polymer *p, int npol, int nosidechains);
 double EnergyHFieldsAll(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms);
 

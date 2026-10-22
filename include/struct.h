@@ -322,6 +322,7 @@ struct s_mc_parms
 	int noangpot;		//0=there is a potential on angles, 1; there is not
 	int nodihpot;		//0=there is a potential on dihedrals, 1; there is not
 	int nohfields;		//0=there is a H fields potential, 1: there is not
+	int echeck;		//1=check incremental energy against TotalEnergy after every move (slow, for debugging)
 	int nrun;		// number of repetitions of the MC
 	int always_restart;	//1=in different irun, start always from input structure
 	int record_native; //1=records the input (native( structure as first snapshot

@@ -426,6 +426,7 @@ struct s_mc_parms *ReadMcParms(char *fname)
 	x->noangpot=0;
 	x->nodihpot=0;
 	x->nohfields=0;
+	x->echeck=0;
 	strcpy(x->fne,"energy");
 	strcpy(x->flastp,"last");
 	strcpy(x->fnproc,"proc");	
@@ -522,6 +523,7 @@ struct s_mc_parms *ReadMcParms(char *fname)
 		ReadParN(aux,"stempering",&(x->stempering));
 		ReadParN(aux,"nodihpot",&(x->nodihpot));
 		ReadParN(aux,"nohfields",&(x->nohfields));
+		ReadParN(aux,"echeck",&(x->echeck));
 		ReadParN(aux,"disentangle",&(x->disentangle));
 		ReadParD(aux,"nrun",&(x->nrun));
 		ReadParN(aux,"always_restart",&(x->always_restart));

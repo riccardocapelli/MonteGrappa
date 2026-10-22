@@ -203,6 +203,7 @@ void UpdateMonomer(struct s_polymer *from, struct s_polymer *to, int w, int n, i
 int MoveSidechain(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *mc_parms, struct s_potential *pot,
 		unsigned long long istep, int debug, double t);
 void UpdateMonomerRange(struct s_polymer *from, struct s_polymer *to, int wfrom, int wto, int p, int shell);
+void UpdateChainRanges(struct s_polymer *from, struct s_polymer *to, int nr, int *ch, int *wfrom, int *wto);
 int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potential *pot, int nmul, struct s_mc_parms *parms, double t);
 void SoftExit();
 int MoveMultipleFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,

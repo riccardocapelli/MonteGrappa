@@ -1,80 +1,113 @@
-#CC=icc
-CC=gcc 
-#CC=gcc -fopenmp
-CCMP=mpicc
-#CCMP=/usr/lib64/openmpi/bin/mpicc -fopenmp
-#LFLAGS -pg
-#LFLAGS= -Wall -pg -fopenmp -lm -L/usr/local/lib
-#LFLAGS= -Wall -pg  -lm -L/usr/local/lib
-LFLAGS= -lm -Wall #-L/opt/openmpi-1.10.1/lib
+#
+# MonteGrappa Makefile
+#
+#   make                       serial montegrappa              -> bin/montegrappa
+#   make version=STEMPERING    serial montegrappa + stempering -> bin/montegrappa (needs GSL)
+#   make version=MPI           parallel tempering              -> bin/montegrappa_mpi
+#   make version=ASAN          serial, AddressSanitizer+UBSan  -> bin/montegrappa_asan
+#   make grappino | mgp2pdb | mhistogram
+#   make all                   everything above except ASAN
+#
+# Each version is compiled in its own obj/<version> directory, so switching
+# version never links objects built with different preprocessor flags.
+# Paths can be overridden from the command line, e.g.
+#   make version=MPI MPICC=/usr/lib64/openmpi/bin/mpicc
+#   make version=STEMPERING GSL_PREFIX=/opt/local
+#
 
-#LGSLFLAGS= -lgsl -lgslcblas 
-CFLAGS= -Wall -I/opt/local/include -Iinclude
-OPTFLAG= -O2
+CC       ?= cc
+MPICC    ?= mpicc
+OPTFLAG  ?= -O2
+WARN     ?= -Wall
+CFLAGS   ?= $(OPTFLAG) -g $(WARN)
+LDLIBS   ?= -lm
 
-SRCDIR=src
-OBJDIR=obj
-INCL = -I../include
-INCMPIFLAG=-D ACTIVE_MPI
-INCSMPFLAG=-D STEMPERING
+GSL_PREFIX ?= $(shell gsl-config --prefix 2>/dev/null || echo /usr/local)
+GSL_CFLAGS ?= -I$(GSL_PREFIX)/include
+GSL_LIBS   ?= -L$(GSL_PREFIX)/lib -lgsl -lgslcblas
 
-BINDIR=bin
-
-
-ifeq ($(version),MPI)
-
-$(OBJDIR)/%.o: $(SRCDIR)/%.c
-	$(CCMP) $(INCMPIFLAG) $(OPTFLAG) $(CFLAGS) -c $< $(INCL) -o $@
-
-montegrappa_MPI: $(OBJDIR)/geometry.o $(OBJDIR)/io.o $(OBJDIR)/mc.o $(OBJDIR)/local_move.o $(OBJDIR)/memory.o $(OBJDIR)/misc.o $(OBJDIR)/potential.o $(OBJDIR)/optimizepot.o $(OBJDIR)/montegrappa.o $(OBJDIR)/MPIfunc.o
-	$(CCMP) $(INCMPIFLAG) $(OBJDIR)/geometry.o $(OBJDIR)/io.o $(OBJDIR)/mc.o $(OBJDIR)/local_move.o $(OBJDIR)/memory.o $(OBJDIR)/misc.o $(OBJDIR)/potential.o $(OBJDIR)/optimizepot.o $(OBJDIR)/montegrappa.o $(OBJDIR)/MPIfunc.o -o $(BINDIR)/montegrappa_mpi $(LFLAGS) 
-
-$(OBJDIR)/MPIfunc.o: $(SRCDIR)/MPIfunc.c
-	$(CCMP) $(INCMPIFLAG) $(CFLAGS) -c $< $(INCL) -o $@
-
-else ifeq ($(version),STEMPERING) 
-
-$(OBJDIR)/%.o: $(SRCDIR)/%.c
-	$(CC) $(INCSMPFLAG) $(OPTFLAG) $(CFLAGS) -c $< $(INCL) -o $@
-
-
-montegrappa_stemp:	$(OBJDIR)/geometry.o $(OBJDIR)/io.o $(OBJDIR)/mc.o $(OBJDIR)/local_move.o $(OBJDIR)/memory.o $(OBJDIR)/misc.o $(OBJDIR)/potential.o $(OBJDIR)/optimizepot.o $(OBJDIR)/montegrappa.o $(OBJDIR)/stempering.o $(OBJDIR)/memory1.o $(OBJDIR)/adjust_st.o $(OBJDIR)/do_mhistogram.o
-	$(CC) $(INCSMPFLAG) $(OBJDIR)/geometry.o $(OBJDIR)/io.o $(OBJDIR)/mc.o  $(OBJDIR)/local_move.o $(OBJDIR)/memory.o $(OBJDIR)/misc.o $(OBJDIR)/potential.o $(OBJDIR)/optimizepot.o $(OBJDIR)/montegrappa.o $(OBJDIR)/stempering.o $(OBJDIR)/memory1.o $(OBJDIR)/adjust_st.o $(OBJDIR)/do_mhistogram.o  -o $(BINDIR)/montegrappa $(LFLAGS) $(LGSLFLAGS)
-
-else
-
-$(OBJDIR)/%.o: $(SRCDIR)/%.c 
-	$(CC) $(OPTFLAG) $(CFLAGS) -c $< $(INCL) -o $@
-
-montegrappa:  $(OBJDIR)/geometry.o $(OBJDIR)/io.o $(OBJDIR)/mc.o $(OBJDIR)/local_move.o $(OBJDIR)/memory.o $(OBJDIR)/misc.o $(OBJDIR)/potential.o $(OBJDIR)/optimizepot.o $(OBJDIR)/montegrappa.o 
-	$(CC) $(OBJDIR)/geometry.o $(OBJDIR)/io.o $(OBJDIR)/mc.o  $(OBJDIR)/local_move.o $(OBJDIR)/memory.o $(OBJDIR)/misc.o $(OBJDIR)/potential.o $(OBJDIR)/optimizepot.o $(OBJDIR)/montegrappa.o -o $(BINDIR)/montegrappa $(LFLAGS)
-
+# OpenMP (experimental): make OPENMP=1 (needs a compiler supporting -fopenmp)
+ifeq ($(OPENMP),1)
+  CFLAGS += -fopenmp
+  LDLIBS += -fopenmp
 endif
 
+SRCDIR = src
+BINDIR = bin
+CPPFLAGS += -Iinclude
 
+version ?= SERIAL
 
-grappino:    $(OBJDIR)/geometry.o $(OBJDIR)/io.o $(OBJDIR)/memory.o $(OBJDIR)/misc.o $(OBJDIR)/potential.o $(OBJDIR)/energy.o $(OBJDIR)/pdb.o $(OBJDIR)/rotamers.o $(OBJDIR)/grappino.o $(OBJDIR)/optimizepot.o
-	$(CC) $(OBJDIR)/geometry.o $(OBJDIR)/io.o $(OBJDIR)/memory.o $(OBJDIR)/misc.o $(OBJDIR)/potential.o $(OBJDIR)/energy.o $(OBJDIR)/pdb.o $(OBJDIR)/rotamers.o $(OBJDIR)/optimizepot.o $(OBJDIR)/grappino.o -o $(BINDIR)/grappino $(LFLAGS)
+MC_SRC = geometry io mc local_move memory misc potential optimizepot montegrappa
 
-mhistogram:
-	cd src/mhistogram; make
+ifeq ($(version),MPI)
+  CCV       = $(MPICC)
+  CPPFLAGS += -D ACTIVE_MPI
+  MC_SRC   += MPIfunc
+  MC_BIN    = $(BINDIR)/montegrappa_mpi
+else ifeq ($(version),STEMPERING)
+  CCV       = $(CC)
+  CPPFLAGS += -D STEMPERING $(GSL_CFLAGS)
+  LDLIBS   += $(GSL_LIBS)
+  MC_SRC   += stempering memory1 adjust_st do_mhistogram
+  MC_BIN    = $(BINDIR)/montegrappa
+else ifeq ($(version),ASAN)
+  CCV       = $(CC)
+  CFLAGS    = -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined $(WARN)
+  LDLIBS   += -fsanitize=address,undefined
+  MC_BIN    = $(BINDIR)/montegrappa_asan
+else
+  CCV       = $(CC)
+  MC_BIN    = $(BINDIR)/montegrappa
+endif
 
-mgp2pdb:     $(OBJDIR)/mgp2pdb.o $(OBJDIR)/io.o $(OBJDIR)/memory.o $(OBJDIR)/geometry.o $(OBJDIR)/misc.o
-	$(CC) $(OBJDIR)/geometry.o $(OBJDIR)/io.o $(OBJDIR)/memory.o $(OBJDIR)/misc.o $(OBJDIR)/mgp2pdb.o -o $(BINDIR)/mgp2pdb $(LFLAGS)
+OBJDIR = obj/$(version)
+MC_OBJ = $(MC_SRC:%=$(OBJDIR)/%.o)
 
-clean:
-	rm -f $(OBJDIR)/*.o src/mhistogram/*.o  $(BINDIR)/* 
+GRAPPINO_SRC = geometry io memory misc potential energy pdb rotamers grappino optimizepot
+GRAPPINO_OBJ = $(GRAPPINO_SRC:%=obj/TOOLS/%.o)
+MGP2PDB_SRC  = mgp2pdb io memory geometry misc
+MGP2PDB_OBJ  = $(MGP2PDB_SRC:%=obj/TOOLS/%.o)
 
-cleanobj:
-	rm -f $(OBJDIR)/*.o 
-	rm -f src/mhistogram/*.o
+.PHONY: montegrappa grappino mgp2pdb mhistogram all clean cleanobj
+
+montegrappa: $(MC_BIN)
+
+$(MC_BIN): $(MC_OBJ) | $(BINDIR)
+	$(CCV) $(CFLAGS) $^ -o $@ $(LDLIBS)
+
+$(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
+	$(CCV) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
+
+grappino: $(BINDIR)/grappino
+mgp2pdb:  $(BINDIR)/mgp2pdb
+
+$(BINDIR)/grappino: $(GRAPPINO_OBJ) | $(BINDIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
+
+$(BINDIR)/mgp2pdb: $(MGP2PDB_OBJ) | $(BINDIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
+
+obj/TOOLS/%.o: $(SRCDIR)/%.c | obj/TOOLS
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
+
+mhistogram: | $(BINDIR)
+	$(MAKE) -C src/mhistogram CC="$(CC)" GSL_CFLAGS="$(GSL_CFLAGS)" GSL_LIBS="$(GSL_LIBS)"
+
+$(BINDIR) $(OBJDIR) obj/TOOLS:
+	mkdir -p $@
 
 all:
-	make cleanobj;
-	make version=STEMPERING;
-	make cleanobj;
-	make grappino;
-	make mgp2pdb;
-	make mhistogram;
-	make cleanobj;
-	make version=MPI;
+	$(MAKE) version=STEMPERING
+	$(MAKE) version=MPI
+	$(MAKE) grappino mgp2pdb mhistogram
+
+cleanobj:
+	rm -rf obj/SERIAL obj/STEMPERING obj/MPI obj/ASAN obj/TOOLS
+	rm -f src/mhistogram/*.o
+
+clean: cleanobj
+	rm -f $(BINDIR)/montegrappa $(BINDIR)/montegrappa_mpi $(BINDIR)/montegrappa_asan \
+	      $(BINDIR)/grappino $(BINDIR)/mgp2pdb $(BINDIR)/mhistogram
+
+-include $(wildcard obj/*/*.d)

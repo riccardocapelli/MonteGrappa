@@ -1,12 +1,14 @@
-CC= cc
-LFLAGS=  -Wall -lgsl -lgslcblas -lm -L/opt/local/lib
-CFLAGS=  -Wall -O3 -funroll-all-loops -finline-functions -I/opt/local/include 
+CC         ?= cc
+GSL_PREFIX ?= $(shell gsl-config --prefix 2>/dev/null || echo /usr/local)
+GSL_CFLAGS ?= -I$(GSL_PREFIX)/include
+GSL_LIBS   ?= -L$(GSL_PREFIX)/lib -lgsl -lgslcblas
+CFLAGS     ?= -Wall -O3 -funroll-all-loops -finline-functions
+CPPFLAGS   += $(GSL_CFLAGS)
 
-.o:     $(CC)  $(CFLAGS) $<
+OBJ = mhistogram.o memory.o misc.o do_mhistogram.o io.o
 
+../../bin/mhistogram: $(OBJ)
+	$(CC) $(CFLAGS) $(OBJ) -o $@ $(GSL_LIBS) -lm
 
-mhistogram: mhistogram.o memory.o misc.o do_mhistogram.o io.o
-	$(CC)  mhistogram.o memory.o misc.o do_mhistogram.o io.o -o ../../bin/mhistogram $(LFLAGS)
-
-
-
+%.o: %.c mhistogram.h do_mhistogram.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@

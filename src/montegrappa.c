@@ -668,7 +668,9 @@ void Welcome(FILE *fp)
 	fprintf(fp,"- [MPI]\t\t is OFF\n");
 	#endif
 	#ifdef ACTIVE_OPENMP
-	fprintf(stderr,"+ [OPENMP]\t is ON\t(experimental!)\n"); 
+	fprintf(fp,"+ [OPENMP]\t is ON\t(experimental!)\n");
+	#else
+	fprintf(fp,"- [OPENMP]\t is OFF\n");
 	#endif
 	#ifdef STEMPERING
 	fprintf(fp,"+ [STEMPERING]\t is ON\n");

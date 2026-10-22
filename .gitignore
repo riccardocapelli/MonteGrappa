@@ -22,3 +22,7 @@
 # swap files
 *.swp
 
+
+# build products
+obj/
+bin/

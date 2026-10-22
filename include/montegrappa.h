@@ -114,7 +114,9 @@
 
 
 
+#ifdef _OPENMP
 #define ACTIVE_OPENMP
+#endif
 
 #ifdef ACTIVE_MPI
 

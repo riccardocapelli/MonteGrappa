@@ -589,7 +589,11 @@ int AddSidechain(struct s_polymer *p, int istart, int istop, int ch)
 			if (e2 > e2max) e2max = e2;
 		}
 		(((p+ch)->back)+i)->ext = sqrt(e2max);					// used to skip far pairs in EnergyPair
-		if (p->cells && p->cells->active && (((p+ch)->back)+i)->ext > p->cells->extcap) p->cells->dirty = 1;
+		if (p->cells)
+		{
+			p->cells->ext[p->cells->offset[ch]+i] = (((p+ch)->back)+i)->ext;
+			if (p->cells->active && (((p+ch)->back)+i)->ext > p->cells->extcap) p->cells->dirty = 1;
+		}
 	}
 	//if(flag==0) return flag; else return 1;
 	return 1;

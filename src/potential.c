@@ -531,6 +531,44 @@ double EnergyMonomerRange(struct s_polymer *p, struct s_potential *u, int from, 
 		}
 	}
 
+	// if not shell, all residues from the compact copy of the positions
+	else if (shell == 0 && p->cells)
+	{
+		struct s_cells *c = p->cells;
+		double xi,yi,zi,ri,dx,dy,dz,rmax;
+		int nhit,k,g,gi;
+
+		for (i=from;i<=to;++i)
+		{
+			gi = c->offset[ip]+i;
+			xi = c->x[gi]; yi = c->y[gi]; zi = c->z[gi]; ri = u->rcut + c->ext[gi];
+
+			// same test as at the beginning of EnergyPair; branchless, the hits keep their order
+			nhit = 0;
+			for (g=0;g<c->nres;++g)
+			{
+				dx = c->x[g]-xi; dy = c->y[g]-yi; dz = c->z[g]-zi;
+				rmax = ri + c->ext[g];
+				c->cand[nhit] = g;
+				nhit += ( dx*dx + dy*dy + dz*dz <= rmax*rmax );
+			}
+
+			for (k=0;k<nhit;++k)
+			{
+				cj = c->chain[c->cand[k]];
+				j = c->res[c->cand[k]];
+				if ( ip!=cj || j<from || j>to || i<j )				// if j in [from,to] of the same chain, require i<j to count only once
+				{
+					tooclose = 0;
+					if (ip == cj && Abs(i-j) <= u->g_imin) tooclose = 1;
+					e = EnergyPair(p,u,i,j,ip,cj,update,nosidechains,disentangle,tooclose,hb);
+					if (e>=LARGE && !disentangle) return LARGE;
+					etot += e;
+				}
+			}
+		}
+	}
+
 	// if not shell
 	else if (shell == 0)
 	{

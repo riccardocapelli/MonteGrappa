@@ -61,7 +61,7 @@
  Allocate the cell list of system p (attached to p->cells), whose npol chains
  have the same number of residues as those of topo
  *****************************************************************************/
-void CellsAlloc(struct s_polymer *p, struct s_polymer *topo, int npol, int forced)
+void CellsAlloc(struct s_polymer *p, struct s_polymer *topo, int npol, int forced, int allowed)
 {
 	struct s_cells *c;
 	int ic,i,g;
@@ -86,7 +86,12 @@ void CellsAlloc(struct s_polymer *p, struct s_polymer *topo, int npol, int force
 	c->chain = (int *) malloc(c->nres*sizeof(int));
 	c->res = (int *) malloc(c->nres*sizeof(int));
 	c->cand = (int *) malloc(c->nres*sizeof(int));
+	c->x = (double *) malloc(c->nres*sizeof(double));
+	c->y = (double *) malloc(c->nres*sizeof(double));
+	c->z = (double *) malloc(c->nres*sizeof(double));
+	c->ext = (double *) malloc(c->nres*sizeof(double));
 	if (!c->head || !c->next || !c->prev || !c->bucket || !c->chain || !c->res || !c->cand) Error("Cannot allocate cell list");
+	if (!c->x || !c->y || !c->z || !c->ext) Error("Cannot allocate cell list");
 
 	for (ic=0;ic<npol;++ic)
 		for (i=0;i<(topo+ic)->nback;++i)
@@ -98,6 +103,7 @@ void CellsAlloc(struct s_polymer *p, struct s_polymer *topo, int npol, int force
 
 	c->dirty = 1;
 	c->forced = forced;
+	c->allowed = allowed || forced;
 	c->active = 0;
 	p->cells = c;
 }
@@ -109,6 +115,7 @@ void CellsFree(struct s_polymer *p)
 	if (!c) return;
 	free(c->offset); free(c->head); free(c->next); free(c->prev);
 	free(c->bucket); free(c->chain); free(c->res); free(c->cand);
+	free(c->x); free(c->y); free(c->z); free(c->ext);
 	free(c);
 	p->cells = NULL;
 }
@@ -152,6 +159,7 @@ void CellsBuild(struct s_polymer *p, double rcut)
 	for (g=0;g<c->nres;++g)
 	{
 		b = ((p+c->chain[g])->back)+c->res[g];
+		c->x[g] = b->pos.x; c->y[g] = b->pos.y; c->z[g] = b->pos.z; c->ext[g] = b->ext;
 		if (b->ext > extmax) extmax = b->ext;
 		v[0] = b->pos.x; v[1] = b->pos.y; v[2] = b->pos.z;
 		for (d=0;d<3;++d)
@@ -169,7 +177,7 @@ void CellsBuild(struct s_polymer *p, double rcut)
 	// plus the cost of visiting the cells are well below scanning all residues
 	ncells = 1.;
 	for (d=0;d<3;++d) ncells *= (hi[d]-lo[d])*c->invL + 1.;
-	c->active = c->forced || ( c->nres*27./ncells + 60. < 0.5*c->nres );
+	c->active = c->forced || ( c->allowed && c->nres*27./ncells + 60. < 0.5*c->nres );
 	c->dirty = 0;
 	if (!c->active) return;
 
@@ -191,15 +199,17 @@ void CellsUpdateRange(struct s_polymer *p, int ic, int from, int to)
 	struct s_back *b;
 	int i,g,h;
 
-	if (!c->active || c->dirty) return;			// not in use, or will be rebuilt before use
+	if (c->dirty) return;					// will be rebuilt before use
 	if (from<0) from=0;
 	if (to>(p+ic)->nback-1) to=(p+ic)->nback-1;
 
 	for (i=from;i<=to;++i)
 	{
 		b = ((p+ic)->back)+i;
-		if (b->ext > c->extcap) { c->dirty = 1; return; }
 		g = c->offset[ic]+i;
+		c->x[g] = b->pos.x; c->y[g] = b->pos.y; c->z[g] = b->pos.z; c->ext[g] = b->ext;
+		if (!c->active) continue;					// only the compact copy
+		if (b->ext > c->extcap) { c->dirty = 1; return; }
 		h = CellBucket(c,CellCoord(b->pos.x,c->invL),CellCoord(b->pos.y,c->invL),CellCoord(b->pos.z,c->invL));
 		if (h != c->bucket[g])
 		{
@@ -247,3 +257,28 @@ int CellsCandidates(struct s_polymer *p, int ic, int i)
 	}
 	return n;
 }
+
+/*****************************************************************************
+ Debug aid (echeck): number of residues whose compact copy or cell does not
+ match their current coordinates
+ *****************************************************************************/
+int CellsCheck(struct s_polymer *p)
+{
+	struct s_cells *c = p->cells;
+	struct s_back *b;
+	int g,h,nbad=0;
+
+	if (!c || c->dirty) return 0;
+	for (g=0;g<c->nres;++g)
+	{
+		b = ((p+c->chain[g])->back)+c->res[g];
+		if (c->x[g]!=b->pos.x || c->y[g]!=b->pos.y || c->z[g]!=b->pos.z || c->ext[g]!=b->ext) { nbad++; continue; }
+		if (c->active)
+		{
+			h = CellBucket(c,CellCoord(b->pos.x,c->invL),CellCoord(b->pos.y,c->invL),CellCoord(b->pos.z,c->invL));
+			if (h != c->bucket[g]) nbad++;
+		}
+	}
+	return nbad;
+}
+

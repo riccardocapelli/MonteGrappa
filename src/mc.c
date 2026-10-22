@@ -72,6 +72,10 @@ static void CheckEnergyDrift(struct s_polymer *p, struct s_polymer *oldp, struct
 				fprintf(stderr,"ECHECK: oldp differs from p after move %d at step %llu (chain %d residue %d)\n",move,istep,ic,i);
 		}
 
+	// before TotalEnergy, which rebuilds them
+	if (p->cells && (k = CellsCheck(p)) > 0)
+		fprintf(stderr,"ECHECK: cell list out of date for %d residues after move %d at step %llu\n",k,move,istep);
+
 	etrue = TotalEnergy(p,pot,parms,parms->npol,0,parms->nosidechains,0,my_rank);
 	if (fabs(etrue - p->etot) > 1e-6*(1.+fabs(etrue)))
 	{

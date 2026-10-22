@@ -340,8 +340,8 @@ int main(int argc, char *argv[])
 	{
 		int nres=0;
 		for (i=0;i<parms->npol;++i) nres += (startp+i)->nback;
-		if (!parms->shell && (parms->cells==1 || (parms->cells==-1 && nres>=CELLS_AUTO_MIN)))
-			CellsAlloc(polymer,startp,parms->npol,parms->cells==1);
+		if (!parms->shell)
+			CellsAlloc(polymer,startp,parms->npol,parms->cells==1,parms->cells==-1 && nres>=CELLS_AUTO_MIN);
 	}
 	CheckOverlaps(startp,u,parms,parms->npol,parms->nosidechains,1,fproc);
 

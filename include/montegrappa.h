@@ -331,11 +331,12 @@ int EnergyBoxPolymer(struct s_polymer *p, struct s_potential *u, int ic);
 double EnergyHFields(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms, int iw, int ic, int update);
 double GetHFields(struct s_polymer *p, int npol);
 void SetPairCutoff(struct s_potential *u, int ntypes);
-void CellsAlloc(struct s_polymer *p, struct s_polymer *topo, int npol, int forced);
+void CellsAlloc(struct s_polymer *p, struct s_polymer *topo, int npol, int forced, int allowed);
 void CellsFree(struct s_polymer *p);
 void CellsBuild(struct s_polymer *p, double rcut);
 void CellsUpdateRange(struct s_polymer *p, int ic, int from, int to);
 int CellsCandidates(struct s_polymer *p, int ic, int i);
+int CellsCheck(struct s_polymer *p);
 void SetSidechainExtents(struct s_polymer *p, int npol, int nosidechains);
 double EnergyHFieldsAll(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms);
 

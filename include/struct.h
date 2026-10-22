@@ -427,7 +427,9 @@ struct s_cells
 	int *head;			// first residue in each bucket
 	int *next,*prev,*bucket;	// linked lists, bucket of each residue
 	int *cand;			// candidates returned by CellsCandidates
+	double *x,*y,*z,*ext;		// compact copy of backbone positions and sidechain extents (always kept)
 	int dirty;			// 1 = to be rebuilt before use
 	int forced;			// 1 = always used (keyword cells 1)
+	int allowed;			// 0 = never used (keyword cells 0, or small system)
 	int active;			// 1 = used by EnergyMonomerRange (decided at each rebuild)
 };

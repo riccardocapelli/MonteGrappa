@@ -193,7 +193,7 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
  Calculate the energy of a pair of residues,
  updating contact lists and partial energies if update==1.
  ********************************************************************/
-double EnergyPair(struct s_polymer *p, struct s_potential *u, int i, int j, int ci, int cj, int update, int nosidechains, int disentangle, int tooclose, int hb)
+static double EnergyPairAtoms(struct s_polymer *p, struct s_potential *u, int i, int j, int ci, int cj, int nosidechains, int disentangle, int tooclose, int hb, double *econt, int *incontact)
 {
 	int is,js,a1,a2,ia1,ia2,out;
 	double r2,etot=0,e,r02,cos1,cos2,mul,rmax,r2bb;
@@ -237,7 +237,7 @@ double EnergyPair(struct s_polymer *p, struct s_potential *u, int i, int j, int 
 				
 				e *= mul;
 				etot += e;
-				if (update) AddContact(p,i,j,ci,cj,e);
+				{ *econt += e; *incontact = 1; }
 
 			}
 		}
@@ -276,7 +276,7 @@ double EnergyPair(struct s_polymer *p, struct s_potential *u, int i, int j, int 
 				
 				e *= mul;
 				etot += e;
-				if (update) AddContact(p,i,j,ci,cj,e);
+				{ *econt += e; *incontact = 1; }
 			}
 
 		for (is=0;is< (((p+ci)->back)+i)->nside;++is)
@@ -330,7 +330,7 @@ double EnergyPair(struct s_polymer *p, struct s_potential *u, int i, int j, int 
 					#endif
 					e *= mul;
 					etot += e;
-					if (update) AddContact(p,i,j,ci,cj,e);
+					{ *econt += e; *incontact = 1; }
 				}
 			}
 		}
@@ -366,11 +366,26 @@ double EnergyPair(struct s_polymer *p, struct s_potential *u, int i, int j, int 
 				
 				e *= mul;
 				etot += e;
-				if (update) AddContact(p,i,j,ci,cj,e);
+				{ *econt += e; *incontact = 1; }
 			}
 		}
 	}
 	return etot;
+}
+
+/********************************************************************
+ Interaction energy of residues i (chain ci) and j (chain cj); if
+ update, the pair is recorded once in their contact lists (also when
+ a hard core is found, as the move is then rejected and restored)
+ ********************************************************************/
+double EnergyPair(struct s_polymer *p, struct s_potential *u, int i, int j, int ci, int cj, int update, int nosidechains, int disentangle, int tooclose, int hb)
+{
+	double e,econt=0;
+	int incontact=0;
+
+	e = EnergyPairAtoms(p,u,i,j,ci,cj,nosidechains,disentangle,tooclose,hb,&econt,&incontact);
+	if (update && incontact) AddContact(p,i,j,ci,cj,econt);
+	return e;
 }
 
 /********************************************************************
@@ -535,47 +550,28 @@ double EnergyMonomerRange(struct s_polymer *p, struct s_potential *u, int from, 
  ********************************************************************/
 void AddContact(struct s_polymer *p, int i, int j, int ci, int cj, double e)
 {
+	struct s_back *bi = ((p+ci)->back)+i;
+	struct s_back *bj = ((p+cj)->back)+j;
 
-	int k,w;
-	
-	// check if j is already among the contacts of i
-	w=-1;
-	for (k=0;k<(((p+ci)->back)+i)->ncontacts;++k)
-		if ( ((((p+ci)->back)+i)->contacts)[k] == j && ((((p+ci)->back)+i)->contacts_p)[k] == cj) w=k;  // w is the element of the contact list
-																			// corresponding to j
-	if (w==-1) // if not present, add it
-	{
-		((((p+ci)->back)+i)->contacts)[ (((p+ci)->back)+i)->ncontacts ] = j;			// add contact
-		((((p+ci)->back)+i)->contacts_p)[ (((p+ci)->back)+i)->ncontacts ] = cj;			// add contact
-		((((p+ci)->back)+i)->e)[ (((p+ci)->back)+i)->ncontacts ] = e;					// add energy
-		(((p+ci)->back)+i)->ncontacts ++;
-		if ( (((p+ci)->back)+i)->ncontacts >= NCONTMAX) Error("NCONTMAX too small");
-	}
-	else	// if already a contact, add the associated energy
-	{
-		((((p+ci)->back)+i)->e)[w] += e;
-	}
+	// each residue pair is evaluated once after the contacts of the moved residues
+	// have been reset (ResetContactsMonomer, TotalEnergy), so it is not in the lists yet
+	#ifdef DEBUG
+	int k;
+	for (k=0;k<bi->ncontacts;++k)
+		if (bi->contacts[k]==j && bi->contacts_p[k]==cj) Error("AddContact: contact already present");
+	#endif
 
-	//fprintf(stderr,"added contact atom %d chain %d with atom %d chain %d\n",i,ci,j,cj);
-	// check if i is already among the contacts of j
-	w=-1;
-	for (k=0;k<(((p+cj)->back)+j)->ncontacts;++k)
-		if ( ((((p+cj)->back)+j)->contacts)[k] == i && ((((p+cj)->back)+j)->contacts_p)[k] == ci) w=k; // w is the element of the contact list
-																		// corresponding to i
+	if (bi->ncontacts+1 >= NCONTMAX || bj->ncontacts+1 >= NCONTMAX) Error("NCONTMAX too small");
 
-	if (w==-1) // if not present, add it
-	{
-		((((p+cj)->back)+j)->contacts)[ (((p+cj)->back)+j)->ncontacts ] = i;			// add contact
-		((((p+cj)->back)+j)->contacts_p)[ (((p+cj)->back)+j)->ncontacts ] = ci;			// add contact
-		((((p+cj)->back)+j)->e)[ (((p+cj)->back)+j)->ncontacts ] = e;					// add energy
-		(((p+cj)->back)+j)->ncontacts ++;
-		if ( (((p+cj)->back)+j)->ncontacts >= NCONTMAX) Error("NCONTMAX too small");
-	}
-	else	// if already a contact, add the associated energy
-	{
-		((((p+cj)->back)+j)->e)[w] += e;
-	}
-	//fprintf(stderr,"added contact atom %d chain %d with atom %d chain %d\n\n\n",i,ci,j,cj);
+	bi->contacts[bi->ncontacts] = j;
+	bi->contacts_p[bi->ncontacts] = cj;
+	bi->e[bi->ncontacts] = e;
+	bi->ncontacts ++;
+
+	bj->contacts[bj->ncontacts] = i;
+	bj->contacts_p[bj->ncontacts] = ci;
+	bj->e[bj->ncontacts] = e;
+	bj->ncontacts ++;
 }
 
 /********************************************************************

@@ -161,6 +161,7 @@ void Welcome(FILE *fp);
 
 // io.c
 void Error(char *text);
+void ScanPolymerSizes(char *fname, int npol, int *nbackmax, int *nsidemax, int *nrotmax, int *natommax);
 void ReadPolymer(char *fname, struct s_polymer *p, FILE *flog, int npol, int debug, int *iamax, int *itypemax);
 #ifdef STEMPERING
 void ResetStStuff(struct s_mc_parms *x,char *fname);

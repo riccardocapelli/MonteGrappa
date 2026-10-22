@@ -62,6 +62,51 @@ void Error(char *text)
 }
 
 /********************************************************************
+ Sizes needed to store the polymer file: largest number of backbone
+ atoms of a chain, of sidechain atoms of a backbone atom, of rotamers
+ and largest atom index (+1); same line formats as ReadPolymer
+ ********************************************************************/
+void ScanPolymerSizes(char *fname, int npol, int *nbackmax, int *nsidemax, int *nrotmax, int *natommax)
+{
+	FILE *fp;
+	char aux[500],keyword[100],s1[100],s2[100];
+	int sec=0,iback,ia,itype,iaa,ch,move,iab,irot,iar,b1,b2,b3,iat;
+	double x,y,z,ang,dih,r;
+
+	fp = fopen(fname,"r");
+	if (!fp) Error("Cannot open polymer file");
+
+	*nbackmax = 1; *nsidemax = 1; *nrotmax = 1; *natommax = 1;
+	while(fgets(aux,500,fp)!=NULL)
+	{
+		if (FindKeyword(aux,keyword)==1)
+		{
+			if (!strcmp(keyword,"backbone")) sec=1;
+			else if (!strcmp(keyword,"rotamers")) sec=2;
+			else sec=0;
+		}
+		if (sec==1 && sscanf(aux,"%d %d %99s %d %99s %d %d %lf %lf %lf %d",&iback,&ia,s1,&itype,s2,&iaa,&ch,&x,&y,&z,&move)==11)
+		{
+			if (iback < 0 || iback >= NRESMAX) Error("Backbone index out of range (NRESMAX too small?)");
+			if (ia < 0 || ia >= NATOMMAX) Error("Atom index out of range (NATOMMAX too small?)");
+			if (iback+1 > *nbackmax) *nbackmax = iback+1;
+			if (ia+1 > *natommax) *natommax = ia+1;
+		}
+		if (sec==2 && sscanf(aux,"%d %d %d %d %d %d %d %d %99s %d %lf %lf %lf",&iab,&ch,&irot,&iar,&b1,&b2,&b3,&iat,s1,&itype,&ang,&dih,&r)==13)
+		{
+			if (iar < 0 || iar >= NSIDEMAX) Error("Sidechain atom index out of range (NSIDEMAX too small?)");
+			if (irot < 0 || irot >= NROTMAX) Error("Rotamer index out of range (NROTMAX too small?)");
+			if (iat < 0 || iat >= NATOMMAX) Error("Atom index out of range (NATOMMAX too small?)");
+			if (iar+1 > *nsidemax) *nsidemax = iar+1;
+			if (irot+1 > *nrotmax) *nrotmax = irot+1;
+			if (iat+1 > *natommax) *natommax = iat+1;
+		}
+	}
+	fclose(fp);
+	(void) npol;
+}
+
+/********************************************************************
  Read polymer structure from file
  	 returns the number of atoms read
  ********************************************************************/

@@ -569,6 +569,9 @@ int AddSidechain(struct s_polymer *p, int istart, int istop, int ch)
 	//quite slow for a small system #pragma omp parallel for private(iside,irot,ib1,ib2,ib3,b1,b2,b3,ang,out) shared(flag)
 	double e2,e2max;
 
+	if (istart < 0) istart = 0;
+	if (istop > (p+ch)->nback-1) istop = (p+ch)->nback-1;
+
 	for (i=istart;i<=istop;++i)
 	{
 		e2max = 0;

@@ -48,6 +48,7 @@ int main(int argc, char *argv[])
 	struct s_checkpoint ckp;
 	char ckpname[FNAMEMAX];
 	int restart=0;
+	int nbackmax,nsidemax,nrotmax,natommax;
 
 	FILE *ftrj=NULL,*fe=NULL,*fproc=NULL,*fp=NULL;
 
@@ -176,10 +177,12 @@ int main(int argc, char *argv[])
 	//fprintf(stderr,"proc %d , seed = %d\n",my_rank,parms->seed);
 	parms->seed = Randomize(parms->seed,my_rank);		// one independent stream per replica
 	
-	startp = AlloPolymer(parms->npol,NRESMAX,NSIDEMAX,NROTMAX,NATOMMAX,parms->shell,parms->nosidechains,parms->flog);
-	polymer = AlloPolymer(parms->npol,NRESMAX,NSIDEMAX,NROTMAX,NATOMMAX,parms->shell,parms->nosidechains,parms->flog);
-	oldp = AlloPolymer(parms->npol,NRESMAX,NSIDEMAX,NROTMAX,NATOMMAX,parms->shell,parms->nosidechains,parms->flog);
-	replica = AlloPolymer(parms->npol,NRESMAX,NSIDEMAX,NROTMAX,NATOMMAX,parms->shell,parms->nosidechains,fproc);
+	// allocate only what the polymer file needs (all ranks read the same file)
+	ScanPolymerSizes(polname,parms->npol,&nbackmax,&nsidemax,&nrotmax,&natommax);
+	startp = AlloPolymer(parms->npol,nbackmax,nsidemax,nrotmax,natommax,parms->shell,parms->nosidechains,parms->flog);
+	polymer = AlloPolymer(parms->npol,nbackmax,nsidemax,nrotmax,natommax,parms->shell,parms->nosidechains,parms->flog);
+	oldp = AlloPolymer(parms->npol,nbackmax,nsidemax,nrotmax,natommax,parms->shell,parms->nosidechains,parms->flog);
+	replica = AlloPolymer(parms->npol,nbackmax,nsidemax,nrotmax,natommax,parms->shell,parms->nosidechains,fproc);
 
 	if( parms->nmul_local !=0 && parms->movetype[7]!=-1)
 	{
@@ -263,7 +266,7 @@ int main(int argc, char *argv[])
 */
 
 	for (i=0;i<parms->npol;++i)
-		if(!AddSidechain(startp,0,startp->nback,i))
+		if(!AddSidechain(startp,0,(startp+i)->nback-1,i))
 			Error("Cannot add sidechain in starting chain");
 
 	// Read potential (needs the number of atoms from ReadPolymer)
@@ -599,8 +602,8 @@ int main(int argc, char *argv[])
 
 	
 	CellsFree(polymer);
-	FreePolymer(polymer,parms->npol, NRESMAX, NSIDEMAX, parms->shell, parms->nosidechains);
-	FreePolymer(oldp,parms->npol, NRESMAX, NSIDEMAX, parms->shell, parms->nosidechains);	
+	FreePolymer(polymer,parms->npol, nbackmax, nsidemax, parms->shell, parms->nosidechains);
+	FreePolymer(oldp,parms->npol, nbackmax, nsidemax, parms->shell, parms->nosidechains);	
 	
 	//FreeOpt(startp->op,parms,startp->op->ndata);	// commentato da bob
 	if (strcmp(parms->op_minim,"none"))
@@ -608,8 +611,8 @@ int main(int argc, char *argv[])
 	else free(startp->op);
 	
 	FreeTables(startp->tables);	
-	FreePolymer(startp,parms->npol, NRESMAX, NSIDEMAX, parms->shell, parms->nosidechains);
-	FreePolymer(replica,parms->npol, NRESMAX, NSIDEMAX, parms->shell, parms->nosidechains);
+	FreePolymer(startp,parms->npol, nbackmax, nsidemax, parms->shell, parms->nosidechains);
+	FreePolymer(replica,parms->npol, nbackmax, nsidemax, parms->shell, parms->nosidechains);
 	FreeDoubleMatrix(ematold,ntypes);
 	FreePotential(u,ntypes,parms->noangpot,parms->nodihpot,parms->hb);
      	

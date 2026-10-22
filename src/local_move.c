@@ -741,9 +741,14 @@ int LocalMove(struct s_polymer *p, struct s_polymer *oldp,struct s_polymer *frag
 }	
 
 
-int BackRub(struct s_polymer *p, struct s_polymer *oldp,struct s_potential *pot,struct s_mc_parms *parms,double t)
+/*****************************************************************************
+ Backrub move: rotate the five backbone atoms iw-2..iw+2 (iw is a CA) around
+ the axis joining the CAs iw-3 and iw+3. The bond angles at iw-3 and iw+3 and
+ the dihedrals iw-3, iw-2, iw+3, iw+4 change. If newrot, a new rotamer is also
+ chosen for residue iw (backsiderub).
+ *****************************************************************************/
+static int BackRubMove(struct s_polymer *p, struct s_polymer *oldp,struct s_potential *pot,struct s_mc_parms *parms,double t,int newrot)
 {
-
   int ok=1;
   int iw,ip;
   int i,out;
@@ -752,51 +757,53 @@ int BackRub(struct s_polymer *p, struct s_polymer *oldp,struct s_potential *pot,
 
   ip=irand( parms->npol);
   iw=3*irand((p+ip)->nback/3)+1;
-  //iw=16;
   dw = 2.0 * (0.5 - frand());
 
-  if(iw<3)
-  {
-    return ok;
+  // the angle checks need the backbone atoms iw-4 and iw+4
+  if (iw<4 || iw+4>(p+ip)->nback-1)
+    return 0;
 
-  }
-  if(iw>(p+ip)->nback-3)
-  {
-    return ok;
-  }
-  
+  parms->mov++;
 
-  //fprintf(stdout,"backrub: iw = %d \t type : %s \n",iw,(((p+ip)->back)+iw)->type);
   deltaE = -GetEnergyMonomerRange(p,iw-3,iw+3,ip);                                                 // two-body energy
 
   if (!parms->nodihpot)
   {
       deltaE -= (((p+ip)->back)+iw-3)->e_dih;                                                   // old dihedral energy
       deltaE -= (((p+ip)->back)+iw-2)->e_dih;
-      
       deltaE -= (((p+ip)->back)+iw+3)->e_dih;
       deltaE -= (((p+ip)->back)+iw+4)->e_dih;
   }
-    if (!parms->nohfields)
-      deltaE -= GetHFields(p,ip);                   
+  if (!parms->noangpot)
+  {
+      deltaE -= (((p+ip)->back)+iw-3)->e_ang;                                                   // old angular energy
+      deltaE -= (((p+ip)->back)+iw+3)->e_ang;
+  }
+  if (!parms->nohfields)
+      deltaE -= GetHFields(p,ip);
 
-  ok=BackFlip(p,iw,dw);
+  ok=BackFlip(p+ip,iw,dw);
 
-  if( DAbs( Angle( (((p+ip)->back)+iw-4)->pos, (((p+ip)->back)+iw-3)->pos, (((p+ip)->back)+iw-2)->pos,p->tables,&out)-(((p+ip)->back)+iw-3)->a_next) > 5.0)
-    ok=0;
-  if(ok!=0) 
-    if( DAbs( Angle( (((p+ip)->back)+iw+2)->pos, (((p+ip)->back)+iw+3)->pos, (((p+ip)->back)+iw+4)->pos,p->tables,&out)-(((p+ip)->back)+iw-3)->a_next) > 5.0)
+  if (ok)
+    if( DAbs( Angle( (((p+ip)->back)+iw-4)->pos, (((p+ip)->back)+iw-3)->pos, (((p+ip)->back)+iw-2)->pos,p->tables,&out)-(((p+ip)->back)+iw-3)->a_next) > 5.0)
+      ok=0;
+  if (ok)
+    if( DAbs( Angle( (((p+ip)->back)+iw+2)->pos, (((p+ip)->back)+iw+3)->pos, (((p+ip)->back)+iw+4)->pos,p->tables,&out)-(((p+ip)->back)+iw+3)->a_next) > 5.0)
       ok=0;
 
-
-  if(ok==1)
+  if (ok)
   {
+    if (newrot)
+      (((p+ip)->back)+iw)->irot = irand( (((p+ip)->back)+iw)->nrot );
 
     if(!parms->nosidechains)
-          ok *= AddSidechain(p,iw-3,iw+3,ip);
-  
+      ok *= AddSidechain(p,iw-3,iw+3,ip);
+  }
+
+  if (ok)
+  {
     deltaE += EnergyMonomerRange(p,pot,iw-3,iw+3,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);
-  
+
     if (!parms->nodihpot)
     {
       deltaE += EnergyDihedrals(p,pot,iw-3,ip,1);
@@ -804,133 +811,38 @@ int BackRub(struct s_polymer *p, struct s_polymer *oldp,struct s_potential *pot,
       deltaE += EnergyDihedrals(p,pot,iw+3,ip,1);
       deltaE += EnergyDihedrals(p,pot,iw+4,ip,1);
     }
-  
-     if (!parms->nohfields)
-       for(i=0;i<(p+ip)->nback;++i)
-         deltaE += EnergyHFields(p,pot,parms,i,ip,1);
-  
-      ok *= Metropolis(deltaE,t,p->tables);
-
-
-    }
-
-
-    if (ok == 0)                        // move rejected
+    if (!parms->noangpot)
     {
-      UpdateMonomerRange(oldp,p,iw-3,iw+3,ip,0);
-      return 0;
+      deltaE += EnergyAngles(p,pot,iw-3,ip,1);
+      deltaE += EnergyAngles(p,pot,iw+3,ip,1);
     }
+    if (!parms->nohfields)
+      for(i=0;i<(p+ip)->nback;++i)
+        deltaE += EnergyHFields(p,pot,parms,i,ip,1);
 
-    else
-    {
-      UpdateMonomerRange(p,oldp,iw-3,iw+3,ip,0);
-      parms->acc++;
-      p->etot+=deltaE;
-      return 1;
-    }
+    ok *= Metropolis(deltaE,t,p->tables);
+  }
 
-  return ok;
+  if (ok == 0)                        // move rejected
+  {
+    UpdateMonomerRange(oldp,p,iw-3,iw+3,ip,0);
+    return 0;
+  }
 
+  UpdateMonomerRange(p,oldp,iw-3,iw+3,ip,0);
+  parms->acc++;
+  p->etot+=deltaE;
+  return 1;
 }
 
+
+int BackRub(struct s_polymer *p, struct s_polymer *oldp,struct s_potential *pot,struct s_mc_parms *parms,double t)
+{
+  return BackRubMove(p,oldp,pot,parms,t,0);
+}
 
 
 int BackSideRub(struct s_polymer *p, struct s_polymer *oldp,struct s_potential *pot,struct s_mc_parms *parms,double t)
 {
-
-  int ok=1;
-  int iw,ir,ip;
-  int i,out;
-
-  double dw,deltaE;
-
-  ip=irand( parms->npol);
-  iw=3*irand((p+ip)->nback/3)+1;
-  //iw=16;
-  dw = 2.0 * (0.5 - frand());
-
-  if(iw<3)
-  {
-    return ok;
-
-  }
-  if(iw>(p+ip)->nback-3)
-  {
-    return ok;
-  }
-
-
-  //fprintf(stdout,"backrub: iw = %d \t type : %s \n",iw,(((p+ip)->back)+iw)->type);
-  deltaE = -GetEnergyMonomerRange(p,iw-3,iw+3,ip);                                                 // two-body energy
-
-  if (!parms->nodihpot)
-  {
-      deltaE -= (((p+ip)->back)+iw-3)->e_dih;                                                   // old dihedral energy
-      deltaE -= (((p+ip)->back)+iw-2)->e_dih;
-
-      deltaE -= (((p+ip)->back)+iw+3)->e_dih;
-      deltaE -= (((p+ip)->back)+iw+4)->e_dih;
-  }
-    if (!parms->nohfields)
-      deltaE -= GetHFields(p,ip);
-
-  ok=BackFlip(p,iw,dw);
-
- if( DAbs( Angle( (((p+ip)->back)+iw-4)->pos, (((p+ip)->back)+iw-3)->pos, (((p+ip)->back)+iw-2)->pos,p->tables,&out)-(((p+ip)->back)+iw-3)->a_next) > 5.0)
-    ok=0;
-  if(ok!=0)
-    if( DAbs( Angle( (((p+ip)->back)+iw+2)->pos, (((p+ip)->back)+iw+3)->pos, (((p+ip)->back)+iw+4)->pos,p->tables,&out)-(((p+ip)->back)+iw-3)->a_next) > 5.0)
-      ok=0;
-
-
-  if(ok==1)
-  {
-
-    ir=irand( (((p+ip)->back)+iw)->nrot );
-    (((p+ip)->back)+iw)->irot=ir;
-    //    ok = AddSidechain(p,iw,iw,ip);
-
-
-
-    if(!parms->nosidechains)
-          ok *= AddSidechain(p,iw-3,iw+3,ip);
-
-    deltaE += EnergyMonomerRange(p,pot,iw-3,iw+3,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);
-
-    if (!parms->nodihpot)
-    {
-      deltaE += EnergyDihedrals(p,pot,iw-3,ip,1);
-      deltaE += EnergyDihedrals(p,pot,iw-2,ip,1);
-      deltaE += EnergyDihedrals(p,pot,iw+3,ip,1);
-      deltaE += EnergyDihedrals(p,pot,iw+4,ip,1);
-    }
-
-     if (!parms->nohfields)
-       for(i=0;i<(p+ip)->nback;++i)
-         deltaE += EnergyHFields(p,pot,parms,i,ip,1);
-
-      ok *= Metropolis(deltaE,t,p->tables);
-
-
-    }
-
-
-    if (ok == 0)                        // move rejected
-    {
-      UpdateMonomerRange(oldp,p,iw-3,iw+3,ip,0);
-      return 0;
-    }
-
-    else
-    {
-      UpdateMonomerRange(p,oldp,iw-3,iw+3,ip,0);
-      parms->acc++;
-      p->etot+=deltaE;
-      return 1;
-    }
-
-  return ok;
-
+  return BackRubMove(p,oldp,pot,parms,t,1);
 }
-
-

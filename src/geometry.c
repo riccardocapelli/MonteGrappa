@@ -696,10 +696,6 @@ int Pivot(struct s_polymer *p, int iw, double dw, int ip, struct s_mc_parms *par
 /********************************************************************
  Square distance between two vectors
  ********************************************************************/
-inline double Dist2(struct vector a, struct vector b)
-{
-	return (a.x-b.x)*(a.x-b.x) + (a.y-b.y)*(a.y-b.y) + (a.z-b.z)*(a.z-b.z);
-}
 
 /*****************************************************************************
   Angle between B, C and D

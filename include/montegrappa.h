@@ -106,6 +106,14 @@
 #endif
 
 #include "struct.h"
+
+// small helpers used in the innermost loops
+static inline int Abs(int x) { return (x>=0) ? x : -x; }
+static inline double DAbs(double x) { return (x>=0) ? x : -x; }
+static inline double Dist2(struct vector a, struct vector b)
+{
+	return (a.x-b.x)*(a.x-b.x) + (a.y-b.y)*(a.y-b.y) + (a.z-b.z)*(a.z-b.z);
+}
 #include "struct_op.h"
 
 
@@ -258,8 +266,6 @@ double FastExp(double x, struct s_tables *t);
 double FastAcos(double x, struct s_tables *t);
 double Norm2(struct vector a);
 void MatrixVectorProduct(double T[][3], struct vector in, struct vector *out);
-double DAbs(double x);
-int Abs(int x);
 void CopyDoubleMatrix(double **from, double **to, int n, int m);
 double gauss(double av, double sig);
 void CopyVector(struct vector *from, struct vector *to);
@@ -277,7 +283,6 @@ struct vector RotateVector(struct vector v, double theta, int w, struct s_tables
 int PivotForward(struct s_polymer *p, int iw, double dw, int n, struct s_mc_parms *parms);
 int PivotBackward(struct s_polymer *p, int iw, double dw, int n, struct s_mc_parms *parms);
 int Pivot(struct s_polymer *p, int iw, double dw, int ip, struct s_mc_parms *parms);
-double Dist2(struct vector a, struct vector b);
 double Dist(struct vector a, struct vector b);
 double Angle( struct vector B, struct vector C, struct vector D, struct s_tables *tables, int *out);
 double Dihedral( struct vector A, struct vector B,

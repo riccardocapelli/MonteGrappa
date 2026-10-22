@@ -474,12 +474,22 @@ double EnergyMonomerRange(struct s_polymer *p, struct s_potential *u, int from, 
 	// if not shell
 	if (shell == 0)
 	{
+		struct s_back *bi,*bj;
+		double rmax;
+
 		for (i=from;i<=to;++i)
 		{
+			bi = ((p+ip)->back)+i;
 			for (cj=0;cj<npol;++cj)
 			{
 				for (j=0;j<(p+cj)->nback;++j)
 				{
+					// same test as at the beginning of EnergyPair, to skip the call for far pairs
+					bj = ((p+cj)->back)+j;
+					rmax = u->rcut + bi->ext + bj->ext;
+					if ( (bi->pos.x-bj->pos.x)*(bi->pos.x-bj->pos.x) + (bi->pos.y-bj->pos.y)*(bi->pos.y-bj->pos.y)
+						+ (bi->pos.z-bj->pos.z)*(bi->pos.z-bj->pos.z) > rmax*rmax ) continue;
+
 					if ( ip!=cj || j<from || j>to || i<j )				// if j in [from,to] of the same chain, require i<j to count only once
 					{
 						//fprintf(stderr,"energypair atomi %d di %d / %d di %d \n",i,ip,j,cj);

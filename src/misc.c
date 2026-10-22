@@ -271,18 +271,6 @@ void MatrixVectorProduct(double T[][3], struct vector in, struct vector *out)
 	out->z = T[2][0] * in.x + T[2][1] * in.y + T[2][2] * in.z;
 }
 
-int Abs(int x)
-{
-	if (x>=0) return x;
-	return -x;
-}
-
-double DAbs(double x)
-{
-	if (x>=0) return x;
-	return -x;
-}
-
 /*****************************************************************************
  Gaussian random number (from numerical recipes)
  *****************************************************************************/

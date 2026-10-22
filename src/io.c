@@ -51,6 +51,13 @@ void Error(char *text)
                                     asctime(localtime(&rawtime)));
   fprintf(stderr,"---------------------------------------------\n\n");
   fprintf(stderr," DON'T\n PANIC\n\n");
+  #ifdef ACTIVE_MPI
+  {
+	int mpi_on;
+	MPI_Initialized(&mpi_on);
+	if (mpi_on) MPI_Abort(MPI_COMM_WORLD,1);		// do not leave the other ranks waiting
+  }
+  #endif
   exit(1);
 }
 

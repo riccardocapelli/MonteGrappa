@@ -118,14 +118,19 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 	
 	int ptempering_count=0;
 	int ex_count[(parms->ntemp)-1],ex_acc[(parms->ntemp)-1];
+	for (i=0;i<parms->ntemp-1;++i) { ex_count[i]=0; ex_acc[i]=0; }
 	t=parms->T[my_rank];
-        
-	FILE *fexchange=fopen("exchange.dat","w");	
+
+	char fexname[100];
+	sprintf(fexname,"exchange_proc%d.dat",my_rank);			// one file per rank: they would overwrite each other
+	FILE *fexchange=fopen(fexname,"w");
+	if (!fexchange) Error("Cannot open exchange file");
 	#else
 	int my_rank=0;
 	t=parms->T;
 	#endif
 	softexit =0;
+	int stop=0;		// softexit as agreed by all ranks
 	
 	// print debug info
 	if (parms->debug>0)
@@ -615,8 +620,17 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			
 			ptempering_count=0;                        
                 }
+
+		// a soft exit (SIGUSR1) must stop all ranks at the same step, or the others hang in the next exchange
+		if (parms->ntemp>1)
+		{
+			if (ptempering_count==1) MPI_Allreduce(&softexit,&stop,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD);
+		}
+		else stop = softexit;
                 
 		ptempering_count++;
+		#else
+		stop = softexit;
 		#endif
 
 		
@@ -640,13 +654,15 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
                  //       parms->ishell ++;
                 }
 
-	} while (istep<parms->nstep && softexit==0);	
+	} while (istep<parms->nstep && stop==0);	
 	///////////////////////////////////////// end MC LOOP
 		
 	// print summary
 	#ifdef ACTIVE_MPI	
 	fclose(fexchange);	
 	fprintf(stderr,"\nRank %d Acceptance:\t%d / %d = %lf\n",my_rank,parms->acc,parms->mov,(double)parms->acc/parms->mov);
+	if (my_rank<parms->ntemp-1 && ex_count[my_rank]>0)
+		fprintf(stderr,"Rank %d Exchanges with rank %d:\t%d / %d = %lf\n",my_rank,my_rank+1,ex_acc[my_rank],ex_count[my_rank],(double)ex_acc[my_rank]/ex_count[my_rank]);
 	#else
 	fprintf(stderr,"\nAcceptance:\t%d / %d = %lf\n",parms->acc,parms->mov,(double)parms->acc/parms->mov);
 	#endif

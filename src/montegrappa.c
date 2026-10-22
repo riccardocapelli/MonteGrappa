@@ -73,7 +73,6 @@ int main(int argc, char *argv[])
 	MPI_Comm_size(MPI_COMM_WORLD,&nprocs);
 	MPI_Comm_rank(MPI_COMM_WORLD,&my_rank);	
 
-	Create_parms_datatype(&(mpiparms->Parms_mpi));
 	Create_back_datatype(&(mpiparms->Back_mpi));
 	Create_side_datatype(&(mpiparms->Side_mpi));
 	Create_rot_datatype(&(mpiparms->Rot_mpi));
@@ -108,6 +107,9 @@ int main(int argc, char *argv[])
 	}
 	
 	
+	// if kill -SIGUSR1 given, soft exit (on every rank: they must stop together)
+	signal(SIGUSR1,SoftExit);
+
 	#ifdef ACTIVE_MPI
 	if(my_rank==0)
 	{
@@ -125,8 +127,6 @@ int main(int argc, char *argv[])
 		parms->r_contact=(parms->r_contact)*(parms->r_contact);
 		
 	
-		// if kill -SIGUSR1 given, soft exit
-		signal(SIGUSR1,SoftExit);
 
 		#ifndef DEBUG
 		if (parms->debug>0) Error("To debug, the program must be compiled with #define DEBUG");
@@ -160,7 +160,7 @@ int main(int argc, char *argv[])
 	#endif
 
 	#ifdef ACTIVE_MPI
-	parms=send_parms(mpiparms->my_rank,nprocs,mpiparms->Parms_mpi,parms,astatus);
+	parms=send_parms(mpiparms->my_rank,nprocs,parms);
 	if (strcmp(parms->fnproc,""))
 	{
             sprintf(fname,"%s_%d.log",parms->fnproc,my_rank);
@@ -338,7 +338,7 @@ int main(int argc, char *argv[])
         	if(u->dih0[1][0]!= -129)
                   if(my_rank==0)
                         fprintf(stderr,"WARNING! phi0_b is usually equal to -129!!!!!!!!\n");
-			if(u->dih0[0][1]!= -47)
+        	if(u->dih0[0][1]!= -47)
                   if(my_rank==0)
                         fprintf(stderr,"WARNING! psi0_a is usually equal to -47!!!!!!!!\n");
 
@@ -648,7 +648,6 @@ int main(int argc, char *argv[])
 	#ifdef ACTIVE_MPI
 	time(&rawtime);
 	fprintf(fproc,"Run finished at %s\n\n",asctime(localtime(&rawtime)));
-	MPI_Type_free(&mpiparms->Parms_mpi);
 	MPI_Type_free(&mpiparms->Pot_mpi);
 	MPI_Type_free(&mpiparms->Rot_mpi);
 	MPI_Type_free(&mpiparms->Side_mpi);

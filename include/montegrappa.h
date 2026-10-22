@@ -129,7 +129,6 @@ struct s_mpi_parms
         int my_rank;
         int nprocs;
         MPI_Datatype Rot_mpi;
-        MPI_Datatype Parms_mpi;
         MPI_Datatype Back_mpi;
         MPI_Datatype Side_mpi;
         MPI_Datatype Pot_mpi;

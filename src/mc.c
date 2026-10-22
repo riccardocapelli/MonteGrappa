@@ -177,6 +177,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 		SetRNGState(chk->rng);
 	}
 	CheckpointName(fchkp,sizeof(fchkp),my_rank);
+	time_t tcheckpoint = time(NULL);
 
  
 	#ifdef OPTIMIZEPOT
@@ -652,8 +653,11 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
                 }
 
 		// checkpoint at the end of a step, so that a restart continues exactly from here
-		if (icheckpoint >= parms->ncheckpoint)
+		// (by default on wall-clock time: writing a checkpoint does not change the trajectory)
+		if (parms->ncheckpoint>0 ? icheckpoint >= parms->ncheckpoint :
+				(icheckpoint % 1000 == 0 && difftime(time(NULL),tcheckpoint) >= parms->tcheckpoint))
 		{
+			tcheckpoint = time(NULL);
 			icheckpoint = 0;
 			chk->istep = istep;
 			chk->irun = irun;

@@ -425,7 +425,8 @@ struct s_mc_parms *ReadMcParms(char *fname)
 	x->randdw = 1;
 	x->nprinttrj = 1000;
 	x->nprintlog = 1000;
-	x->ncheckpoint = 1000;
+	x->ncheckpoint = 0;
+	x->tcheckpoint = 600;
 	strcpy(x->fntrj,"traj");
 	x->r2shell = 6.;
 	x->ntemp = 0;
@@ -503,6 +504,7 @@ struct s_mc_parms *ReadMcParms(char *fname)
 		ReadParD(aux,"nprintlog",&(x->nprintlog));
 		ReadParD(aux,"nprinte",&(x->nprinte));
 		ReadParD(aux,"ncheckpoint",&(x->ncheckpoint));
+		ReadParD(aux,"tcheckpoint",&(x->tcheckpoint));
 		ReadParS(aux,"traj",x->fntrj);
 		ReadParS(aux,"logfile",nlog);
 		ReadParS(aux,"lastp",x->flastp);
@@ -779,6 +781,7 @@ struct s_mc_parms *ReadMcParms(char *fname)
 	for (i=0;i<NMOVES;++i) if ( x->movetype[i] != -1 ) chk=1;
 	if (chk==-1) Error("No move type defined");
 	#ifdef ACTIVE_MPI
+	if (x->ncheckpoint<=0) x->ncheckpoint = 100000;		// replicas must write their checkpoints at the same step
 	if (x->ntemp<1) Error("ntemp and temperatures must be defined");
 	for (i=0;i<x->ntemp;++i)
 		if (x->T[i] <= 0) Error("Temperatures must be positive");

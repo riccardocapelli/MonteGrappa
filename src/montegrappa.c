@@ -43,9 +43,11 @@ int main(int argc, char *argv[])
 	struct s_polymer *polymer, *startp, *oldp,*fragment=NULL,*replica;
 	struct s_mc_parms *parms=0;
 	struct s_potential *u;
-	char polname[FNAMEMAX],potname[FNAMEMAX],fname[2*FNAMEMAX],aux[500];
+	char polname[FNAMEMAX],potname[FNAMEMAX],fname[2*FNAMEMAX];
 	int i,nat,ntypes,irun,ci,out,nrestr;
-	unsigned long long int chkp_step=0;
+	struct s_checkpoint ckp;
+	char ckpname[FNAMEMAX];
+	int restart=0;
 
 	FILE *ftrj=NULL,*fe=NULL,*fproc=NULL,*fp=NULL;
 
@@ -87,28 +89,19 @@ int main(int argc, char *argv[])
 	if (strlen(argv[1])>=FNAMEMAX || strlen(argv[2])>=FNAMEMAX) Error("File name too long (FNAMEMAX)");
 	strcpy(polname,argv[1]);
 	
-	if(!strcmp(polname,"checkpoint")){
-	#ifdef ACTIVE_MPI
-		MPI_Barrier(MPI_COMM_WORLD);
-		if(my_rank == 0){
-			fp = fopen("checkpoint.dat","r");
-			if (!fp) Error("Cannot open checkpoint.dat");
-			while(fgets(aux,500,fp)!=NULL){
-				chkp_step = strtoull(aux,NULL,10);
-			}
-			fclose(fp);
-		}
-		MPI_Bcast(&chkp_step, 1, MPI_UNSIGNED_LONG_LONG, 0, MPI_COMM_WORLD);
-		MPI_Barrier(MPI_COMM_WORLD);
-	#else
-		fp = fopen("checkpoint.dat","r");
-		if (!fp) Error("Cannot open checkpoint.dat");
-		while(fgets(aux,500,fp)!=NULL){
-			chkp_step = strtoull(aux,NULL,10);
-		}
-		fclose(fp);
-	#endif
+	memset(&ckp,0,sizeof(ckp));
+	CheckpointName(ckpname,sizeof(ckpname),my_rank);
+	if(!strcmp(polname,"checkpoint"))
+	{
+		// restart: the checkpoint of each rank contains the name of the original polymer file
+		restart = 1;
+		ReadCheckpointHeader(ckpname,&ckp);
+		strcpy(polname,ckp.polname);
+		ckp.restart = 1;
+		if (my_rank==0) fprintf(stderr,"Restart from %s at run %d, step %llu (polymer file %s)\n",ckpname,ckp.irun,ckp.istep,polname);
 	}
+	else
+		strcpy(ckp.polname,polname);
 	
 	
 	// if kill -SIGUSR1 given, soft exit (on every rank: they must stop together)
@@ -124,6 +117,7 @@ int main(int argc, char *argv[])
 
 		fprintf(stderr,"Simulation parameters:\n");
 		parms = ReadMcParms(argv[3]);
+		if (parms->seed==-1) parms->seed = TimeSeed();			// decided once, before it is sent to the other ranks
 		//speedup calculation
 		parms->r2shell=(parms->r2shell)*(parms->r2shell);
 	
@@ -180,7 +174,7 @@ int main(int argc, char *argv[])
 	fproc = stderr;
 	#endif
 	//fprintf(stderr,"proc %d , seed = %d\n",my_rank,parms->seed);
-	parms->seed = Randomize(parms->seed);
+	parms->seed = Randomize(parms->seed,my_rank);		// one independent stream per replica
 	
 	startp = AlloPolymer(parms->npol,NRESMAX,NSIDEMAX,NROTMAX,NATOMMAX,parms->shell,parms->nosidechains,parms->flog);
 	polymer = AlloPolymer(parms->npol,NRESMAX,NSIDEMAX,NROTMAX,NATOMMAX,parms->shell,parms->nosidechains,parms->flog);
@@ -204,50 +198,7 @@ int main(int argc, char *argv[])
 	// Read polymer stuff from file
 	//if(parms->nreplicas==1)
 	//{
-	if(!strcmp(polname,"checkpoint"))
 	{
-		#ifdef ACTIVE_MPI
-		if(my_rank == 0){
-			fprintf(stderr,"WARNING! Using checkpoint_proc$rep.pol as input polymer files\n");
-			fprintf(stderr,"Corrected starting step: %llu\n",chkp_step);
-		}
-		// Read all polymers from process 0 and send it from the last to the 2nd replica
-		for(i=nprocs-1;i>0;--i)
-		{
-			if(my_rank == 0)
-			{
-				snprintf(polname,sizeof(polname),"checkpoint_proc%d.pol",i);
-				ReadPolymer(polname,startp,parms->flog,parms->npol, parms->debug, &nat, &ntypes);
-				ComputeIAPDB(startp,parms);
-			}
-			
-			MPI_Barrier(MPI_COMM_WORLD);
-			for (j=0;j<parms->npol;++j)
-			{
-				if((my_rank == 0) || (my_rank == i)){
-					send_struct(&((startp+j)->nback),mpiparms->my_rank, nprocs, &nat, &ntypes, astatus);
-					startp = send_pol_to_proc(mpiparms->my_rank,i, nprocs, (startp+j)->nback, mpiparms->Back_mpi, mpiparms->Side_mpi, mpiparms->Rot_mpi, startp, astatus, j, parms->nshell, parms->nosidechains);
-				}
-				MPI_Barrier(MPI_COMM_WORLD);
-			}
-			MPI_Barrier(MPI_COMM_WORLD);
-		}
-		if(my_rank==0)
-		{
-			snprintf(polname,sizeof(polname),"checkpoint_proc%d.pol",i);
-			ReadPolymer(polname,startp,parms->flog,parms->npol, parms->debug, &nat, &ntypes);
-			ComputeIAPDB(startp,parms);
-			snprintf(polname,sizeof(polname),"checkpoint");
-		}
-		#else
-		fprintf(stderr,"WARNING! Using checkpoint.pol as input polymer file\n");
-		snprintf(polname,sizeof(polname),"checkpoint.pol");
-		fprintf(stderr,"Corrected starting step: %llu\n",chkp_step);
-		ReadPolymer(polname,startp,parms->flog,parms->npol, parms->debug, &nat, &ntypes);
-		ComputeIAPDB(startp,parms);
-		#endif
-	}
-	else{
 		#ifdef ACTIVE_MPI
 		if(my_rank==0)
 		{
@@ -425,12 +376,20 @@ int main(int argc, char *argv[])
 	#endif
 	// do Monte Carlo
 	#ifdef OPTIMIZEPOT
-	if(parms->chi2start==0)
+	if(parms->chi2start==0 && !restart)
 		remove("chi2.dat");
 	#endif
-	for (irun=parms->chi2start;irun<parms->nrun;++irun)
+	for (irun=(restart ? ckp.irun : parms->chi2start);irun<parms->nrun;++irun)
 	{
-		if (irun==0 || parms->always_restart)
+		if (ckp.restart)						// continue the interrupted run from the checkpoint
+		{
+			CopyAllPolymers(startp,polymer,parms->npol,parms->nosidechains,parms->nosidechains);
+			ReadCheckpointCoordinates(ckpname,polymer,parms->npol);
+			#ifdef ACTIVE_MPI
+			CopyAllPolymers(polymer,replica,parms->npol,parms->nosidechains,parms->nosidechains);
+			#endif
+		}
+		else if (irun==0 || parms->always_restart)
 		{
 			CopyAllPolymers(startp,polymer,parms->npol,parms->nosidechains,parms->nosidechains);
 			#ifdef ACTIVE_MPI
@@ -485,11 +444,14 @@ int main(int argc, char *argv[])
 		else
 			snprintf(fname,sizeof(fname),"%s.pdb",parms->fntrj);
 		#endif
-		ftrj = fopen(fname,"w");
+		ftrj = fopen(fname,ckp.restart ? "a" : "w");			// a restart continues the files of the run
 		if (!ftrj)
 			Error("Cannot open trajectory file for writing");
-		snprintf(polymer->title,sizeof(polymer->title),"initial\tE=%lf",polymer->etot);
-		PrintPDBStream(polymer,parms->npol,ftrj);
+		if (!ckp.restart)
+		{
+			snprintf(polymer->title,sizeof(polymer->title),"initial\tE=%lf",polymer->etot);
+			PrintPDBStream(polymer,parms->npol,ftrj);
+		}
 
 		// open energy file
 		if (strcmp(parms->fne,""))
@@ -505,10 +467,10 @@ int main(int argc, char *argv[])
 			else
 				snprintf(fname,sizeof(fname),"%s.ene",parms->fne);
 			#endif
-			fe = fopen(fname,"w");
+			fe = fopen(fname,ckp.restart ? "a" : "w");
 			if (!fe) 
 				Error("Cannot open energy file for writing");
-			PrintEnergies(fe,parms->npol,0,polymer);
+			if (!ckp.restart) PrintEnergies(fe,parms->npol,0,polymer);
 		}
 
 		//if(parms->npol>1)
@@ -541,10 +503,11 @@ int main(int argc, char *argv[])
 	
 		// MAKE MONTE CARLO
 		#ifdef ACTIVE_MPI		
-		Do_MC(polymer,fragment,replica,startp,u,parms,ftrj,fe,oldp,fproc,irun,chkp_step,mpiparms);
+		Do_MC(polymer,fragment,replica,startp,u,parms,ftrj,fe,oldp,fproc,irun,&ckp,mpiparms);
 		#else
-		Do_MC(polymer,fragment,replica,startp,u,parms,ftrj,fe,oldp,fproc,irun,chkp_step,0);
+		Do_MC(polymer,fragment,replica,startp,u,parms,ftrj,fe,oldp,fproc,irun,&ckp,0);
 		#endif
+		ckp.restart = 0;						// the following runs start normally
 		#ifdef OPTIMIZEPOT
 		if (strcmp(parms->op_minim,"none"))
 		{

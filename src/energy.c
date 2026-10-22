@@ -49,7 +49,7 @@ void Go_Pairs(struct s_parms *parms, struct s_polymer *p, double **e, double **r
 	if (parms->go_noise) 
 	{
 		fprintf(stderr,"Adding noise (kind %d, sigma=%lf) to the Go potential\n",parms->go_noise,parms->go_noise_sigma);
-		srand(time(0));	
+		SeedRNG((long) time(0),0);
 	}
 	if (parms->debug>1)  fprintf(stderr,"\n\nGo contacts:\n");
 	

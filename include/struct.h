@@ -390,3 +390,19 @@ struct s_tables
 	double *fast_acos;		// arccos
 
 };
+
+/********************************************************************
+ State of the MC loop saved in a checkpoint (see checkpoint.c)
+ ********************************************************************/
+struct s_checkpoint
+{
+	int restart;			// 1 = Do_MC continues from this state (not saved)
+	char polname[FNAMEMAX];		// polymer file of the original start (reference geometry, native)
+	unsigned long long istep;	// first step to do
+	int irun;
+	unsigned long long rng[4];	// state of the random number generator
+	int iprinttrj,iprintlog,iprinte,icheckpoint,ptcount;
+	int acc,mov;
+	int mcount[NMOVES],macc[NMOVES],mdone[NMOVES];
+};
+

@@ -333,8 +333,8 @@ struct s_mc_parms
 	int nrun;		// number of repetitions of the MC
 	int always_restart;	//1=in different irun, start always from input structure
 	int record_native; //1=records the input (native( structure as first snapshot
-	int acc;		// # of accepted moves
-	int mov;		// # of attempted moves
+	long long acc;		// # of accepted moves
+	long long mov;		// # of attempted moves
 	int disentangle;	//0=if two atoms are closer than r_hardcore, then do not calculate the energy
 	int stempering;		//1=do stempering
 	double dx_com;		//displacemente oc center of mass
@@ -409,8 +409,9 @@ struct s_checkpoint
 	int irun;
 	unsigned long long rng[4];	// state of the random number generator
 	int iprinttrj,iprintlog,iprinte,icheckpoint,ptcount;
-	int acc,mov;
-	int mcount[NMOVES],macc[NMOVES],mdone[NMOVES];
+	long long acc,mov;
+	int mcount[NMOVES];
+	long long macc[NMOVES],mdone[NMOVES];
 };
 
 /********************************************************************

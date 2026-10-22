@@ -74,9 +74,9 @@ void WriteCheckpoint(char *fname, struct s_checkpoint *c, struct s_polymer *p, i
 	fprintf(fp,"istep %llu\n",c->istep);
 	fprintf(fp,"irun %d\n",c->irun);
 	fprintf(fp,"rng %llu %llu %llu %llu\n",c->rng[0],c->rng[1],c->rng[2],c->rng[3]);
-	fprintf(fp,"counters %d %d %d %d %d %d %d\n",c->iprinttrj,c->iprintlog,c->iprinte,c->icheckpoint,c->ptcount,c->acc,c->mov);
+	fprintf(fp,"counters %d %d %d %d %d %lld %lld\n",c->iprinttrj,c->iprintlog,c->iprinte,c->icheckpoint,c->ptcount,c->acc,c->mov);
 	fprintf(fp,"moves %d\n",NMOVES);
-	for (i=0;i<NMOVES;++i) fprintf(fp,"%d %d %d\n",c->mcount[i],c->macc[i],c->mdone[i]);
+	for (i=0;i<NMOVES;++i) fprintf(fp,"%d %lld %lld\n",c->mcount[i],c->macc[i],c->mdone[i]);
 
 	fprintf(fp,"chains %d\n",npol);
 	for (ic=0;ic<npol;++ic)
@@ -114,12 +114,12 @@ void ReadCheckpointHeader(char *fname, struct s_checkpoint *c)
 	if (fscanf(fp," irun %d",&(c->irun))!=1) Error("Cannot read irun in checkpoint");
 	if (fscanf(fp," rng %llu %llu %llu %llu",&(c->rng[0]),&(c->rng[1]),&(c->rng[2]),&(c->rng[3]))!=4)
 		Error("Cannot read random number generator state in checkpoint");
-	if (fscanf(fp," counters %d %d %d %d %d %d %d",&(c->iprinttrj),&(c->iprintlog),&(c->iprinte),
+	if (fscanf(fp," counters %d %d %d %d %d %lld %lld",&(c->iprinttrj),&(c->iprintlog),&(c->iprinte),
 			&(c->icheckpoint),&(c->ptcount),&(c->acc),&(c->mov))!=7)
 		Error("Cannot read counters in checkpoint");
 	if (fscanf(fp," moves %d",&nmoves)!=1 || nmoves!=NMOVES) Error("Wrong number of move types in checkpoint");
 	for (i=0;i<NMOVES;++i)
-		if (fscanf(fp,"%d %d %d",&(c->mcount[i]),&(c->macc[i]),&(c->mdone[i]))!=3)
+		if (fscanf(fp,"%d %lld %lld",&(c->mcount[i]),&(c->macc[i]),&(c->mdone[i]))!=3)
 			Error("Cannot read move counters in checkpoint");
 	fclose(fp);
 }

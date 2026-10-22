@@ -88,7 +88,8 @@ static void CheckEnergyDrift(struct s_polymer *p, struct s_polymer *oldp, struct
 
 void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *replica, struct s_polymer *native, struct s_potential *pot, struct s_mc_parms *parms, FILE *ftrj, FILE *fe, struct s_polymer *oldp, FILE *fproc,int irun, struct s_checkpoint *chk, struct s_mpi_parms *mpiparms)
 {
-	int i,ok=0,iprinttrj=0,iprintlog=0,iprinte=0,icheckpoint=0,ntm=0,ci,mcount[NMOVES],macc[NMOVES],mdone[NMOVES];
+	int i,ok=0,iprinttrj=0,iprintlog=0,iprinte=0,icheckpoint=0,ntm=0,ci,mcount[NMOVES];
+	long long macc[NMOVES],mdone[NMOVES];
 //	int anneal_count=0, anneal_status=0;
 
 	double t;
@@ -695,42 +696,19 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 	// print summary
 	#ifdef ACTIVE_MPI	
 	fclose(fexchange);	
-	fprintf(stderr,"\nRank %d Acceptance:\t%d / %d = %lf\n",my_rank,parms->acc,parms->mov,(double)parms->acc/parms->mov);
+	fprintf(stderr,"\nRank %d Acceptance:\t%lld / %lld = %lf\n",my_rank,parms->acc,parms->mov,parms->mov ? (double)parms->acc/parms->mov : 0.);
 	if (my_rank<parms->ntemp-1 && ex_count[my_rank]>0)
 		fprintf(stderr,"Rank %d Exchanges with rank %d:\t%d / %d = %lf\n",my_rank,my_rank+1,ex_acc[my_rank],ex_count[my_rank],(double)ex_acc[my_rank]/ex_count[my_rank]);
 	#else
-	fprintf(stderr,"\nAcceptance:\t%d / %d = %lf\n",parms->acc,parms->mov,(double)parms->acc/parms->mov);
+	fprintf(stderr,"\nAcceptance:\t%lld / %lld = %lf\n",parms->acc,parms->mov,parms->mov ? (double)parms->acc/parms->mov : 0.);
 	#endif
-	if(parms->movetype[0]!=-1)
-		fprintf(stderr,"\tFlip:\t%d / %d = %lf\n",macc[0],mdone[0],(double)macc[0]/mdone[0]);
-	if(parms->movetype[11]!=-1)
-                fprintf(stderr,"\tBackRub:\t%d / %d = %lf\n",macc[11],mdone[11],(double)macc[11]/mdone[11]);
-	if(parms->movetype[12]!=-1)
-                fprintf(stderr,"\tBackSideRub:\t%d / %d = %lf\n",macc[12],mdone[12],(double)macc[12]/mdone[12]);
-
-	if(parms->movetype[1]!=-1) 
-		fprintf(stderr,"\tPivot:\t%d / %d = %lf\n",macc[1],mdone[1],(double)macc[1]/mdone[1]);
-	if(parms->movetype[2]!=-1) 
-		fprintf(stderr,"\tMPivot:\t%d / %d = %lf\n",macc[2],mdone[2],(double)macc[2]/mdone[2]);
-	if(parms->movetype[3]!=-1) 
-		fprintf(stderr,"\tSidechain:\t%d / %d = %lf\n",macc[3],mdone[3],(double)macc[3]/mdone[3]);
-	if(parms->movetype[4]!=-1) 
-		fprintf(stderr,"\tLPivot:\t%d / %d = %lf\n",macc[4],mdone[4],(double)macc[4]/mdone[4]);
-	if(parms->movetype[5]!=-1) 
-		fprintf(stderr,"\tMFlip:\t%d / %d = %lf\n",macc[5],mdone[5],(double)macc[5]/mdone[5]);
-	if(parms->movetype[6]!=-1) 
-		fprintf(stderr,"\tCoM shift:\t%d / %d = %lf\n",macc[6],mdone[6],(double)macc[6]/mdone[6]);
-	if(parms->movetype[7]!=-1)
-		fprintf(stderr,"\tLocal:\t%d / %d = %lf\n",macc[7],mdone[7],(double)macc[7]/mdone[7]); 
-	 if(parms->movetype[8]!=-1)
-                fprintf(stderr,"\tRotation:\t%d / %d = %lf\n",macc[8],mdone[8],(double)macc[8]/mdone[8]);
-
-         if(parms->movetype[9]!=-1)
-                fprintf(stderr,"\tCluster CoM:\t%d / %d = %lf\n",macc[9],mdone[9],(double)macc[9]/mdone[9]);
-
-         if(parms->movetype[10]!=-1)
-                fprintf(stderr,"\tCluster Rot:\t%d / %d = %lf\n",macc[10],mdone[10],(double)macc[10]/mdone[10]);
-
+	{
+		static const char *movename[NMOVES] = {"Flip","Pivot","MPivot","Sidechain","LPivot","MFlip","CoM shift",
+							"Local","Rotation","Cluster CoM","Cluster Rot","BackRub","BackSideRub"};
+		for (i=0;i<NMOVES;++i)
+			if (parms->movetype[i]!=-1)
+				fprintf(stderr,"\t%s:\t%lld / %lld = %lf\n",movename[i],macc[i],mdone[i],mdone[i] ? (double)macc[i]/mdone[i] : 0.);
+	}
 
 	fprintf(stderr,"\n");
 	sprintf(p->title,"final");

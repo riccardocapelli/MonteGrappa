@@ -106,6 +106,15 @@ group_errors() {
 	( cd $WORK && "$MG" "$long.pol" polyala.pot run.par > /dev/null 2> long.log )
 	if [ $? -ne 0 ] && grep -q "too long" $WORK/long.log; then pass "file name too long"; else fail "file name too long" "not refused"; fi
 
+	mkdir -p $WORK/err_box; cp $DATA/three.pol $WORK/err_box/
+	printf "[ global ]\nboxtype p\nboxsize 3\n\n" | cat - $DATA/homo.pot > $WORK/err_box/small.pot
+	par $WORK/err_box/run.par "nchains 3\nnosidechain\nnodihpot\nnoangpot\nTemp 1\nnstep 10\nflip 1\n"
+	( cd $WORK/err_box && "$MG" three.pol small.pot run.par > /dev/null 2> stderr.log )
+	if [ $? -ne 0 ] && grep -q "periodic box must be larger" $WORK/err_box/stderr.log; then pass "periodic box too small"; else fail "periodic box too small" "not refused"; fi
+
+	mg err_shell three.pol homo_pbc.pot "nchains 3\nnosidechain\nnodihpot\nnoangpot\nTemp 1\nnstep 10\nflip 1\nshell\n"
+	if [ $? -ne 0 ] && grep -q "shells cannot be used" $WORK/err_shell/stderr.log; then pass "shells with periodic box"; else fail "shells with periodic box" "not refused"; fi
+
 	mkdir -p $WORK/err_ckp; cp $DATA/polyala.pot $WORK/err_ckp/
 	par $WORK/err_ckp/run.par "nchains 1\nTemp 1\nnstep 10\npivot 1\n"
 	( cd $WORK/err_ckp && "$MG" checkpoint polyala.pot run.par > /dev/null 2> stderr.log )
@@ -164,6 +173,8 @@ angles|polyala.pol|polyala_ang.pot|nchains 1\nTemp 2.0\n
 hbonds|polyala.pol|polyala_hb.pot|nchains 1\nTemp 1.0\nhb\n
 three|three.pol|homo.pot|nchains 3\nnosidechain\nnodihpot\nnoangpot\nTemp 1.5\n
 two|two.pol|two_hf.pot|nchains 2\nTemp 2.0\n
+three_pbc|three.pol|homo_pbc.pot|nchains 3\nnosidechain\nnodihpot\nnoangpot\nTemp 1.5\n
+two_pbc|two.pol|two_hf_pbc.pot|nchains 2\nTemp 2.0\n
 "
 
 group_echeck() {
@@ -183,8 +194,10 @@ group_echeck() {
 		done
 	done
 	# 40 chains (the limit used to be 25), whole-chain and cluster moves only
-	mg ec_many many.pol homo.pot "nchains 40\nnosidechain\nnodihpot\nnoangpot\nTemp 1.0\nseed 3\nnstep 3000\necheck\nflip 1\npivot 5\nmovecom 5\nmoverot 5\ncomcluster 3\nrotcluster 3\nnprinttrj 100000\nnprinte 100000\nnprintlog 100000\n"
-	if [ $? -eq 0 ] && ! grep -q ECHECK $WORK/ec_many/stderr.log && sanitizer_ok $WORK/ec_many; then echo PASS; else echo "FAIL many: cluster moves"; fi > $WORK/ec_result_many_40chains
+	for pot in homo.pot homo_pbc70.pot; do
+		mg ec_many_$pot many.pol $pot "nchains 40\nnosidechain\nnodihpot\nnoangpot\nTemp 1.0\nseed 3\nnstep 3000\necheck\nflip 1\npivot 5\nmovecom 5\nmoverot 5\ncomcluster 3\nrotcluster 3\nnprinttrj 100000\nnprinte 100000\nnprintlog 100000\n"
+		if [ $? -eq 0 ] && ! grep -q ECHECK $WORK/ec_many_$pot/stderr.log && sanitizer_ok $WORK/ec_many_$pot; then echo PASS; else echo "FAIL many: cluster moves"; fi > $WORK/ec_result_many_40chains_${pot%.pot}
+	done
 	for r in $WORK/ec_result_*; do
 		name=$(basename $r | sed 's/^ec_result_//')
 		if [ "$(cat $r)" = PASS ]; then pass "echeck $name"; else fail "echeck $name" "$(cat $r | sed 's/^FAIL [^:]*://')"; fi
@@ -213,6 +226,7 @@ group_restart() {
 	restart_case polyala polyala.pol polyala.pot "nchains 1\nTemp 1.0\nmpivot 1\npivot 4\nsidechain 2\nflip 3\nmovebias 5\nnmul_local 5\n"
 	restart_case three three.pol homo.pot "nchains 3\nnosidechain\nnodihpot\nnoangpot\nTemp 1.0\nflip 1\npivot 5\ncomcluster 5\nrotcluster 5\nmovecom 7\nmoverot 7\n"
 	restart_case two two.pol two_hf.pot "nchains 2\nTemp 2.0\nflip 1\npivot 5\nmovecom 5\nmoverot 5\nsidechain 3\nbackrub 5\nmflip 7\nlpivot 7\nmovebias 4\nnmul_local 5\n"
+	restart_case three_pbc three.pol homo_pbc.pot "nchains 3\nnosidechain\nnodihpot\nnoangpot\nTemp 1.0\nflip 1\npivot 5\ncomcluster 5\nrotcluster 5\nmovecom 7\nmoverot 7\n"
 }
 
 ######################################################################
@@ -231,6 +245,8 @@ group_cells() {
 	cells_case chain1100 chain1100.pol chain1100.pot "nchains 1\nnstep 5000\nTemp 1.0\nflip 1\npivot 2\nnosidechain\nnodihpot\nnoangpot\nnohfields\n"
 	cells_case three three.pol homo.pot "nchains 3\nnosidechain\nnodihpot\nnoangpot\nTemp 1.0\nnstep 20000\nflip 1\npivot 5\ncomcluster 5\nrotcluster 5\nmovecom 7\nmoverot 7\n"
 	cells_case two two.pol two_hf.pot "nchains 2\nTemp 2.0\nnstep 5000\nflip 1\npivot 5\nmovecom 5\nmoverot 5\nsidechain 3\nbackrub 5\nmflip 7\nmovebias 4\nnmul_local 5\n"
+	cells_case many_pbc many.pol homo_pbc70.pot "nchains 40\nnosidechain\nnodihpot\nnoangpot\nTemp 1.0\nnstep 5000\nflip 1\npivot 5\nmovecom 5\nmoverot 5\ncomcluster 3\nrotcluster 3\n"
+	cells_case two_pbc two.pol two_hf_pbc.pot "nchains 2\nTemp 2.0\nnstep 5000\nflip 1\npivot 5\nmovecom 5\nmoverot 5\nsidechain 3\nbackrub 5\nmflip 7\nmovebias 4\nnmul_local 5\n"
 }
 
 ######################################################################

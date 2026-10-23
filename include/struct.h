@@ -434,4 +434,6 @@ struct s_cells
 	int forced;			// 1 = always used (keyword cells 1)
 	int allowed;			// 0 = never used (keyword cells 0, or small system)
 	int active;			// 1 = used by EnergyMonomerRange (decided at each rebuild)
+	double box;			// side of the periodic box (0 = no periodic box)
+	int ncell;			// cells per side in the periodic box
 };

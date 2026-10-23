@@ -12,7 +12,7 @@ directory, whose path is printed.
 
 | group | what it checks |
 |---|---|
-| `errors` | wrong input (no `Temp`, wrong `nchains`, unknown `op_minim`, too long file name, missing checkpoint) stops with a message |
+| `errors` | wrong input (no `Temp`, wrong `nchains`, unknown `op_minim`, too long file name, missing checkpoint, periodic box too small, shells with a periodic box) stops with a message |
 | `regression` | fixed-seed runs (CA Go model, full atom with rotamers, three chains with cluster moves, two chains with H fields and all moves, hydrogen bonds with splice, potential optimisation) against `tests/reference`, with a small numerical tolerance |
 | `echeck` | every move type on five systems with the keyword `echeck`, with the automatic and the forced cell list: the incremental energy, the backup copy `oldp` and the cell list must agree with a full recalculation after every move |
 | `restart` | a run restarted from its checkpoint gives the same energy file, trajectory and final structure, bit by bit |
@@ -45,3 +45,4 @@ library differs between platforms; a different trajectory still fails.
 | `fragment.pol`, `fragment.pot` | first 30 residues of 1YPC, CA Go model |
 | `chain1100.pol`, `chain1100.pot` | 1100-residue homopolymer (cell list) |
 | `many.pol` (with `homo.pot`) | 40 homopolymer chains |
+| `homo_pbc.pot`, `homo_pbc70.pot`, `two_hf_pbc.pot` | the same potentials in a periodic box of side 40 or 70 A |

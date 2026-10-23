@@ -51,6 +51,10 @@
  * residues, so the energies (and trajectories) are identical with and
  * without cell list; at each rebuild the list is switched off when the
  * system spans too few cells for it to pay off (unless forced).
+ *
+ * In a periodic box of side L (c->box > 0) there are ncell = floor(L/Lmin)
+ * cells per side, indexed directly (no hashing), and distances use the
+ * minimum image.
  */
 
 #include "montegrappa.h"
@@ -127,6 +131,13 @@ static inline int CellCoord(double x, double invL)
 
 static inline int CellBucket(struct s_cells *c, int ix, int iy, int iz)
 {
+	if (c->box > 0)							// periodic box: wrap the cell indices
+	{
+		ix %= c->ncell; if (ix < 0) ix += c->ncell;
+		iy %= c->ncell; if (iy < 0) iy += c->ncell;
+		iz %= c->ncell; if (iz < 0) iz += c->ncell;
+		return (ix*c->ncell + iy)*c->ncell + iz;
+	}
 	return (int) ( ( (unsigned) ix * 73856093u ^ (unsigned) iy * 19349663u ^ (unsigned) iz * 83492791u ) & (unsigned) c->mask );
 }
 
@@ -149,7 +160,7 @@ static inline void CellsLink(struct s_cells *c, int g, int h)
 /*****************************************************************************
  Rebuild the whole list from the current coordinates
  *****************************************************************************/
-void CellsBuild(struct s_polymer *p, double rcut)
+void CellsBuild(struct s_polymer *p, double rcut, double box)
 {
 	struct s_cells *c = p->cells;
 	struct s_back *b;
@@ -172,11 +183,26 @@ void CellsBuild(struct s_polymer *p, double rcut)
 	c->extcap = extmax + CELLS_EXT_MARGIN;
 	c->L = rcut + 2.*c->extcap;
 	c->invL = 1./c->L;
+	c->box = box;
+	if (box > 0)
+	{
+		if (box < 2.*c->L) Error("The periodic box must be larger than twice the interaction range of two residues (cutoff + 2 x sidechain extent)");
+		c->ncell = (int) floor(box/c->L);
+		c->L = box/c->ncell;					// cells exactly tile the box
+		c->invL = 1./c->L;
+		if (c->ncell*c->ncell*c->ncell > c->hsize)
+		{
+			c->hsize = c->ncell*c->ncell*c->ncell;
+			c->head = (int *) realloc(c->head,c->hsize*sizeof(int));
+			if (!c->head) Error("Cannot allocate cell list");
+		}
+	}
 
 	// worth it if the expected candidates (27 cells out of those spanned by the system)
 	// plus the cost of visiting the cells are well below scanning all residues
 	ncells = 1.;
 	for (d=0;d<3;++d) ncells *= (hi[d]-lo[d])*c->invL + 1.;
+	if (box > 0) ncells = c->ncell*c->ncell*c->ncell;
 	c->active = c->forced || ( c->allowed && c->nres*27./ncells + 60. < 0.5*c->nres );
 	c->dirty = 0;
 	if (!c->active) return;

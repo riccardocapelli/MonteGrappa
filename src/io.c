@@ -1849,6 +1849,15 @@ int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, 
 	}
 	fclose(fp);
 
+	// box: c=cubic and s=spherical walls (boxsize stored as half side/radius), p=periodic cube of side lbox
+	if (u->boxtype!='n' && u->boxtype!='c' && u->boxtype!='s' && u->boxtype!='p') Error("boxtype must be c, s or p");
+	if (u->boxtype!='n' && u->boxsize<=0) Error("boxsize must be defined for a box");
+	if (u->boxtype=='p')
+	{
+		u->lbox = 2.*u->boxsize;
+		fprintf(parms->flog,"Periodic boundary conditions in a cubic box of side %lf\n",u->lbox);
+	}
+
 	// without a [hfields] chapter all fields would be zero: switch them off
 	if (!parms->nohfields && !hfields_read)
 	{
@@ -2060,7 +2069,7 @@ void PrintPotential(struct s_potential *u, char *eoutfile, int nat, int ntypes, 
 		if (u->boxtype !='n')
 		{
 			fprintf(fout,"boxtype %c\n",u->boxtype);
-			fprintf(fout,"boxsize %lf\n",u->boxsize);
+			fprintf(fout,"boxsize %lf\n",2.*u->boxsize);			// read back as full size
 		}
 
 

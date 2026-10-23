@@ -115,7 +115,7 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
 	double etot=0,eang=0,edih=0,ehfs=0,ebox=0;
 
 	SetSidechainExtents(p,npol,nosidechains);			// coordinates may have been loaded in bulk (start, exchange, restart)
-	if (p->cells) CellsBuild(p,u->rcut);
+	if (p->cells) CellsBuild(p,u->rcut,u->boxtype=='p' ? u->lbox : 0.);
 
 	if (update)
 		#pragma omp parallel for private(i,j)
@@ -228,12 +228,14 @@ static double EnergyPairAtoms(struct s_polymer *p, struct s_potential *u, int i,
 {
 	int is,js,a1,a2,ia1,ia2,out;
 	double r2,etot=0,e,r02,cos1,cos2,mul,rmax,r2bb;
+	struct vector sh = {0.,0.,0.},v2,v2m;			// periodic box: shift of the atoms of j to the image nearest to i
 	
 	// within same aa do not interact
 	if (ci==cj && (((p+ci)->back)+i)->iaa == (((p+cj)->back)+j)->iaa) return 0;
 
 	// no atom of the two residues can be within the interaction range
-	r2bb = Dist2( (((p+ci)->back)+i)->pos, (((p+cj)->back)+j)->pos );
+	if (u->boxtype=='p') sh = ImageShift( (((p+ci)->back)+i)->pos, (((p+cj)->back)+j)->pos, u->lbox );
+	r2bb = Dist2S( (((p+ci)->back)+i)->pos, (((p+cj)->back)+j)->pos, sh );
 	rmax = u->rcut + (((p+ci)->back)+i)->ext + (((p+cj)->back)+j)->ext;
 	if (r2bb > rmax*rmax) return 0;
 
@@ -283,7 +285,7 @@ static double EnergyPairAtoms(struct s_polymer *p, struct s_potential *u, int i,
 		// interaction backbone-sidechain (i-js)
 		a1 = (((p+ci)->back)+i)->itype;
 		a2 = (((((p+cj)->back)+j)->side)+js)->itype;
-		r2 = Dist2( (((p+ci)->back)+i)->pos, (((((p+cj)->back)+j)->side)+js)->pos );
+		r2 = Dist2S( (((p+ci)->back)+i)->pos, (((((p+cj)->back)+j)->side)+js)->pos, sh );
 
 		if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
 		else r02 = (u->r0_2)[a1][a2];
@@ -316,7 +318,7 @@ static double EnergyPairAtoms(struct s_polymer *p, struct s_potential *u, int i,
 			a1 = (((((p+ci)->back)+i)->side)+is)->itype;
 			a2 = (((((p+cj)->back)+j)->side)+js)->itype;
 
-			r2 = Dist2( (((((p+ci)->back)+i)->side)+is)->pos, (((((p+cj)->back)+j)->side)+js)->pos );
+			r2 = Dist2S( (((((p+ci)->back)+i)->side)+is)->pos, (((((p+cj)->back)+j)->side)+js)->pos, sh );
 			
 			if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
 			else r02 = (u->r0_2)[a1][a2];
@@ -347,11 +349,14 @@ static double EnergyPairAtoms(struct s_polymer *p, struct s_potential *u, int i,
 						 if (u->splice==1 && (u->r_2)[a1][a2] * u->kr2_splice < r2) mul = 0;
 						 else
 						 {
+							v2 = *(*(((p+cj)->vback)+ia2));
+							v2.x += sh.x; v2.y += sh.y; v2.z += sh.z;
+							v2m = *(*(((p+cj)->vback)+(u->hb_iam)[ia2]));
+							v2m.x += sh.x; v2m.y += sh.y; v2m.z += sh.z;
 							cos1 = CosAngle( (*(*(((p+ci)->vback)+(u->hb_iam)[ia1]))), (*(*(((p+ci)->vback)+ia1))), 
-									(*(*(((p+cj)->vback)+ia2))), p->tables, &out );
+									v2, p->tables, &out );
 							if (out==0) return LARGE;
-							cos2 = CosAngle( (*(*(((p+ci)->vback)+ia1))), (*(*(((p+cj)->vback)+ia2))), 
-									(*(*(((p+cj)->vback)+(u->hb_iam)[ia2]))), p->tables , &out);
+							cos2 = CosAngle( (*(*(((p+ci)->vback)+ia1))), v2, v2m, p->tables , &out);
 							if (out==0) return LARGE;
 							mul = FastSqrt( DAbs(cos1*cos2),p->tables);
 						 }
@@ -374,7 +379,7 @@ static double EnergyPairAtoms(struct s_polymer *p, struct s_potential *u, int i,
 	{
 		a1 = (((p+cj)->back)+j)->itype;
 		a2 = (((((p+ci)->back)+i)->side)+is)->itype;
-		r2 = Dist2( (((p+cj)->back)+j)->pos, (((((p+ci)->back)+i)->side)+is)->pos );
+		r2 = Dist2S( (((((p+ci)->back)+i)->side)+is)->pos, (((p+cj)->back)+j)->pos, sh );
 
 		if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
 		else r02 = (u->r0_2)[a1][a2];
@@ -522,7 +527,7 @@ double EnergyMonomerRange(struct s_polymer *p, struct s_potential *u, int from, 
 	if (shell == 0 && p->cells)
 	{
 		CellsUpdateRange(p,ip,from,to);
-		if (p->cells->dirty) CellsBuild(p,u->rcut);
+		if (p->cells->dirty) CellsBuild(p,u->rcut,u->boxtype=='p' ? u->lbox : 0.);
 	}
 
 	// if not shell, with cell list
@@ -548,7 +553,11 @@ double EnergyMonomerRange(struct s_polymer *p, struct s_potential *u, int from, 
 				j = c->res[c->cand[k]];
 				bj = ((p+cj)->back)+j;
 				rmax = u->rcut + bi->ext + bj->ext;
-				if ( (bi->pos.x-bj->pos.x)*(bi->pos.x-bj->pos.x) + (bi->pos.y-bj->pos.y)*(bi->pos.y-bj->pos.y)
+				if (c->box > 0)
+				{
+					if ( Dist2S(bi->pos,bj->pos,ImageShift(bi->pos,bj->pos,c->box)) > rmax*rmax ) continue;
+				}
+				else if ( (bi->pos.x-bj->pos.x)*(bi->pos.x-bj->pos.x) + (bi->pos.y-bj->pos.y)*(bi->pos.y-bj->pos.y)
 					+ (bi->pos.z-bj->pos.z)*(bi->pos.z-bj->pos.z) > rmax*rmax ) continue;
 
 				if ( ip!=cj || j<from || j>to || i<j )				// if j in [from,to] of the same chain, require i<j to count only once
@@ -577,13 +586,26 @@ double EnergyMonomerRange(struct s_polymer *p, struct s_potential *u, int from, 
 
 			// same test as at the beginning of EnergyPair; branchless, the hits keep their order
 			nhit = 0;
-			for (g=0;g<c->nres;++g)
+			if (u->boxtype=='p')
 			{
-				dx = c->x[g]-xi; dy = c->y[g]-yi; dz = c->z[g]-zi;
-				rmax = ri + c->ext[g];
-				c->cand[nhit] = g;
-				nhit += ( dx*dx + dy*dy + dz*dz <= rmax*rmax );
+				double box=u->lbox;
+				for (g=0;g<c->nres;++g)
+				{
+					dx = c->x[g]-xi; dy = c->y[g]-yi; dz = c->z[g]-zi;
+					dx -= box*round(dx/box); dy -= box*round(dy/box); dz -= box*round(dz/box);
+					rmax = ri + c->ext[g];
+					c->cand[nhit] = g;
+					nhit += ( dx*dx + dy*dy + dz*dz <= rmax*rmax );
+				}
 			}
+			else
+				for (g=0;g<c->nres;++g)
+				{
+					dx = c->x[g]-xi; dy = c->y[g]-yi; dz = c->z[g]-zi;
+					rmax = ri + c->ext[g];
+					c->cand[nhit] = g;
+					nhit += ( dx*dx + dy*dy + dz*dz <= rmax*rmax );
+				}
 
 			for (k=0;k<nhit;++k)
 			{
@@ -1313,6 +1335,7 @@ int CheckOverlaps(struct s_polymer *p, struct s_potential *u, struct s_mc_parms 
 	char atom1[5],am1[5];
 	char atom2[5],am2[5];
 	double r2,r02;
+	struct vector sh={0.,0.,0.};		// periodic box: image of j nearest to i
 
 	if (pr) fprintf(fproc,"\nChecking overlaps... r0hard = %lf\n",u->g_r0hard);
 	// backbone loop
@@ -1326,6 +1349,7 @@ int CheckOverlaps(struct s_polymer *p, struct s_potential *u, struct s_mc_parms 
 				{
 					if (ci!=cj || (i<j && (((p+ci)->back)+i)->iaa != (((p+cj)->back)+j)->iaa))                      // in the same polymer, do not count twice a contact
 					{
+						if (u->boxtype=='p') sh = ImageShift( (((p+ci)->back)+i)->pos, (((p+cj)->back)+j)->pos, u->lbox );
 						tooclose = 0;
 						if (ci==cj && j-i <= u->g_imin ) tooclose = 1;
 
@@ -1334,7 +1358,7 @@ int CheckOverlaps(struct s_polymer *p, struct s_potential *u, struct s_mc_parms 
 						{
 							a1 = (((p+ci)->back)+i)->itype;
 							a2 = (((p+cj)->back)+j)->itype;
-							r2 = Dist2( (((p+ci)->back)+i)->pos, (((p+cj)->back)+j)->pos );
+							r2 = Dist2S( (((p+ci)->back)+i)->pos, (((p+cj)->back)+j)->pos, sh );
 							if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
 							else r02 = (u->r0_2)[a1][a2];
 							if ( r2 < r02 )
@@ -1359,7 +1383,7 @@ int CheckOverlaps(struct s_polymer *p, struct s_potential *u, struct s_mc_parms 
 							// interaction backbone-sidechain (i-js)
 							a1 = (((p+ci)->back)+i)->itype;
 							a2 = (((((p+cj)->back)+j)->side)+js)->itype;
-							r2 = Dist2( (((p+ci)->back)+i)->pos, (((((p+cj)->back)+j)->side)+js)->pos );
+							r2 = Dist2S( (((p+ci)->back)+i)->pos, (((((p+cj)->back)+j)->side)+js)->pos, sh );
 							if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
 							else r02 = (u->r0_2)[a1][a2];
 							if ( r2 < r02 )
@@ -1383,7 +1407,7 @@ int CheckOverlaps(struct s_polymer *p, struct s_potential *u, struct s_mc_parms 
 								// interaction sidechain-sidechain (is-js)
 								a1 = (((((p+ci)->back)+i)->side)+is)->itype;
 								a2 = (((((p+cj)->back)+j)->side)+js)->itype;
-								r2 = Dist2( (((((p+ci)->back)+i)->side)+is)->pos, (((((p+cj)->back)+j)->side)+js)->pos );
+								r2 = Dist2S( (((((p+ci)->back)+i)->side)+is)->pos, (((((p+cj)->back)+j)->side)+js)->pos, sh );
 								if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
 								else r02 = (u->r0_2)[a1][a2];
 								if ( r2 < r02 )
@@ -1412,7 +1436,7 @@ int CheckOverlaps(struct s_polymer *p, struct s_potential *u, struct s_mc_parms 
 						{
 							a1 = (((p+cj)->back)+j)->itype;
 							a2 = (((((p+ci)->back)+i)->side)+is)->itype;
-							r2 = Dist2( (((p+cj)->back)+j)->pos, (((((p+ci)->back)+i)->side)+is)->pos );
+							r2 = Dist2S( (((((p+ci)->back)+i)->side)+is)->pos, (((p+cj)->back)+j)->pos, sh );
 							if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
 							else r02 = (u->r0_2)[a1][a2];
 							if ( r2 < r02 )
@@ -1449,6 +1473,8 @@ int CheckOverlaps(struct s_polymer *p, struct s_potential *u, struct s_mc_parms 
  ********************************************************************/
 int EnergyBox(struct s_polymer *p, struct s_potential *u, int iw, int ic)
 {
+	if (u->boxtype == 'p') return 0;				// periodic box: no walls
+
 	double d2;
 
 	// cubic box

@@ -114,6 +114,20 @@ static inline double Dist2(struct vector a, struct vector b)
 {
 	return (a.x-b.x)*(a.x-b.x) + (a.y-b.y)*(a.y-b.y) + (a.z-b.z)*(a.z-b.z);
 }
+// periodic box of side L: shift that brings b to the image nearest to a
+static inline struct vector ImageShift(struct vector a, struct vector b, double L)
+{
+	struct vector s;
+	s.x = -L*round((b.x-a.x)/L);
+	s.y = -L*round((b.y-a.y)/L);
+	s.z = -L*round((b.z-a.z)/L);
+	return s;
+}
+// squared distance between a and b shifted by s
+static inline double Dist2S(struct vector a, struct vector b, struct vector s)
+{
+	return (b.x+s.x-a.x)*(b.x+s.x-a.x) + (b.y+s.y-a.y)*(b.y+s.y-a.y) + (b.z+s.z-a.z)*(b.z+s.z-a.z);
+}
 #include "struct_op.h"
 
 
@@ -331,7 +345,7 @@ void SetPairCutoff(struct s_potential *u, int ntypes);
 int CheckHBReferences(struct s_polymer *p, struct s_potential *u, int npol, int nat);
 void CellsAlloc(struct s_polymer *p, struct s_polymer *topo, int npol, int forced, int allowed);
 void CellsFree(struct s_polymer *p);
-void CellsBuild(struct s_polymer *p, double rcut);
+void CellsBuild(struct s_polymer *p, double rcut, double box);
 void CellsUpdateRange(struct s_polymer *p, int ic, int from, int to);
 int CellsCandidates(struct s_polymer *p, int ic, int i);
 int CellsCheck(struct s_polymer *p);

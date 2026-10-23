@@ -658,7 +658,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
                 }
 
 		// rebuild the cell list from time to time (the shape of the system changes, see cells.c)
-		if (p->cells && istep%10000==0) CellsBuild(p,pot->rcut);
+		if (p->cells && istep%10000==0) CellsBuild(p,pot->rcut,pot->boxtype=='p' ? pot->lbox : 0.);
 
 		// checkpoint at the end of a step, so that a restart continues exactly from here
 		// (by default on wall-clock time: writing a checkpoint does not change the trajectory)

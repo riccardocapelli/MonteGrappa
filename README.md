@@ -136,6 +136,16 @@ Restart:
    and frames recorded for the optimization of the potential are not
    saved.
 
+Periodic box:
+ - In the [ global ] chapter of the potential file,
+	boxtype p
+	boxsize L
+   puts the system in a periodic cubic box of side L (A), with minimum
+   image interactions (boxtype c and s are boxes with walls, as before).
+   L must exceed twice the range of interaction of two residues; shells
+   cannot be used with it. Coordinates are not wrapped into the box.
+ - Any number of chains (the limit was 25).
+
 New keywords of the parameter file:
  - echeck          after every move, compare the energy with a full
                    recalculation and report differences (slow, to test moves)

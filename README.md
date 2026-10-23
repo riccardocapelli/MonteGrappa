@@ -152,6 +152,12 @@ New keywords of the parameter file:
  - cells N         cell list for the energy: 1 always, 0 never, -1 automatic
                    (default; used for large systems when it is faster)
  - tcheckpoint N   seconds between checkpoints (default 600)
+ - nprintobs N     every N steps, write observables of aggregation to obs.dat
+                   (obs_run<run>_proc<rank>.dat as for energies): number of
+                   clusters of chains, largest and mean cluster size, pairs of
+                   chains in contact, parallel and antiparallel pairs (cosine of
+                   the end-to-end vectors above 0.8), pairs in register and
+                   mean register, nematic order parameter
  - op_tchi2 T      fictitious temperature of the Metropolis search of the
                    potential optimization, on the reduced chi2 (default 0:
                    only steps that lower chi2 are accepted, as before); the

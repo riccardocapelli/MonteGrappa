@@ -427,6 +427,10 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			//fprintf(stderr,"Total Energy:\t%lf\n\n",TotalEnergy(p,pot,parms,parms->npol,0,parms->nosidechains,parms->debug,0));
 		}
 
+		// print the observables of aggregation
+		if (parms->fobs && parms->nprintobs>0 && istep%parms->nprintobs==0)
+			PrintObservables(parms->fobs,p,parms->npol,istep);
+
 		// print energies
 		if (fe != NULL && iprinte == parms->nprinte && ok>-1)
 		{
@@ -1910,47 +1914,6 @@ int MoveRotation(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *
 }
 
 
-/*****************************************************************************
- Clusters of chains: connected components of the graph whose edges are the
- contacts between different chains (a chain without such contacts is a
- cluster by itself). Returns the number of clusters; the chains of cluster
- k are member[start[k]..start[k+1]-1].
- *****************************************************************************/
-static int FindClusters(struct s_polymer *p, int npol, int *member, int *start, int *cluster_of)
-{
-	int ic,q,i,k,c2,head,tail=0,nc=0;
-	struct s_back *b;
-
-	for (ic=0;ic<npol;++ic) cluster_of[ic] = -1;
-
-	for (ic=0;ic<npol;++ic)
-		if (cluster_of[ic] < 0)
-		{
-			start[nc] = tail;
-			cluster_of[ic] = nc;
-			member[tail++] = ic;
-			for (head=start[nc];head<tail;++head)				// breadth-first visit
-			{
-				q = member[head];
-				for (i=0;i<(p+q)->nback;++i)
-				{
-					b = ((p+q)->back)+i;
-					for (k=0;k<b->ncontacts;++k)
-					{
-						c2 = (b->contacts_p)[k];
-						if (cluster_of[c2] < 0)
-						{
-							cluster_of[c2] = nc;
-							member[tail++] = c2;
-						}
-					}
-				}
-			}
-			nc++;
-		}
-	start[nc] = tail;
-	return nc;
-}
 
 /*****************************************************************************
  Returns 1 if the chains of cluster ic have no contact with other chains

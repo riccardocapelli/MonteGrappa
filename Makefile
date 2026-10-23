@@ -38,7 +38,7 @@ CPPFLAGS += -Iinclude
 
 version ?= SERIAL
 
-MC_SRC = geometry io mc local_move memory misc potential optimizepot checkpoint cells montegrappa
+MC_SRC = geometry io mc local_move memory misc potential optimizepot checkpoint cells observables montegrappa
 
 ifeq ($(version),MPI)
   CCV       = $(MPICC)

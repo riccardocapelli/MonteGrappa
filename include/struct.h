@@ -330,6 +330,8 @@ struct s_mc_parms
 	int nohfields;		//0=there is a H fields potential, 1: there is not
 	int echeck;		//1=check incremental energy against TotalEnergy after every move (slow, for debugging)
 	int cells;		//cell list for the energy: 1=on, 0=off, -1=automatic (on for large systems)
+	int nprintobs;		//write the observables of aggregation every nprintobs steps (0=never)
+	FILE *fobs;		//... to this file (opened for each run)
 	int nrun;		// number of repetitions of the MC
 	int always_restart;	//1=in different irun, start always from input structure
 	int record_native; //1=records the input (native( structure as first snapshot

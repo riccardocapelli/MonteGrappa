@@ -492,6 +492,22 @@ int main(int argc, char *argv[])
 			if (!ckp.restart) PrintEnergies(fe,parms->npol,0,polymer);
 		}
 
+		// open the file of the observables of aggregation
+		parms->fobs = NULL;
+		if (parms->nprintobs > 0)
+		{
+			#ifdef ACTIVE_MPI
+			if (parms->nrun>1) snprintf(fname,sizeof(fname),"obs_run%d_proc%d.dat",irun,my_rank);
+			else snprintf(fname,sizeof(fname),"obs_proc%d.dat",my_rank);
+			#else
+			if (parms->nrun>1) snprintf(fname,sizeof(fname),"obs_run%d.dat",irun);
+			else snprintf(fname,sizeof(fname),"obs.dat");
+			#endif
+			parms->fobs = fopen(fname,ckp.restart ? "a" : "w");
+			if (!parms->fobs) Error("Cannot open the file of observables");
+			if (!ckp.restart) PrintObservablesHeader(parms->fobs);
+		}
+
 		//if(parms->npol>1)
 		//{
 			//fprintf(stderr,"\nChecking number of Contacts\tstep=0\n");
@@ -581,6 +597,7 @@ int main(int argc, char *argv[])
 		// close files
 		if (strcmp(parms->fntrj,"")) fclose(ftrj);
 		if (strcmp(parms->fne,"")) fclose(fe);
+		if (parms->fobs) { fclose(parms->fobs); parms->fobs = NULL; }
 
 	
 		#ifdef ACTIVE_MPI

@@ -15,6 +15,7 @@
 #   cells       cell list on and off must give identical trajectories
 #   tools       grappino and mgp2pdb
 #   mpi         MPI executable run on a single rank (if it was built)
+#   observables observables of aggregation on sheets of known structure
 #   stat        (slow, not in the default) detailed balance: the BGS local move
 #               must sample the same mean energy as pivot moves
 #
@@ -40,7 +41,7 @@ for a in "$@"; do
 		*) TGROUPS="$TGROUPS $a" ;;
 	esac
 done
-[ -z "$TGROUPS" ] && TGROUPS="errors regression echeck restart cells tools mpi"
+[ -z "$TGROUPS" ] && TGROUPS="errors regression echeck restart cells tools mpi observables"
 
 [ -x "$MG" ] || { echo "executable $MG not found: build it first"; exit 1; }
 
@@ -208,15 +209,16 @@ group_echeck() {
 # a run interrupted at its checkpoint and restarted must give identical files
 restart_case() {
 	local name=$1 pol=$2 pot=$3 lines=$4
-	mg rst_$name $pol $pot "seed 5\nnstep 4000\nncheckpoint 3000\nnprinte 200\nnprinttrj 1000\nnprintlog 100000\n$lines"
+	mg rst_$name $pol $pot "seed 5\nnstep 4000\nncheckpoint 3000\nnprinte 200\nnprintobs 200\nnprinttrj 1000\nnprintlog 100000\n$lines"
 	local a=$WORK/rst_$name b=$WORK/rst_${name}_b
 	rm -rf $b; cp -r $a $b
 	awk '$1<3000' $a/energy.ene > $b/energy.ene
+	awk '/^#/ || $1<3000' $a/obs.dat > $b/obs.dat
 	awk '{print} /^ENDMDL/{n++; if(n==3) exit}' $a/traj.pdb > $b/traj.pdb
 	rm -f $b/last.pol
 	( cd $b && "$MG" checkpoint $pot run.par > stdout.log 2> stderr.log )
 	local res=ok f
-	for f in energy.ene traj.pdb last.pol; do cmp -s $a/$f $b/$f || res="$f differs"; done
+	for f in energy.ene traj.pdb last.pol obs.dat; do cmp -s $a/$f $b/$f || res="$f differs"; done
 	sanitizer_ok $b || res="sanitizer report"
 	if [ "$res" = ok ]; then pass "restart $name"; else fail "restart $name" "$res"; fi
 }
@@ -312,11 +314,28 @@ group_stat() {
 }
 
 ######################################################################
+# Three sheets of 4 chains of known structure (parallel in register, antiparallel
+# in register, parallel shifted by two residues): the first line of obs.dat.
+group_observables() {
+	echo "observables"
+	local f expect
+	for f in parallel antiparallel shifted; do
+		mg obs_$f obs_$f.pol obs.pot "nchains 4\nseed 1\nnstep 1\nTemp 1.0\nnosidechain\nnodihpot\nnoangpot\nflip 1\ndw_flip 0.00001\nnprintobs 1\nnprinttrj 10\nnprinte 10\nnprintlog 10\n"
+		case $f in
+			parallel)     expect='$2==1 && $3==4 && $5==3 && $6==3 && $7==0 && $8==3 && $10*$10<0.01 && $12>0.99' ;;
+			antiparallel) expect='$2==1 && $3==4 && $5==3 && $6==0 && $7==3 && $9==3 && $11*$11<0.01 && $12>0.99' ;;
+			shifted)      expect='$2==1 && $3==4 && $5==3 && $6==3 && $8==0 && $10>-2.1 && $10<-1.9 && $12>0.99' ;;
+		esac
+		if awk "NR==2 { exit !($expect) } END { if (NR<2) exit 1 }" $WORK/obs_$f/obs.dat; then pass "observables $f sheet"; else fail "observables $f sheet" "$(sed -n 2p $WORK/obs_$f/obs.dat)"; fi
+	done
+}
+
+######################################################################
 echo "MonteGrappa tests with $MG"
 echo "working directory $WORK"
 for g in $TGROUPS; do
 	case $g in
-		errors|regression|echeck|restart|cells|tools|mpi|stat) group_$g ;;
+		errors|regression|echeck|restart|cells|tools|mpi|observables|stat) group_$g ;;
 		*) echo "unknown group $g"; NFAIL=$((NFAIL+1)) ;;
 	esac
 done

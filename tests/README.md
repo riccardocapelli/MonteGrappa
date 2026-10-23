@@ -15,10 +15,11 @@ directory, whose path is printed.
 | `errors` | wrong input (no `Temp`, wrong `nchains`, unknown `op_minim`, too long file name, missing checkpoint, periodic box too small, shells with a periodic box) stops with a message |
 | `regression` | fixed-seed runs (CA Go model, full atom with rotamers, three chains with cluster moves, two chains with H fields and all moves, hydrogen bonds with splice, potential optimisation) against `tests/reference`, with a small numerical tolerance |
 | `echeck` | every move type on five systems with the keyword `echeck`, with the automatic and the forced cell list: the incremental energy, the backup copy `oldp` and the cell list must agree with a full recalculation after every move |
-| `restart` | a run restarted from its checkpoint gives the same energy file, trajectory and final structure, bit by bit |
+| `restart` | a run restarted from its checkpoint gives the same energy file, observables, trajectory and final structure, bit by bit |
 | `cells` | cell list on and off give identical trajectories |
 | `tools` | `grappino` reproduces the CA model of tutorial 1; `mgp2pdb` converts a two-chain system |
 | `mpi` | `montegrappa_mpi` on one rank: run and exact restart (multi-rank runs are not tested) |
+| `observables` | `obs.dat` of three 4-chain sheets of known structure: parallel in register, antiparallel in register, parallel shifted by two residues |
 | `stat` | on a 30-residue Go fragment at T=0.6, the BGS local move gives the same mean energy as pivot moves within 3 sigma |
 
 ## References
@@ -46,3 +47,4 @@ library differs between platforms; a different trajectory still fails.
 | `chain1100.pol`, `chain1100.pot` | 1100-residue homopolymer (cell list) |
 | `many.pol` (with `homo.pot`) | 40 homopolymer chains |
 | `homo_pbc.pot`, `homo_pbc70.pot`, `two_hf_pbc.pot` | the same potentials in a periodic box of side 40 or 70 A |
+| `obs_*.pol`, `obs.pot` | sheets of 4 chains of 20 beads, all pairs attractive |

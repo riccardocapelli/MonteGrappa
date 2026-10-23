@@ -241,6 +241,7 @@ struct s_mc_parms *send_parms(int iproc, int nprocs, struct s_mc_parms *parms)
 		// pointers refer to the memory of rank 0
 		parms->flog = NULL;
 		parms->op_input = NULL;
+		parms->fobs = NULL;
 	}
 
 	return parms;

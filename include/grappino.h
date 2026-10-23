@@ -188,6 +188,7 @@ void Go_Dihedrals(struct s_parms *parms, struct s_polymer *p, int nc, double *di
 void Go_Angles(struct s_parms *parms, struct s_polymer *p, int nc, double *ang, struct s_potential *u);
 void Ram_Dihedrals(struct s_parms *p, struct s_potential *u);
 int SetGoTypes(struct s_polymer *p, int nchains, int nat);
+int SetGoHomoTypes(struct s_polymer *p, int nchains, int nat);
 int SetGoAATypes(struct s_polymer *p, int nchains, int nat);
 void DisulphideBonds(struct s_parms *parms, struct s_polymer *p, double **e, double **r2, double **r02, int nchains, int nat);
 void OP_AddEnergy(struct s_polymer *p, int a1, int a2, double mul);

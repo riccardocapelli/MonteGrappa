@@ -77,6 +77,7 @@ int main(int argc, char *argv[])
 	// set atomtypes
 	if (!strcmp(p->atomtypes,"go")) ntypes = SetGoTypes(polymer,nchain,npdb);
 	else if (!strcmp(p->atomtypes,"go_aa")) ntypes = SetGoAATypes(polymer,nchain,npdb);
+	else if (!strcmp(p->atomtypes,"go_homo")) ntypes = SetGoHomoTypes(polymer,nchain,npdb);
 	else ntypes = ReadTypes(polymer,nchain,npdb,p->atomtypes);
 	
 	cm = ContactMap(p,polymer,nchain,ntypes,p->debug);

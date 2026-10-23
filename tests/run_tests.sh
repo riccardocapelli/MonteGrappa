@@ -266,6 +266,14 @@ group_tools() {
 	else
 		echo "  SKIP  grappino not built"
 	fi
+	if [ -x $ROOT/bin/grappino ]; then
+		# Go model of identical chains: the 16 chains of the TTR(105-115) protofilament share their atom types
+		d=$WORK/grappino_homo; mkdir -p $d; cp $DATA/ttr_protofilament.pdb $d/
+		printf "pdbfile ttr_protofilament.pdb\nbackbone_atoms 1 CA\nnosidechain\natomtypes go_homo\nimin 4\npotential go\nr_hardcore 4.0\nr_native 7.5\ngo-energy -1.0\ndebug 1\npolfile ttr.pol\npotfile ttr.pot\n" > $d/ttr.in
+		( cd $d && $ROOT/bin/grappino ttr.in > g.log 2>&1 )
+		if grep -q "Found 32 Go contacts" $d/g.log && [ "$(awk '$1~/^[0-9]+$/ && NF==11 {print $4}' $d/ttr.pol | sort -u | wc -l)" -eq 11 ] && [ "$(awk '$1~/^[0-9]+$/ && NF==11' $d/ttr.pol | wc -l)" -eq 176 ]
+		then pass "grappino go_homo (TTR protofilament)"; else fail "grappino go_homo (TTR protofilament)" "wrong contacts or types"; fi
+	fi
 	if [ -x $ROOT/bin/mgp2pdb ]; then
 		d=$WORK/mgp2pdb; mkdir -p $d
 		( cd $d && $ROOT/bin/mgp2pdb -i $DATA/two.pol -o two.pdb > log 2>&1 )

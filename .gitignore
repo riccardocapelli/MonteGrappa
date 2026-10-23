@@ -26,3 +26,6 @@
 # build products
 obj/
 bin/
+
+# simulation outputs of the examples
+examples/*/runs/

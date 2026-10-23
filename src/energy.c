@@ -369,6 +369,42 @@ int SetGoTypes(struct s_polymer *p, int nchains, int nat)
 }
 
 /*****************************************************************************
+ Go model of identical chains (e.g. an amyloid fibril): every atom takes the
+ type of the corresponding atom of chain 0, so that all native contacts, also
+ those between chains, become attractions between types shared by all chains
+ and any chain can take the place of any other. Returns the number of types.
+ *****************************************************************************/
+int SetGoHomoTypes(struct s_polymer *p, int nchains, int nat)
+{
+	int ic,i,j,ntypes=0;
+
+	fprintf(stderr,"Set Go types shared by identical chains\n");
+
+	for (ic=1;ic<nchains;++ic)
+	{
+		if ((p+ic)->nback != p->nback) Error("go_homo atom types need chains with the same atoms");
+		for (i=0;i<p->nback;++i)
+			if ( (((p+ic)->back)+i)->nside != ((p->back)+i)->nside || strcmp((((p+ic)->back)+i)->type,((p->back)+i)->type) )
+				Error("go_homo atom types need chains with the same atoms");
+	}
+
+	for (ic=0;ic<nchains;++ic)
+		for (i=0;i<(p+ic)->nback;++i)
+		{
+			(((p+ic)->back)+i)->itype = ((p->back)+i)->ia;
+			for (j=0;j<(((p+ic)->back)+i)->nside;++j) (((((p+ic)->back)+i)->side)+j)->itype = ((((p->back)+i)->side)+j)->ia;
+		}
+	for (i=0;i<p->nback;++i)
+	{
+		if (((p->back)+i)->ia+1 > ntypes) ntypes = ((p->back)+i)->ia+1;
+		for (j=0;j<((p->back)+i)->nside;++j)
+			if (((((p->back)+i)->side)+j)->ia+1 > ntypes) ntypes = ((((p->back)+i)->side)+j)->ia+1;
+	}
+	(void) nat;
+	return ntypes;
+}
+
+/*****************************************************************************
  Assign as atom types an incremental number on aminoacids
  *****************************************************************************/
 int SetGoAATypes(struct s_polymer *p, int nchains, int nat)

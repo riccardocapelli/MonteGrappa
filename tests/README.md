@@ -17,7 +17,7 @@ directory, whose path is printed.
 | `echeck` | every move type on five systems with the keyword `echeck`, with the automatic and the forced cell list: the incremental energy, the backup copy `oldp` and the cell list must agree with a full recalculation after every move |
 | `restart` | a run restarted from its checkpoint gives the same energy file, observables, trajectory and final structure, bit by bit |
 | `cells` | cell list on and off give identical trajectories |
-| `tools` | `grappino` reproduces the CA model of tutorial 1; `mgp2pdb` converts a two-chain system |
+| `tools` | `grappino` reproduces the CA model of tutorial 1 and builds the shared-type (`go_homo`) Go model of the TTR(105-115) protofilament; `mgp2pdb` converts a two-chain system |
 | `mpi` | `montegrappa_mpi` on one rank: run and exact restart |
 | `mpi_multi` | parallel tempering on 4 ranks (only where `mpirun` works, e.g. the Linux CI): run, accepted exchanges, exact restart, and the lowest-temperature replica samples the same mean energy as plain runs at that temperature |
 | `observables` | `obs.dat` of three 4-chain sheets of known structure: parallel in register, antiparallel in register, parallel shifted by two residues |
@@ -48,4 +48,5 @@ library differs between platforms; a different trajectory still fails.
 | `chain1100.pol`, `chain1100.pot` | 1100-residue homopolymer (cell list) |
 | `many.pol` (with `homo.pot`) | 40 homopolymer chains |
 | `homo_pbc.pot`, `homo_pbc70.pot`, `two_hf_pbc.pot` | the same potentials in a periodic box of side 40 or 70 A |
+| `ttr_protofilament.pdb` | TTR(105-115) protofilament, PDB 2M5N model 1 (16 chains) |
 | `obs_*.pol`, `obs.pot` | sheets of 4 chains of 20 beads, all pairs attractive |

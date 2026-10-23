@@ -16,6 +16,9 @@
 #   tools       grappino and mgp2pdb
 #   mpi         MPI executable run on a single rank (if it was built)
 #   observables observables of aggregation on sheets of known structure
+#   mpi_multi   parallel tempering with 4 ranks (only where mpirun works): run,
+#               exact restart, and the replica at the lowest temperature must
+#               sample the same mean energy as plain runs at that temperature
 #   stat        (slow, not in the default) detailed balance: the BGS local move
 #               must sample the same mean energy as pivot moves
 #
@@ -41,7 +44,7 @@ for a in "$@"; do
 		*) TGROUPS="$TGROUPS $a" ;;
 	esac
 done
-[ -z "$TGROUPS" ] && TGROUPS="errors regression echeck restart cells tools mpi observables"
+[ -z "$TGROUPS" ] && TGROUPS="errors regression echeck restart cells tools mpi observables mpi_multi"
 
 [ -x "$MG" ] || { echo "executable $MG not found: build it first"; exit 1; }
 
@@ -331,11 +334,69 @@ group_observables() {
 }
 
 ######################################################################
+# Parallel tempering on 4 ranks, 30-residue Go fragment at T = 0.6 ... 0.9
+PT_PAR="nchains 1\nnprinttrj 100000000\nnprintlog 100000000\npivot 1\nmpivot 1\nntemp 4\ntemperatures\n0.6\n0.7\n0.8\n0.9\nstep_exchange 1000\n"
+
+# mpirun with a timeout (a deadlock must fail the test, not hang it)
+mpirun4() {
+	timeout 900 mpirun --oversubscribe -np 4 "$@"
+}
+
+group_mpi_multi() {
+	echo "mpi_multi (parallel tempering, 4 ranks)"
+	local MPI=$ROOT/bin/montegrappa_mpi d seed ok
+	[ $ASAN = 1 ] && { echo "  SKIP  not with --asan"; return; }
+	[ -x $MPI ] || { echo "  SKIP  montegrappa_mpi not built"; return; }
+	if ! command -v mpirun > /dev/null || ! timeout 60 mpirun --oversubscribe -np 2 true > /dev/null 2>&1; then echo "  SKIP  mpirun does not work here"; return; fi
+
+	# run: all ranks complete, consistent energies, exchanges accepted
+	d=$WORK/pt_run; mkdir -p $d; cp $DATA/fragment.pol $DATA/fragment.pot $d/
+	par $d/run.par "${PT_PAR}seed 7\nnstep 200000\nnprinte 1000\n"
+	( cd $d && mpirun4 $MPI fragment.pol fragment.pot run.par > stdout.log 2> stderr.log )
+	ok=1
+	for r in 0 1 2 3; do
+		[ -f $d/proc_$r.log ] && awk '/^Final:/ { split($2,a,"="); split($3,b,"="); x=a[2]-b[2]; f=1; exit (x>1e-6||x<-1e-6) } END { if (!f) exit 1 }' $d/proc_$r.log || ok=0
+	done
+	if [ $ok = 1 ]; then pass "pt run (4 ranks)"; else fail "pt run (4 ranks)" "did not complete or energies inconsistent (see $d)"; fi
+	if grep -h "Exchanges with rank" $d/stderr.log | awk '{split($0,a,"= "); if (a[2]+0 <= 0) bad=1; n++} END { exit (n!=3 || bad) }'
+	then pass "pt exchanges accepted"; else fail "pt exchanges accepted" "$(grep -h 'Exchanges' $d/stderr.log | tr '\n' ' ')"; fi
+
+	# exact restart on 4 ranks
+	d=$WORK/pt_rst; mkdir -p $d; cp $DATA/fragment.pol $DATA/fragment.pot $d/
+	par $d/run.par "${PT_PAR}seed 5\nnstep 4000\nncheckpoint 3000\nnprinte 200\n"
+	( cd $d && mpirun4 $MPI fragment.pol fragment.pot run.par > stdout.log 2> stderr.log )
+	rm -rf $d.b; cp -r $d $d.b
+	for r in 0 1 2 3; do awk '$1<3000' $d/energy_proc$r.ene > $d.b/energy_proc$r.ene; rm -f $d.b/last_proc$r.pol; done
+	( cd $d.b && mpirun4 $MPI checkpoint fragment.pot run.par > stdout.log 2> stderr.log )
+	ok=1
+	for r in 0 1 2 3; do cmp -s $d/energy_proc$r.ene $d.b/energy_proc$r.ene && cmp -s $d/last_proc$r.pol $d.b/last_proc$r.pol || ok=0; done
+	if [ $ok = 1 ]; then pass "pt restart (4 ranks)"; else fail "pt restart (4 ranks)" "files differ (see $d.b)"; fi
+
+	# the lowest-temperature replica samples the canonical distribution at T=0.6
+	for seed in 11 22 33 44; do
+		d=$WORK/pt_stat_$seed; mkdir -p $d; cp $DATA/fragment.pol $DATA/fragment.pot $d/
+		par $d/run.par "${PT_PAR}seed $seed\nnstep 2000000\nnprinte 100\n"
+		( cd $d && mpirun4 $MPI fragment.pol fragment.pot run.par > stdout.log 2> stderr.log )
+		mg pt_ref_$seed fragment.pol fragment.pot "nchains 1\nseed $seed\nnstep 2000000\nTemp 0.6\npivot 1\nmpivot 1\nnprinttrj 100000000\nnprinte 100\nnprintlog 100000000\n" &
+	done
+	wait
+	for kind in pt ref; do
+		for seed in 11 22 33 44; do
+			if [ $kind = pt ]; then f=$WORK/pt_stat_$seed/energy_proc0.ene; else f=$WORK/pt_ref_$seed/energy.ene; fi
+			awk '{n++; e[n]=$2} END{s=0; for(i=int(n/2)+1;i<=n;i++) s+=e[i]; print s/(n-int(n/2))}' $f
+		done | awk -v k=$kind '{m+=$1; m2+=$1*$1; n++} END{mu=m/n; printf "%s %f %f\n", k, mu, sqrt((m2/n-mu*mu)/(n-1))}'
+	done > $WORK/pt_summary
+	sed 's/^/        /' $WORK/pt_summary
+	if awk 'NR==1{m1=$2;s1=$3} NR==2{m2=$2;s2=$3} END{d=m1-m2; if(d<0)d=-d; exit !(NR==2 && d < 3*sqrt(s1*s1+s2*s2))}' $WORK/pt_summary
+	then pass "pt lowest replica vs plain run"; else fail "pt lowest replica vs plain run" "difference above 3 sigma"; fi
+}
+
+######################################################################
 echo "MonteGrappa tests with $MG"
 echo "working directory $WORK"
 for g in $TGROUPS; do
 	case $g in
-		errors|regression|echeck|restart|cells|tools|mpi|observables|stat) group_$g ;;
+		errors|regression|echeck|restart|cells|tools|mpi|observables|mpi_multi|stat) group_$g ;;
 		*) echo "unknown group $g"; NFAIL=$((NFAIL+1)) ;;
 	esac
 done

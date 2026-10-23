@@ -18,7 +18,8 @@ directory, whose path is printed.
 | `restart` | a run restarted from its checkpoint gives the same energy file, observables, trajectory and final structure, bit by bit |
 | `cells` | cell list on and off give identical trajectories |
 | `tools` | `grappino` reproduces the CA model of tutorial 1; `mgp2pdb` converts a two-chain system |
-| `mpi` | `montegrappa_mpi` on one rank: run and exact restart (multi-rank runs are not tested) |
+| `mpi` | `montegrappa_mpi` on one rank: run and exact restart |
+| `mpi_multi` | parallel tempering on 4 ranks (only where `mpirun` works, e.g. the Linux CI): run, accepted exchanges, exact restart, and the lowest-temperature replica samples the same mean energy as plain runs at that temperature |
 | `observables` | `obs.dat` of three 4-chain sheets of known structure: parallel in register, antiparallel in register, parallel shifted by two residues |
 | `stat` | on a 30-residue Go fragment at T=0.6, the BGS local move gives the same mean energy as pivot moves within 3 sigma |
 

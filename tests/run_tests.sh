@@ -128,7 +128,7 @@ REGRESSION_CASES="
 ca|ca.pol|ca.pot|nchains 1\nTemp 1.0\nflip 1\npivot 4\nmpivot 1\nnstep 20000\n
 polyala|polyala.pol|polyala.pot|nchains 1\nTemp 1.0\nflip 3\npivot 4\nmpivot 1\nsidechain 2\nnstep 20000\n
 three|three.pol|homo.pot|nchains 3\nnosidechain\nnodihpot\nnoangpot\nTemp 1.0\nflip 1\npivot 5\nmovecom 5\nmoverot 5\ncomcluster 10\nrotcluster 10\nnstep 20000\n
-two|two.pol|two_hf.pot|nchains 2\nTemp 2.0\nflip 1\npivot 5\nmovecom 5\nmoverot 5\nsidechain 3\nbackrub 5\nbacksiderub 7\nmflip 7\nlpivot 7\nmovebias 4\nnmul_local 5\nnstep 2000\n
+two|two.pol|two_hf.pot|nchains 2\nTemp 2.0\nflip 1\npivot 5\nmovecom 5\nmoverot 5\nsidechain 3\nbackrub 5\nbacksiderub 7\nmflip 7\nlpivot 7\nmovebias 4\nnmul_local 5\nnstep 10000\n
 hb|polyala.pol|polyala_hb.pot|nchains 1\nTemp 1.0\nhb\nflip 1\npivot 4\nmpivot 2\nbackrub 5\nmovebias 5\nnmul_local 5\nnstep 10000\n
 optim|polyala.pol|polyala.pot|nchains 1\nTemp 1.0\nmpivot 1\npivot 4\nnrun 2\nnstep 60000\nalways_restart\nrecord_native\nop_file polyala.op\nop_minim sample\nop_itermax 200\nop_step 0.2\nop_T 1.0\nop_deltat 5000\nop_wait 10000\nop_rw 3.5\nop_r0 1.0\n
 "

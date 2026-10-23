@@ -380,7 +380,7 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
     struct s_back *b = (p+ip)->back;
     struct s_polymer *f = fragment+ip;
     int kd[nmul],k;
-    double rnd;
+    double rnd,r;
 
     // free dihedrals of the segment (see BGS_GMatrix)
     nang=0;
@@ -444,8 +444,10 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
       W2 = BGS_Weight(f->L,f->g_ang,nang);
 
       // the proposal is not symmetric: the ratio of weights enters also when deltaE<=0
+      // as in Metropolis, the random number is always drawn
+      r = frand();
       rnd = (W2/W1) * exp(-deltaE/t);
-      if (rnd < 1. && frand() >= rnd) ok = 0;
+      if (rnd < 1. && r >= rnd) ok = 0;
     }
 
     if (ok)

@@ -1184,16 +1184,13 @@ int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_pote
  *****************************************************************************/
 int Metropolis(double deltaE, double T, struct s_tables *t)
 {
-	double p;
+	// the random number is drawn also when deltaE<=0, so that the stream of random
+	// numbers does not depend on the sign of a deltaE which is zero up to rounding
+	double r = frand();
+
 	if (deltaE<=0)
-       		 return 1;
-	
-	p = FastExp(-deltaE/T,t);
-      
-	if (frand()<p)
- 	 return 1;
-	
-	return 0;
+		return 1;
+	return ( r < FastExp(-deltaE/T,t) );
 }
 
 
@@ -1523,6 +1520,7 @@ int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potenti
       if (idir == -1)
       {
             if ( iw-nmul-1 < 2 ) nmul = iw - 1;                                                       // if nmul beyond beginning of the chain, decrease it
+            if (nmul < 1) { parms->mov ++; return 0; }                                                // nothing to move
 
             deltaE = -GetEnergyMonomerRange(p,iw-nmul-1,iw,ip);                                 // calculate old energy
             if (!parms->nodihpot)
@@ -1572,6 +1570,7 @@ int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potenti
       else
       {
             if ( iw+2+nmul > (p+ip)->nback - 1 ) nmul = (p+ip)->nback - 3 - iw;                // if nmul is beyond the end, decrease it
+            if (nmul < 1) { parms->mov ++; return 0; }                                                // nothing to move
 
             deltaE = -GetEnergyMonomerRange(p,iw,iw+nmul+1,ip);                                // calculate old energy
             if (!parms->nodihpot)

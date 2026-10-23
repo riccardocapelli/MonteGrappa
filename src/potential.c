@@ -109,6 +109,65 @@ void SetSidechainExtents(struct s_polymer *p, int npol, int nosidechains)
 		}
 }
 
+/********************************************************************
+ Pair energy of the whole system with the cell list: only residue pairs
+ in neighbouring cells, summed in the same order as the plain loops of
+ TotalEnergy (chain ci, chain cj>=ci, residue i, residue j), so that the
+ result is identical. Returns 0 (nothing done) if some residue has too
+ many candidates for the cell list to be useful.
+ ********************************************************************/
+static int TotalPairEnergyCells(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms, int npol, int update, int nosidechains, double *etot)
+{
+	struct s_cells *c = p->cells;
+	int g,n,k,ci,cj,i,j,tooclose,*start,*list,*ptr,nlist=0,size;
+
+	start = (int *) malloc((c->nres+1)*sizeof(int));
+	ptr = (int *) malloc(c->nres*sizeof(int));
+	size = 32*c->nres;
+	list = (int *) malloc(size*sizeof(int));
+	if (!start || !ptr || !list) Error("Cannot allocate in TotalPairEnergyCells");
+
+	// sorted candidates of every residue
+	for (g=0;g<c->nres;++g)
+	{
+		start[g] = nlist;
+		n = CellsCandidates(p,c->chain[g],c->res[g]);
+		if (n < 0) { free(start); free(ptr); free(list); return 0; }
+		if (nlist+n > size)
+		{
+			size = 2*(nlist+n);
+			list = (int *) realloc(list,size*sizeof(int));
+			if (!list) Error("Cannot allocate in TotalPairEnergyCells");
+		}
+		for (k=0;k<n;++k) list[nlist++] = c->cand[k];
+	}
+	start[c->nres] = nlist;
+
+	for (ci=0;ci<npol;++ci)
+	{
+		for (i=0;i<(p+ci)->nback;++i) ptr[c->offset[ci]+i] = start[c->offset[ci]+i];
+		for (cj=ci;cj<npol;++cj)
+			for (i=0;i<(p+ci)->nback;++i)
+			{
+				g = c->offset[ci]+i;
+				// candidates are sorted by global index: those of chain cj are a contiguous block
+				while (ptr[g] < start[g+1] && list[ptr[g]] < c->offset[cj]) ptr[g]++;
+				for (k=ptr[g]; k<start[g+1] && list[k] < c->offset[cj+1]; ++k)
+				{
+					j = list[k] - c->offset[cj];
+					if (ci!=cj || i<j)					// in the same polymer, do not count twice a contact
+					{
+						tooclose = 0;
+						if (ci==cj && j-i <= u->g_imin ) tooclose = 1;
+						*etot += EnergyPair(p,u,i,j,ci,cj,update,nosidechains,parms->disentangle,tooclose,parms->hb);
+					}
+				}
+			}
+	}
+	free(start); free(ptr); free(list);
+	return 1;
+}
+
 double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms, int npol, int update, int nosidechains, int debug, int iproc)
 {
 	int i,j,ci,cj,tooclose;
@@ -126,7 +185,9 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
                         (((p+ci)->back)+i)->ncontacts = 0;
                   }
 
-	if(update)
+	if (p->cells && p->cells->active && TotalPairEnergyCells(p,u,parms,npol,update,nosidechains,&etot))
+		;							// pairs from the cell list
+	else if(update)
 	{
 	for (ci=0;ci<npol;++ci)                                     // loops on polymers
             for (cj=ci;cj<npol;++cj)

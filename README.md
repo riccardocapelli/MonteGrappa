@@ -133,6 +133,10 @@ New keywords of the parameter file:
  - cells N         cell list for the energy: 1 always, 0 never, -1 automatic
                    (default; used for large systems when it is faster)
  - tcheckpoint N   seconds between checkpoints (default 600)
+ - op_tchi2 T      fictitious temperature of the Metropolis search of the
+                   potential optimization, on the reduced chi2 (default 0:
+                   only steps that lower chi2 are accepted, as before); the
+                   best matrix found is returned
  - flag keywords accept an explicit 0 (e.g. "shell 0")
 
 Output:

@@ -356,8 +356,9 @@ void OP_AddEnergy(struct s_polymer *p, int a1, int a2, double mul)
  ***************************************************/
 void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntypes, double **u, int irun, double **ematold)
 {
-	int istep,irunstart,iacc=0,a1,a2,iw,ifr,i,j,n=0,nstep=0,ntry;
-	double chi2,chi2old,deltae,eav=0,eav2=0,de2=0;
+	int istep,irunstart,iacc=0,a1,a2,iw,ifr,i,j,n=0,nstep=0,ntry,accept;
+	double chi2,chi2old,chi2best,deltae,eav=0,eav2=0,de2=0,ndata;
+	double **ebest;
 	char aux[500];
 	FILE *fp, *fc;
 	
@@ -372,6 +373,12 @@ void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntype
 
 	// initial chi2
 	chi2old = OP_function(u,p->op,parms->op_input,parms);
+	ndata = parms->op_input->ndata;
+
+	// with op_tchi2>0 the search can go uphill: keep the best matrix found
+	chi2best = chi2old;
+	ebest = AlloDoubleMatrix(ntypes,ntypes);
+	CopyDoubleMatrix(u,ebest,ntypes,ntypes);
 	
 //	fprintf(stderr,"Potential Optimization \n> Initial value of Chi2 = %lf | Reduced = %lf\n",chi2old,chi2old/(parms->op_input->ndata));
 	fprintf(stderr,"Potential Optimization \n> Initial value of Chi2 %lf\n",chi2old/(parms->op_input->ndata));
@@ -405,8 +412,13 @@ void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntype
 
 		chi2 = OP_functionDiff(iw,deltae,p->op,parms->op_input,parms);
 
+		// Metropolis on the reduced chi2 at temperature op_tchi2 (op_tchi2=0: only downhill steps)
+		if (chi2 < chi2old) accept = 1;
+		else if (parms->op_tchi2 > 0) accept = ( frand() < exp( -(chi2-chi2old)/ndata/parms->op_tchi2 ) );
+		else accept = 0;
+
 		// accept
-		if (chi2 < chi2old)
+		if (accept)
 		{
 			a1 = p->op->it1[iw];
 			a2 = p->op->it2[iw];
@@ -414,6 +426,11 @@ void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntype
 			if (a1 != a2) u[a2][a1] += deltae;			// a diagonal element must change only once
 			chi2old = chi2;
 			iacc ++;
+			if (chi2 < chi2best)
+			{
+				chi2best = chi2;
+				CopyDoubleMatrix(u,ebest,ntypes,ntypes);
+			}
 		}
 		// reject
 		else
@@ -430,6 +447,11 @@ void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntype
 		// exit condition
 		if (chi2old<parms->op_stop) break;
 	}
+
+	// return the best matrix, with its averages (rest_av of the last proposal otherwise)
+	CopyDoubleMatrix(ebest,u,ntypes,ntypes);
+	FreeDoubleMatrix(ebest,ntypes);
+	chi2old = OP_function(u,p->op,parms->op_input,parms);
 
 	// calculate the properties of the new matrix
 	for (i=0;i<ntypes;++i)

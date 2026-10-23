@@ -354,6 +354,7 @@ struct s_mc_parms
 	 double op_T;		// temperature corresponding to the experimental data (can be different from T)
 	 int op_deltat;		// = nstep/op_nframes
 	 double op_stop;	// stop condition
+	 double op_tchi2;	// fictitious temperature of the Metropolis search on the reduced chi2 (0 = only downhill)
 	 int op_print;		// print log every * step
 	 double op_emin;	// matrix elements cannot go below this limit
 	 double op_emax;	// matrix elements cannot go below this limit

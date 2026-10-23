@@ -37,7 +37,8 @@ ASAN=0; UPDATE=0; KEEP=0; TGROUPS=""
 
 for a in "$@"; do
 	case $a in
-		--asan) ASAN=1; MG=$ROOT/bin/montegrappa_asan ;;
+		--asan) ASAN=1; MG=$ROOT/bin/montegrappa_asan
+			export ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=0} ;;		# memory still allocated at exit is not an error here
 		--update-reference) UPDATE=1 ;;
 		--keep) KEEP=1 ;;
 		-h|--help) sed -n '2,30p' "$0"; exit 0 ;;

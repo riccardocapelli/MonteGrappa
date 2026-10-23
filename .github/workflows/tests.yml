@@ -26,7 +26,16 @@ jobs:
           name: linux-test-outputs
           path: ${{ runner.temp }}/mgtests
       - name: Tests with AddressSanitizer
-        run: make check-asan
+        run: |
+          sudo sysctl -w vm.mmap_rnd_bits=28     # ASan cannot map its shadow memory with the default ASLR entropy
+          make version=ASAN
+          MG_TEST_WORKDIR=$RUNNER_TEMP/mgtests_asan tests/run_tests.sh --asan errors regression echeck restart cells
+      - name: Keep the outputs of failed ASan tests
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-asan-outputs
+          path: ${{ runner.temp }}/mgtests_asan
       - name: Detailed balance
         run: tests/run_tests.sh stat
 

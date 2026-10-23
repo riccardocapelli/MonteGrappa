@@ -18,7 +18,13 @@ jobs:
           make version=MPI
           make grappino mgp2pdb mhistogram
       - name: Tests
-        run: tests/run_tests.sh
+        run: MG_TEST_WORKDIR=$RUNNER_TEMP/mgtests tests/run_tests.sh
+      - name: Keep the outputs of failed tests
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-test-outputs
+          path: ${{ runner.temp }}/mgtests
       - name: Tests with AddressSanitizer
         run: make check-asan
       - name: Detailed balance
@@ -36,4 +42,10 @@ jobs:
           make
           make grappino mgp2pdb mhistogram
       - name: Tests
-        run: tests/run_tests.sh
+        run: MG_TEST_WORKDIR=$RUNNER_TEMP/mgtests tests/run_tests.sh
+      - name: Keep the outputs of failed tests
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-test-outputs
+          path: ${{ runner.temp }}/mgtests

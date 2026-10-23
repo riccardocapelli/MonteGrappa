@@ -526,6 +526,10 @@ int main(int argc, char *argv[])
 		Do_MC(polymer,fragment,replica,startp,u,parms,ftrj,fe,oldp,fproc,irun,&ckp,0);
 		#endif
 		ckp.restart = 0;						// the following runs start normally
+
+		// check the energy before the optimisation of the potential changes it
+		CheckOverlaps(polymer,u,parms,parms->npol,parms->nosidechains,1,fproc);
+		fprintf(fproc,"Final: Etot=%lf\tEtot(true)=%lf\n",polymer->etot,TotalEnergy(polymer,u,parms,parms->npol,0,parms->nosidechains,parms->debug,my_rank));
 		#ifdef OPTIMIZEPOT
 		if (strcmp(parms->op_minim,"none"))
 		{
@@ -571,11 +575,7 @@ int main(int argc, char *argv[])
 
 
 
-		CheckOverlaps(polymer,u,parms,parms->npol,parms->nosidechains,1,fproc);
-
-
 		PrintPolymer(fname,polymer,parms->npol);
-		fprintf(fproc,"Final: Etot=%lf\tEtot(true)=%lf\n",polymer->etot,TotalEnergy(polymer,u,parms,parms->npol,0,parms->nosidechains,parms->debug,my_rank));
 
 		// close files
 		if (strcmp(parms->fntrj,"")) fclose(ftrj);

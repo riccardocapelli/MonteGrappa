@@ -57,6 +57,36 @@ void SetPairCutoff(struct s_potential *u, int ntypes)
 }
 
 /********************************************************************
+ The angular factor of a hydrogen bond uses the atom hb_iam preceding
+ the donor/acceptor: if it belongs to another backbone unit, a move of
+ that unit changes the bond energy without recomputing it. Returns the
+ number of such donors/acceptors.
+ ********************************************************************/
+int CheckHBReferences(struct s_polymer *p, struct s_potential *u, int npol, int nat)
+{
+	int ic,i,is,k,g=0,nbad=0,*owner;
+
+	owner = (int *) malloc(nat*sizeof(int));
+	if (!owner) Error("Cannot allocate in CheckHBReferences");
+	for (k=0;k<nat;++k) owner[k] = -1;
+	for (ic=0;ic<npol;++ic)
+		for (i=0;i<(p+ic)->nback;++i,++g)
+		{
+			owner[(((p+ic)->back)+i)->ia] = g;
+			for (is=0;is<(((p+ic)->back)+i)->nside;++is)
+				owner[(((((p+ic)->back)+i)->side)+is)->ia] = g;
+		}
+	for (k=0;k<nat;++k)
+		if ((u->hb)[k] && (u->hb_iam[k]<0 || u->hb_iam[k]>=nat || owner[u->hb_iam[k]] != owner[k]))
+		{
+			if (nbad < 5) fprintf(stderr,"WARNING: hydrogen bond atom %d refers to atom %d, which is not in its backbone unit\n",k,u->hb_iam[k]);
+			nbad++;
+		}
+	free(owner);
+	return nbad;
+}
+
+/********************************************************************
  Largest distance of the sidechain atoms of each residue from its
  backbone atom (also kept up to date by AddSidechain)
  ********************************************************************/
@@ -309,13 +339,14 @@ static double EnergyPairAtoms(struct s_polymer *p, struct s_potential *u, int i,
 					// calculate hydrogen bond (if any)
 					if (hb)
 					{
-						if (u->splice==1)		// if HB, interacts only the first half of splice
-							if ((u->r_2)[a1][a2] * u->kr2_splice < r2) mul = 0;
-
 						ia1 = (((((p+ci)->back)+i)->side)+is)->ia;
 						ia2 = (((((p+cj)->back)+j)->side)+js)->ia;
-						if ((u->hb)[ia1]*(u->hb)[ia2]==2 && mul>0)	// donor-acceptor pair within the first half of splice
+						if ((u->hb)[ia1]*(u->hb)[ia2]==2)		// donor-acceptor pair
 						{
+						 // a hydrogen bond acts only in the first half of splice (other pairs keep ke_splice)
+						 if (u->splice==1 && (u->r_2)[a1][a2] * u->kr2_splice < r2) mul = 0;
+						 else
+						 {
 							cos1 = CosAngle( (*(*(((p+ci)->vback)+(u->hb_iam)[ia1]))), (*(*(((p+ci)->vback)+ia1))), 
 									(*(*(((p+cj)->vback)+ia2))), p->tables, &out );
 							if (out==0) return LARGE;
@@ -323,6 +354,7 @@ static double EnergyPairAtoms(struct s_polymer *p, struct s_potential *u, int i,
 									(*(*(((p+cj)->vback)+(u->hb_iam)[ia2]))), p->tables , &out);
 							if (out==0) return LARGE;
 							mul = FastSqrt( DAbs(cos1*cos2),p->tables);
+						 }
 						}
 					}
 

@@ -337,6 +337,8 @@ int main(int argc, char *argv[])
 	}
 
 	SetPairCutoff(u,ntypes);
+	if (parms->hb && my_rank==0 && CheckHBReferences(startp,u,parms->npol,nat))
+		fprintf(stderr,"WARNING: the energy of these hydrogen bonds is not updated when only the reference atom moves\n");
 	SetSidechainExtents(startp,parms->npol,parms->nosidechains);
 
 	// cell list for the energy of moved residues (not with shells, which play the same role)

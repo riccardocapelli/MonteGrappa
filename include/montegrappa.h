@@ -332,6 +332,7 @@ int EnergyBoxPolymer(struct s_polymer *p, struct s_potential *u, int ic);
 double EnergyHFields(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms, int iw, int ic, int update);
 double GetHFields(struct s_polymer *p, int npol);
 void SetPairCutoff(struct s_potential *u, int ntypes);
+int CheckHBReferences(struct s_polymer *p, struct s_potential *u, int npol, int nat);
 void CellsAlloc(struct s_polymer *p, struct s_polymer *topo, int npol, int forced, int allowed);
 void CellsFree(struct s_polymer *p);
 void CellsBuild(struct s_polymer *p, double rcut);

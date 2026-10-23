@@ -299,7 +299,7 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
     if (!parms->nohfields)
       deltaE -= GetHFields(p,parms->npol);										// old H fields energy
   
-    ok = PivotBackward((p+ip),iw+1,0.2*(0.5-frand()),iw,parms);							// moved atoms are in [0,iw-1]; changed dihedral is iw+1
+    ok = PivotBackward((p+ip),iw+1,0.2*(0.5-frand())*180./PI,iw,parms);		// +-0.1 rad, in degrees; moved atoms are in [0,iw-1]; changed dihedral is iw+1
 
     ok *= AddSidechain(p,0,iw,ip);
     
@@ -341,7 +341,7 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
     if (!parms->nohfields)
        deltaE -= GetHFields(p,parms->npol);
 
-    ok = PivotForward((p+ip),iw-1,0.2*(0.5-frand()),(p+ip)->nback-iw-1,parms);			// moved atoms are in [iw+1,nback-1]; changed dihedral of iw
+    ok = PivotForward((p+ip),iw-1,0.2*(0.5-frand())*180./PI,(p+ip)->nback-iw-1,parms);	// +-0.1 rad, in degrees; moved atoms are in [iw+1,nback-1]; changed dihedral of iw
    
     ok *= AddSidechain(p,iw,(p+ip)->nback-1,ip);
     

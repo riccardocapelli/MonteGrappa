@@ -363,17 +363,6 @@ int Rot2Polymer(int nrot_kinds, int nchains, struct s_polymer *p, struct rot_inp
 
 	fprintf(stderr,"\nAdd rotamers from rotamers library...\n");
 
-	for (i=0;i<NRESMAX;++i) CA[i] = -1;
-
-	// find main backbone atoms
-	for (ic=0;ic<nchains;++ic)
-		for (i=0;i<(p+ic)->nback;++i)
-		{
-			if (!strcmp( (((p+ic)->back)+i)->type,"N") ) { N[ (((p+ic)->back)+i)->iaa ] = (((p+ic)->back)+i)->ia; }
-			if (!strcmp( (((p+ic)->back)+i)->type,"C") ) { C[ (((p+ic)->back)+i)->iaa ] = (((p+ic)->back)+i)->ia; }
-			if (!strcmp( (((p+ic)->back)+i)->type,"CA") ) { CA[ (((p+ic)->back)+i)->iaa ] = (((p+ic)->back)+i)->ia; }
-		}
-
 	// if required, change CB
 	if (!parms->cb_pdb) SubstituteDefaultCB(p,nchains);
 
@@ -389,6 +378,18 @@ int Rot2Polymer(int nrot_kinds, int nchains, struct s_polymer *p, struct rot_inp
 				if (parms->debug>1) fprintf(stderr,"Back=%3d\taa=%s\t",i,(((p+ic)->back)+i)->aa);
 				// find which amino acid (i.e. which element of rotamer structure)
 				iaa = (((p+ic)->back)+i)->iaa;
+				if (iaa < 0 || iaa >= NATOMMAX) Error("Residue number out of range in Rot2Polymer");
+
+				// main backbone atoms of this residue in this chain (chains may number their residues alike)
+				N[iaa] = C[iaa] = CA[iaa] = -1;
+				for (k=0;k<(p+ic)->nback;++k)
+					if ((((p+ic)->back)+k)->iaa == iaa)
+					{
+						if (!strcmp( (((p+ic)->back)+k)->type,"N") ) N[iaa] = (((p+ic)->back)+k)->ia;
+						if (!strcmp( (((p+ic)->back)+k)->type,"C") ) C[iaa] = (((p+ic)->back)+k)->ia;
+						if (!strcmp( (((p+ic)->back)+k)->type,"CA") ) CA[iaa] = (((p+ic)->back)+k)->ia;
+					}
+
 				rot_kind=-1;
 				for (k=0;k<nrot_kinds;++k)
 					if (!strcmp((((p+ic)->back)+i)->aa,(r+k)->aa)) rot_kind = k;

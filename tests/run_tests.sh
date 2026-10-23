@@ -273,6 +273,15 @@ group_tools() {
 		( cd $d && $ROOT/bin/grappino ttr.in > g.log 2>&1 )
 		if grep -q "Found 32 Go contacts" $d/g.log && [ "$(awk '$1~/^[0-9]+$/ && NF==11 {print $4}' $d/ttr.pol | sort -u | wc -l)" -eq 11 ] && [ "$(awk '$1~/^[0-9]+$/ && NF==11' $d/ttr.pol | wc -l)" -eq 176 ]
 		then pass "grappino go_homo (TTR protofilament)"; else fail "grappino go_homo (TTR protofilament)" "wrong contacts or types"; fi
+
+		# all-atom model with rotamers of 16 chains numbered alike, then sidechain moves on it
+		d=$WORK/grappino_aa; mkdir -p $d; cp $DATA/ttr_protofilament.pdb $d/
+		printf "pdbfile ttr_protofilament.pdb\nrotamers\nrotfile $ROOT/lib/rotamers.lib\npdb_rot\ncb_pdb\natomtypes go_homo\nbackbone_atoms 3 N CA C\nlocked_atoms N\nimin 4\nr_hardcore 2.0\nr_native 4.5\npotential go\ngo-energy -0.2\ngo_dihedrals\ne_dih1 1.2\ne_dih3 0.4\ndebug 1\npolfile ttr.pol\npotfile ttr.pot\n" > $d/ttr.in
+		( cd $d && $ROOT/bin/grappino ttr.in > g.log 2>&1 )
+		par $d/run.par "nchains 16\nseed 1\nnstep 300\nTemp 0.5\nsidechain 1\nflip 2\necheck\nnprinttrj 1000\nnprinte 1000\nnprintlog 1000\n"
+		( cd $d && "$MG" ttr.pol ttr.pot run.par > o.log 2> e.log )
+		if [ $? -eq 0 ] && grep -q "Found 358 Go contacts" $d/g.log && ! grep -q ECHECK $d/e.log && ! grep -q "WARNING: overlap" $d/e.log
+		then pass "grappino all-atom rotamers, 16 chains"; else fail "grappino all-atom rotamers, 16 chains" "see $d"; fi
 	fi
 	if [ -x $ROOT/bin/mgp2pdb ]; then
 		d=$WORK/mgp2pdb; mkdir -p $d

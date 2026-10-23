@@ -2,7 +2,7 @@
 # whose native contacts, also between chains, are shared by all chains (go_homo)
 pdbfile         protofilament.pdb
 rotamers
-rotfile         /Users/cape/progetti/claude_montegrappa/MonteGrappa/lib/rotamers.lib
+rotfile         ../../lib/rotamers.lib
 pdb_rot                         # the conformation of the PDB is one of the rotamers
 cb_pdb                          # keep the CB of the PDB (the default CB is an achiral pseudo-CB in the backbone plane)
 atomtypes       go_homo

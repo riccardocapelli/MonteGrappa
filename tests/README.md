@@ -44,3 +44,4 @@ library differs between platforms; a different trajectory still fails.
 | `two.pol`, `two_hf.pot` | two polyalanine chains with angles and H fields |
 | `fragment.pol`, `fragment.pot` | first 30 residues of 1YPC, CA Go model |
 | `chain1100.pol`, `chain1100.pot` | 1100-residue homopolymer (cell list) |
+| `many.pol` (with `homo.pot`) | 40 homopolymer chains |

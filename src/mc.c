@@ -1217,14 +1217,15 @@ void UpdateMonomerRange(struct s_polymer *from, struct s_polymer *to, int wfrom,
  *****************************************************************************/
 void UpdateChainRanges(struct s_polymer *from, struct s_polymer *to, int nr, int *ch, int *wfrom, int *wto)
 {
-	static int l[NCHAINMAX*NRESMAX],lp[NCHAINMAX*NRESMAX];
-	static unsigned int mark[NCHAINMAX][NRESMAX],stamp=0;
-	int r,i,w,j,ntm,p,wf,wt;
+	// work arrays, grown as needed: partners found (l,lp) and marks per (chain,residue)
+	static int *l=NULL,*lp=NULL,lsize=0,nchainmark=0;
+	static unsigned int *mark=NULL,stamp=0;
+	int r,i,w,j,ntm,p,wf,wt,c;
 	struct s_back *b;
 
 	if (++stamp == 0)						// stamp wrapped around: clear marks
 	{
-		memset(mark,0,sizeof(mark));
+		if (mark) memset(mark,0,(size_t)nchainmark*NRESMAX*sizeof(unsigned int));
 		stamp = 1;
 	}
 
@@ -1239,22 +1240,56 @@ void UpdateChainRanges(struct s_polymer *from, struct s_polymer *to, int nr, int
 		{
 			b = ((from+p)->back)+w;
 			for (i=0;i<b->ncontacts;++i)
-				if (mark[(b->contacts_p)[i]][(b->contacts)[i]] != stamp)
+			{
+				c = (b->contacts_p)[i];
+				if (c >= nchainmark)					// a chain not seen yet: enlarge the marks
 				{
-					mark[(b->contacts_p)[i]][(b->contacts)[i]] = stamp;
+					mark = (unsigned int *) realloc(mark,(size_t)(c+1)*NRESMAX*sizeof(unsigned int));
+					if (!mark) Error("Cannot allocate in UpdateChainRanges");
+					memset(mark+(size_t)nchainmark*NRESMAX,0,(size_t)(c+1-nchainmark)*NRESMAX*sizeof(unsigned int));
+					nchainmark = c+1;
+				}
+				if (mark[(size_t)c*NRESMAX+(b->contacts)[i]] != stamp)
+				{
+					mark[(size_t)c*NRESMAX+(b->contacts)[i]] = stamp;
+					if (ntm >= lsize)
+					{
+						lsize = 2*lsize + 1024;
+						l = (int *) realloc(l,lsize*sizeof(int));
+						lp = (int *) realloc(lp,lsize*sizeof(int));
+						if (!l || !lp) Error("Cannot allocate in UpdateChainRanges");
+					}
 					l[ntm] = (b->contacts)[i];
-					lp[ntm] = (b->contacts_p)[i];
+					lp[ntm] = c;
 					++ntm;
 				}
+			}
 			b = ((to+p)->back)+w;
 			for (i=0;i<b->ncontacts;++i)
-				if (mark[(b->contacts_p)[i]][(b->contacts)[i]] != stamp)
+			{
+				c = (b->contacts_p)[i];
+				if (c >= nchainmark)					// a chain not seen yet: enlarge the marks
 				{
-					mark[(b->contacts_p)[i]][(b->contacts)[i]] = stamp;
+					mark = (unsigned int *) realloc(mark,(size_t)(c+1)*NRESMAX*sizeof(unsigned int));
+					if (!mark) Error("Cannot allocate in UpdateChainRanges");
+					memset(mark+(size_t)nchainmark*NRESMAX,0,(size_t)(c+1-nchainmark)*NRESMAX*sizeof(unsigned int));
+					nchainmark = c+1;
+				}
+				if (mark[(size_t)c*NRESMAX+(b->contacts)[i]] != stamp)
+				{
+					mark[(size_t)c*NRESMAX+(b->contacts)[i]] = stamp;
+					if (ntm >= lsize)
+					{
+						lsize = 2*lsize + 1024;
+						l = (int *) realloc(l,lsize*sizeof(int));
+						lp = (int *) realloc(lp,lsize*sizeof(int));
+						if (!l || !lp) Error("Cannot allocate in UpdateChainRanges");
+					}
 					l[ntm] = (b->contacts)[i];
-					lp[ntm] = (b->contacts_p)[i];
+					lp[ntm] = c;
 					++ntm;
 				}
+			}
 		}
 	}
 
@@ -1876,339 +1911,219 @@ int MoveRotation(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *
 
 
 /*****************************************************************************
- Returns 1 if the chains in members[0..n-1] have no contact with other chains
+ Clusters of chains: connected components of the graph whose edges are the
+ contacts between different chains (a chain without such contacts is a
+ cluster by itself). Returns the number of clusters; the chains of cluster
+ k are member[start[k]..start[k+1]-1].
  *****************************************************************************/
-static int ClusterIsIsolated(struct s_polymer *p, int *members, int n)
+static int FindClusters(struct s_polymer *p, int npol, int *member, int *start, int *cluster_of)
 {
-	int i,k,ic,ip,incluster[NCHAINMAX];
+	int ic,q,i,k,c2,head,tail=0,nc=0;
+	struct s_back *b;
 
-	for (ic=0;ic<NCHAINMAX;++ic) incluster[ic]=0;
-	for (i=0;i<n;++i) incluster[members[i]]=1;
+	for (ic=0;ic<npol;++ic) cluster_of[ic] = -1;
+
+	for (ic=0;ic<npol;++ic)
+		if (cluster_of[ic] < 0)
+		{
+			start[nc] = tail;
+			cluster_of[ic] = nc;
+			member[tail++] = ic;
+			for (head=start[nc];head<tail;++head)				// breadth-first visit
+			{
+				q = member[head];
+				for (i=0;i<(p+q)->nback;++i)
+				{
+					b = ((p+q)->back)+i;
+					for (k=0;k<b->ncontacts;++k)
+					{
+						c2 = (b->contacts_p)[k];
+						if (cluster_of[c2] < 0)
+						{
+							cluster_of[c2] = nc;
+							member[tail++] = c2;
+						}
+					}
+				}
+			}
+			nc++;
+		}
+	start[nc] = tail;
+	return nc;
+}
+
+/*****************************************************************************
+ Returns 1 if the chains of cluster ic have no contact with other chains
+ *****************************************************************************/
+static int ClusterIsIsolated(struct s_polymer *p, int *members, int n, int *cluster_of, int ic)
+{
+	int i,ires,k;
+	struct s_back *b;
 
 	for (i=0;i<n;++i)
-	{
-		ip = members[i];
-		for (ic=0;ic<(p+ip)->nback;++ic)
-			for (k=0;k<(((p+ip)->back)+ic)->ncontacts;++k)
-				if (!incluster[((((p+ip)->back)+ic)->contacts_p)[k]]) return 0;
-	}
+		for (ires=0;ires<(p+members[i])->nback;++ires)
+		{
+			b = ((p+members[i])->back)+ires;
+			for (k=0;k<b->ncontacts;++k)
+				if (cluster_of[(b->contacts_p)[k]] != ic) return 0;
+		}
 	return 1;
 }
 
-
-int MoveClusterCoM(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,
-                  int istep, int debug, double t, FILE *fproc, int iproc)
+/*****************************************************************************
+ Periodic box: shift the chains of a cluster by box vectors (which does not
+ change any energy) so that each one is at the image nearest to the chain
+ through which it is reached. Returns 0 if the cluster wraps around the box
+ (e.g. a fibril through the periodic boundary), which then cannot be rotated.
+ *****************************************************************************/
+static int UnwrapCluster(struct s_polymer *p, int *members, int n, int *cluster_of, int ic, double L)
 {
-	int ip,ok,ic,jc;
-	int k,i;//,ind;
-	int ctrl, old_ctrl;
-	int ncluster,ind_cluster,cont,sum;
-	double dx,dy,dz,deltaE;
-	int adjacency[NCHAINMAX][NCHAINMAX];
-	int cluster[NCHAINMAX][NCHAINMAX];
-	int avector[NCHAINMAX];
-	int npol_cluster[NCHAINMAX];
-	int wfrom[NCHAINMAX],wto[NCHAINMAX];
+	int head,i,k,a,c2,placed[n],idx;
+	double dx,dy,dz;
+	struct s_back *b,*b2;
 
-	for(ic=0;ic<NCHAINMAX;++ic)
+	for (i=0;i<n;++i) placed[i] = (i==0);
+	for (head=0;head<n;++head)
 	{
-		for(jc=0;jc<NCHAINMAX;++jc)
-	    {
-			adjacency[ic][jc]=0;
-			cluster[ic][jc]=-1;
-		}
-	}
-
-	for(ic=0;ic<parms->npol;++ic)
-	{
-		for (i=0;i<(p+ic)->nback;++i)
+		a = members[head];
+		if (!placed[head]) continue;
+		for (i=0;i<(p+a)->nback;++i)
 		{
-			for (k=0;k<(((p+ic)->back)+i)->ncontacts;++k)
+			b = ((p+a)->back)+i;
+			for (k=0;k<b->ncontacts;++k)
 			{
-				adjacency[ic][((((p+ic)->back)+i)->contacts_p)[k]] = 1;
-			}
-		}
-	}
-
-	cont=0;
-	ncluster=0;
-	while(1)
-	{
-		ctrl=99;
-		for(ic=0;ic<parms->npol;++ic)
-			avector[ic]=adjacency[cont][ic];
-            
-	    ind_cluster=0;
-		old_ctrl=0;
-
-		while( (old_ctrl-ctrl) != 0)
-	    {
-			old_ctrl=ctrl;
-			ctrl=0;
-			for(ic=cont;ic<parms->npol;++ic)
-			{
-				sum=0;
-				for(jc=0;jc<parms->npol;++jc)
-					{
-						sum += avector[jc]*adjacency[ic][jc];
-					}
-				if(sum!=0)
+				c2 = (b->contacts_p)[k];
+				if (cluster_of[c2] != ic || c2 == a) continue;
+				for (idx=0;members[idx]!=c2;++idx) ;
+				b2 = ((p+c2)->back)+(b->contacts)[k];
+				dx = b2->pos.x - b->pos.x;
+				dy = b2->pos.y - b->pos.y;
+				dz = b2->pos.z - b->pos.z;
+				if (!placed[idx])
 				{
-					cluster[ncluster][ind_cluster] = ic;
-					++ind_cluster;
-					++ctrl;
-					for(jc=0;jc<parms->npol;++jc)
-					{
-						if(avector[jc]+adjacency[ic][jc]>=1)
-							avector[jc]=1;
-
-						adjacency[ic][jc]=0;
-					}
+					DisplaceCoM(p,c2,-L*round(dx/L),-L*round(dy/L),-L*round(dz/L));
+					placed[idx] = 1;
 				}
+				else if (fabs(dx) > 0.5*L || fabs(dy) > 0.5*L || fabs(dz) > 0.5*L) return 0;
 			}
 		}
-
-		npol_cluster[ncluster]=ind_cluster;
-		++ncluster;
-		++cont;
-
-		for(i=cont;i<parms->npol;++i)
-	    {
-			if(adjacency[i][i] == 0)
-				++cont;
-			else
-			{
-				cont=i;
-				break;
-			}
-		}
-		if(cont==parms->npol) break;
 	}
-
-	ic = irand(ncluster);
-
-	dx = parms->dx_clm * frand() - parms->dx_clm / 2;
-	dy = parms->dx_clm * frand() - parms->dx_clm / 2;
-	dz = parms->dx_clm * frand() - parms->dx_clm / 2;
-
-	deltaE=0.;
-	for(i=0;i<npol_cluster[ic];++i)
-	{
-		ip = cluster[ic][i];
-
-		#ifdef DEBUG
-		if (debug>2) fprintf(fproc,"step=%d com ip=%d\n",istep,ip); fflush(stderr);
-		#endif
-
-		deltaE -= GetEnergyMonomerRange(p,0,(p+ip)->nback-1,ip);                                    // old energy  (iw1-1 & iw2+1 because I move their sidechains)
-		DisplaceCoM(p,ip,dx,dy,dz);
-
-		//deltaE += EnergyMonomerRange(p,pot,0,(p+ip)->nback,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);
-	    deltaE += EnergyMonomerRange(p,pot,0,(p+ip)->nback-1,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
-	}
-
-	#ifdef DEBUG
-	if (debug>2) fprintf(fproc,"deltaE=%lf\n",deltaE); fflush(stderr);
-	#endif
-
-	// a cluster which touches other chains after the move would change the
-	// cluster decomposition, making the reverse move impossible: reject it
-	if (ClusterIsIsolated(p,cluster[ic],npol_cluster[ic]))
-		ok = Metropolis(deltaE,t,p->tables);
-	else
-		ok = 0;
-
-	for(i=0;i<npol_cluster[ic];++i)
-	{
-		wfrom[i] = 0;
-		wto[i] = (p+cluster[ic][i])->nback-1;
-	}
-
-	if (ok == 0)                        // move rejected: return to the old position, contacts, etc.
-		UpdateChainRanges(oldp,p,npol_cluster[ic],cluster[ic],wfrom,wto);
-
-	else                          // move accepted
-	{
-		UpdateChainRanges(p,oldp,npol_cluster[ic],cluster[ic],wfrom,wto);		// update oldp
-		if(parms->shell==1 )            // if shells are active, update them
-			parms->ishell=1;
-		p->etot += deltaE;
-		parms->acc ++;
-
-		#ifdef DEBUG
-		if (debug>2) fprintf(fproc,"accept=%d\n",ok); fflush(stderr);
-		#endif
-	}
-
-	parms->mov ++;
-
-	if (ok == 0) return 0;
-	else return 1;
+	for (i=0;i<n;++i) if (!placed[i]) return 0;				// the visit of FindClusters reaches all of them
+	return 1;
 }
 
-
-int MoveClusterRot(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,
-                  int istep, int npol,int debug, double t, FILE *fproc, int iproc)
+/*****************************************************************************
+ Rotate the chains members[0..n-1] by dtheta (radians) around the axis idir
+ (0=x, 1=y, 2=z) through the centre of mass of their backbone atoms
+ *****************************************************************************/
+static void RotateChains(struct s_polymer *p, int *members, int n, int idir, double dtheta)
 {
-	int ip=0,ok,ic,jc;
-	int k,i;//,ind;
-	int ctrl, old_ctrl;
-	int ncluster,ind_cluster,cont,sum;
-	//double dx,dy,dz
-	double deltaE;
-	int adjacency[NCHAINMAX][NCHAINMAX];
-	int cluster[NCHAINMAX][NCHAINMAX];
-	int avector[NCHAINMAX];
-	int npol_cluster[NCHAINMAX];
-	int wfrom[NCHAINMAX],wto[NCHAINMAX];
-	double dtheta= parms->dtheta * (0.5 - frand());
+	int k,i,j,nat=0;
+	double c[3]={0,0,0},cs=cos(dtheta),sn=sin(dtheta),u,v;
+	double *x,*y;
+	struct s_back *b;
+	struct vector *r;
 
-
-
-	for(ic=0;ic<NCHAINMAX;++ic)
-	{
-		for(jc=0;jc<NCHAINMAX;++jc)
-	    {
-			adjacency[ic][jc]=0;
-			cluster[ic][jc]=-1;
+	for (k=0;k<n;++k)
+		for (i=0;i<(p+members[k])->nback;++i)
+		{
+			b = ((p+members[k])->back)+i;
+			c[0] += b->pos.x; c[1] += b->pos.y; c[2] += b->pos.z;
+			nat++;
 		}
-	}
+	for (i=0;i<3;++i) c[i] /= nat;
 
-	for(ic=0;ic<parms->npol;++ic)
-	{
-		for (i=0;i<(p+ic)->nback;++i)
-	    {
-			for (k=0;k<(((p+ic)->back)+i)->ncontacts;++k)
+	for (k=0;k<n;++k)
+		for (i=0;i<(p+members[k])->nback;++i)
+			for (j=-1;j<(((p+members[k])->back)+i)->nside;++j)	// j=-1 is the backbone atom
 			{
-				adjacency[ic][((((p+ic)->back)+i)->contacts_p)[k]] = 1;
+				r = (j<0) ? &((((p+members[k])->back)+i)->pos) : &((((((p+members[k])->back)+i)->side)+j)->pos);
+				if (idir==0)      { x = &(r->y); y = &(r->z); u = r->y - c[1]; v = r->z - c[2]; *x = c[1] + cs*u - sn*v; *y = c[2] + sn*u + cs*v; }
+				else if (idir==1) { x = &(r->z); y = &(r->x); u = r->z - c[2]; v = r->x - c[0]; *x = c[2] + cs*u - sn*v; *y = c[0] + sn*u + cs*v; }
+				else              { x = &(r->x); y = &(r->y); u = r->x - c[0]; v = r->y - c[1]; *x = c[0] + cs*u - sn*v; *y = c[1] + sn*u + cs*v; }
 			}
-		}
-	}
+}
 
-	cont=0;
-	ncluster=0;
-	while(1)
-	{
-		ctrl=99;
-		for(ic=0;ic<NCHAINMAX;++ic)
-	    {
-			avector[ic]=adjacency[cont][ic];
-		}
+/*****************************************************************************
+ Rigid translation (rot=0) or rotation (rot=1) of a cluster of chains.
+ A move after which the cluster touches other chains is rejected: it would
+ change the decomposition into clusters, making the reverse move impossible.
+ *****************************************************************************/
+static int MoveCluster(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot, double t, int rot)
+{
+	int npol=parms->npol,member[npol],start[npol+1],cluster_of[npol],wfrom[npol],wto[npol];
+	int ncluster,ic,n,i,ip,ok,idir=0,*m;
+	double dx=0,dy=0,dz=0,dtheta=0,deltaE=0.;
 
-		ind_cluster=0;
-		old_ctrl=0;
+	if (rot) dtheta = parms->dtheta * (0.5 - frand());
 
-		while(old_ctrl-ctrl != 0)
-	    {
-			old_ctrl=ctrl;
-			ctrl=0;
-			for(ic=cont;ic<parms->npol;++ic)
-			{
-				sum=0;
-				for(jc=0;jc<parms->npol;++jc)
-					sum += avector[jc]*adjacency[ic][jc];
-				if(sum!=0)
-				{
-					cluster[ncluster][ind_cluster] = ic;
-					ind_cluster++;
-					++ctrl;
-					for(jc=0;jc<parms->npol;++jc)
-					{
-						if(avector[jc]+adjacency[ic][jc]>=1) avector[jc]=1;
-						adjacency[ic][jc]=0;
-					}
-				}
-			}
-		}
-
-		npol_cluster[ncluster]=ind_cluster;
-		++ncluster;
-		++cont;
-		for(i=cont;i<parms->npol;++i)
-	    {
-			if(adjacency[i][i] == 0)
-		  	++cont;
-			else
-			{
-				cont=i;
-				break;
-			}
-		}
-		if(cont==parms->npol) break;
-	}
-
+	ncluster = FindClusters(p,npol,member,start,cluster_of);
 	ic = irand(ncluster);
-	deltaE=0.;
-
-	for(i=0;i<npol_cluster[ic];++i)
+	m = member+start[ic];
+	n = start[ic+1]-start[ic];
+	for(i=0;i<n;++i)
 	{
-		ip = cluster[ic][i];
-
-		#ifdef DEBUG
-		if (debug>2) fprintf(fproc,"step=%d com ip=%d\n",istep,ip); fflush(stderr);
-		#endif
-
-		deltaE -= GetEnergyMonomerRange(p,0,(p+ip)->nback-1,ip);                                    // old energy  (iw1-1 & iw2+1 because I move their sidechains)
-
-		// deltaE += EnergyMonomerRange(p,pot,0,(p+ip)->nback,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);
-		// deltaE += EnergyMonomerRange(p,pot,0,(p+ip)->nback,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
+		wfrom[i] = 0;
+		wto[i] = (p+m[i])->nback-1;
 	}
 
-	int idir=irand(3);
-
-	if(idir==0)
-		RotationClusterX(p,ip,dtheta,ic,cluster,npol_cluster[ic]);
-	else if(idir==1)
-		RotationClusterY(p,ip,dtheta,ic,cluster,npol_cluster[ic]);
+	if (rot)
+	{
+		idir = irand(3);
+		if (pot->boxtype=='p' && !UnwrapCluster(p,m,n,cluster_of,ic,pot->lbox))
+		{
+			UpdateChainRanges(oldp,p,n,m,wfrom,wto);			// undo the shifts
+			parms->mov ++;
+			return 0;
+		}
+		for(i=0;i<n;++i) deltaE -= GetEnergyMonomerRange(p,0,(p+m[i])->nback-1,m[i]);
+		RotateChains(p,m,n,idir,dtheta);
+		if (p->cells)							// all chains moved before their energies are computed
+			for(i=0;i<n;++i) CellsUpdateRange(p,m[i],0,(p+m[i])->nback-1);
+		for(i=0;i<n;++i)
+			deltaE += EnergyMonomerRange(p,pot,0,(p+m[i])->nback-1,m[i],npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
+	}
 	else
-		RotationClusterZ(p,ip,dtheta,ic,cluster,npol_cluster[ic]);
-
-	// all chains have moved before their energies are computed: update the cell list now
-	if (p->cells)
-		for(i=0;i<npol_cluster[ic];++i)
-			CellsUpdateRange(p,cluster[ic][i],0,(p+cluster[ic][i])->nback-1);
-
-	for(i=0;i<npol_cluster[ic];++i)
 	{
-	ip=cluster[ic][i];
-	//deltaE += EnergyMonomerRange(p,pot,0,(p+ip)->nback,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);
-	deltaE += EnergyMonomerRange(p,pot,0,(p+ip)->nback-1,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
+		dx = parms->dx_clm * frand() - parms->dx_clm / 2;
+		dy = parms->dx_clm * frand() - parms->dx_clm / 2;
+		dz = parms->dx_clm * frand() - parms->dx_clm / 2;
+		for(i=0;i<n;++i)
+		{
+			ip = m[i];
+			deltaE -= GetEnergyMonomerRange(p,0,(p+ip)->nback-1,ip);
+			DisplaceCoM(p,ip,dx,dy,dz);
+			deltaE += EnergyMonomerRange(p,pot,0,(p+ip)->nback-1,ip,npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
+		}
 	}
 
-	#ifdef DEBUG
-	if (debug>2) fprintf(fproc,"deltaE=%lf\n",deltaE); fflush(stderr);
-	#endif
-
-	// a cluster which touches other chains after the move would change the
-	// cluster decomposition, making the reverse move impossible: reject it
-	if (ClusterIsIsolated(p,cluster[ic],npol_cluster[ic]))
+	if (ClusterIsIsolated(p,m,n,cluster_of,ic))
 		ok = Metropolis(deltaE,t,p->tables);
 	else
 		ok = 0;
 
-	for(i=0;i<npol_cluster[ic];++i)
-	{
-		wfrom[i] = 0;
-		wto[i] = (p+cluster[ic][i])->nback-1;
-	}
-
 	if (ok == 0)                        // move rejected: return to the old position, contacts, etc.
-		UpdateChainRanges(oldp,p,npol_cluster[ic],cluster[ic],wfrom,wto);
-	else                          // move accepted
+		UpdateChainRanges(oldp,p,n,m,wfrom,wto);
+	else                                // move accepted
 	{
-		UpdateChainRanges(p,oldp,npol_cluster[ic],cluster[ic],wfrom,wto);		// update oldp
-		if(parms->shell==1 )            // if shells are active, update them
-			parms->ishell=1;
+		UpdateChainRanges(p,oldp,n,m,wfrom,wto);
+		if(parms->shell==1) parms->ishell=1;
 		p->etot += deltaE;
 		parms->acc ++;
-
-		#ifdef DEBUG
-		if (debug>2) fprintf(fproc,"accept=%d\n",ok); fflush(stderr);
-		#endif
 	}
-
 	parms->mov ++;
 
-	if (ok == 0) return 0;
-	else return 1;
+	return ok;
+}
+
+int MoveClusterCoM(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,
+                  unsigned long long istep, int debug, double t, FILE *fproc, int iproc)
+{
+	return MoveCluster(p,oldp,parms,pot,t,0);
+}
+
+int MoveClusterRot(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,
+                  unsigned long long istep, int npol,int debug, double t, FILE *fproc, int iproc)
+{
+	return MoveCluster(p,oldp,parms,pot,t,1);
 }

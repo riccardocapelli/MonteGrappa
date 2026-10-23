@@ -61,7 +61,6 @@
 
         #define NREPMAX		40
         #define NAAMAX		1000
-        #define NCHAINMAX	25
 
 
 	#define DEBUG_SHELL
@@ -224,8 +223,8 @@ int MoveCoM(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms
 		unsigned long long istep, int debug, double t);
 int MoveRotation(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot, unsigned long long istep, int debug, double t);
 
-int MoveClusterCoM(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,int istep, int debug, double t, FILE *fproc, int iproc);
-int MoveClusterRot(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,int istep,int npol, int debug, double t, FILE *fproc, int iproc);
+int MoveClusterCoM(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,unsigned long long istep, int debug, double t, FILE *fproc, int iproc);
+int MoveClusterRot(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,unsigned long long istep,int npol, int debug, double t, FILE *fproc, int iproc);
 
 
 
@@ -298,9 +297,6 @@ double CosAngle( struct vector B, struct vector C, struct vector D, struct s_tab
 void RotationX(struct s_polymer *p,int ip,double dtheta);
 void RotationY(struct s_polymer *p,int ip,double dtheta);
 void RotationZ(struct s_polymer *p,int ip,double dtheta);
-void RotationClusterX(struct s_polymer *p,int ip,double dtheta,int icluster,int cluster[NCHAINMAX][NCHAINMAX],int npol_cluster);
-void RotationClusterY(struct s_polymer *p,int ip,double dtheta,int icluster,int cluster[NCHAINMAX][NCHAINMAX],int npol_cluster);
-void RotationClusterZ(struct s_polymer *p,int ip,double dtheta,int icluster,int cluster[NCHAINMAX][NCHAINMAX],int npol_cluster);
 
 // potential.c
 double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms, int npol, int update, int sidechains, int debug, int iproc);

@@ -826,7 +826,6 @@ struct s_mc_parms *ReadMcParms(char *fname)
 	
 	// check compulsory data
 	if (x->npol<1) Error("no chain defined in parameter file");
-	if (x->npol>NCHAINMAX) Error("Too many chains defined in parameter file");
 	chk=-1;
 	for (i=0;i<NMOVES;++i) if ( x->movetype[i] != -1 ) chk=1;
 	if (chk==-1) Error("No move type defined");

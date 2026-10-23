@@ -182,6 +182,9 @@ group_echeck() {
 			if [ -z "$bad" ]; then echo PASS; else echo "FAIL $sys cells=$cells:$bad"; fi > $WORK/ec_result_${sys}_$cells
 		done
 	done
+	# 40 chains (the limit used to be 25), whole-chain and cluster moves only
+	mg ec_many many.pol homo.pot "nchains 40\nnosidechain\nnodihpot\nnoangpot\nTemp 1.0\nseed 3\nnstep 3000\necheck\nflip 1\npivot 5\nmovecom 5\nmoverot 5\ncomcluster 3\nrotcluster 3\nnprinttrj 100000\nnprinte 100000\nnprintlog 100000\n"
+	if [ $? -eq 0 ] && ! grep -q ECHECK $WORK/ec_many/stderr.log && sanitizer_ok $WORK/ec_many; then echo PASS; else echo "FAIL many: cluster moves"; fi > $WORK/ec_result_many_40chains
 	for r in $WORK/ec_result_*; do
 		name=$(basename $r | sed 's/^ec_result_//')
 		if [ "$(cat $r)" = PASS ]; then pass "echeck $name"; else fail "echeck $name" "$(cat $r | sed 's/^FAIL [^:]*://')"; fi

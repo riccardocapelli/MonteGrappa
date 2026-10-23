@@ -2014,7 +2014,7 @@ static void RotateChains(struct s_polymer *p, int *members, int n, int idir, dou
 static int MoveCluster(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot, double t, int rot)
 {
 	int npol=parms->npol,member[npol],start[npol+1],cluster_of[npol],wfrom[npol],wto[npol];
-	int ncluster,ic,n,i,ip,ok,idir=0,*m;
+	int ncluster,ic,n,i,ok,idir=0,*m;
 	double dx=0,dy=0,dz=0,dtheta=0,deltaE=0.;
 
 	if (rot) dtheta = parms->dtheta * (0.5 - frand());
@@ -2047,16 +2047,17 @@ static int MoveCluster(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_p
 	}
 	else
 	{
+		// all chains are displaced before any energy is computed: moving them one at a
+		// time would make them overlap with their neighbours not moved yet
 		dx = parms->dx_clm * frand() - parms->dx_clm / 2;
 		dy = parms->dx_clm * frand() - parms->dx_clm / 2;
 		dz = parms->dx_clm * frand() - parms->dx_clm / 2;
+		for(i=0;i<n;++i) deltaE -= GetEnergyMonomerRange(p,0,(p+m[i])->nback-1,m[i]);
+		for(i=0;i<n;++i) DisplaceCoM(p,m[i],dx,dy,dz);
+		if (p->cells)
+			for(i=0;i<n;++i) CellsUpdateRange(p,m[i],0,(p+m[i])->nback-1);
 		for(i=0;i<n;++i)
-		{
-			ip = m[i];
-			deltaE -= GetEnergyMonomerRange(p,0,(p+ip)->nback-1,ip);
-			DisplaceCoM(p,ip,dx,dy,dz);
-			deltaE += EnergyMonomerRange(p,pot,0,(p+ip)->nback-1,ip,npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
-		}
+			deltaE += EnergyMonomerRange(p,pot,0,(p+m[i])->nback-1,m[i],npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
 	}
 
 	if (ClusterIsIsolated(p,m,n,cluster_of,ic))

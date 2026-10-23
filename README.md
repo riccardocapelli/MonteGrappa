@@ -99,6 +99,15 @@ The tools can be compiled alone, with the commands
 	$ make mgp2pdb
 
 
+(6) Tests
+
+	$ make check          (about 20 s)
+	$ make check-asan     (memory errors, about 1.5 min)
+	$ make check-stat     (detailed balance, a few minutes)
+
+See tests/README.md.
+
+
 ================ NEW IN THIS REVISION ===================================
 
 Results:

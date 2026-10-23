@@ -1,0 +1,39 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GSL and MPI
+        run: sudo apt-get update && sudo apt-get install -y libgsl-dev libopenmpi-dev openmpi-bin
+      - name: Build
+        run: |
+          make version=STEMPERING      # compile check only: it also writes bin/montegrappa
+          make                         # serial executable used by the tests
+          make version=MPI
+          make grappino mgp2pdb mhistogram
+      - name: Tests
+        run: tests/run_tests.sh
+      - name: Tests with AddressSanitizer
+        run: make check-asan
+      - name: Detailed balance
+        run: tests/run_tests.sh stat
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GSL
+        run: brew install gsl
+      - name: Build
+        run: |
+          make version=STEMPERING
+          make
+          make grappino mgp2pdb mhistogram
+      - name: Tests
+        run: tests/run_tests.sh

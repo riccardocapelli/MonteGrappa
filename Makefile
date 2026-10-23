@@ -19,7 +19,7 @@ CC       ?= cc
 MPICC    ?= mpicc
 OPTFLAG  ?= -O2
 WARN     ?= -Wall
-CFLAGS   ?= $(OPTFLAG) -g $(WARN)
+CFLAGS   ?= $(OPTFLAG) -g -ffp-contract=off $(WARN)		# no fused multiply-add: same arithmetic on all platforms
 LDLIBS   ?= -lm
 
 GSL_PREFIX ?= $(shell gsl-config --prefix 2>/dev/null || echo /usr/local)
@@ -53,7 +53,7 @@ else ifeq ($(version),STEMPERING)
   MC_BIN    = $(BINDIR)/montegrappa
 else ifeq ($(version),ASAN)
   CCV       = $(CC)
-  CFLAGS    = -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined $(WARN)
+  CFLAGS    = -O1 -g -ffp-contract=off -fno-omit-frame-pointer -fsanitize=address,undefined $(WARN)
   LDLIBS   += -fsanitize=address,undefined
   MC_BIN    = $(BINDIR)/montegrappa_asan
 else
@@ -69,7 +69,7 @@ GRAPPINO_OBJ = $(GRAPPINO_SRC:%=obj/TOOLS/%.o)
 MGP2PDB_SRC  = mgp2pdb io memory geometry misc
 MGP2PDB_OBJ  = $(MGP2PDB_SRC:%=obj/TOOLS/%.o)
 
-.PHONY: montegrappa grappino mgp2pdb mhistogram all clean cleanobj FORCE
+.PHONY: montegrappa grappino mgp2pdb mhistogram all clean cleanobj check check-asan check-stat FORCE
 
 montegrappa: $(MC_BIN)
 
@@ -104,6 +104,19 @@ all:
 	$(MAKE) version=STEMPERING
 	$(MAKE) version=MPI
 	$(MAKE) grappino mgp2pdb mhistogram
+
+# tests (see tests/run_tests.sh)
+check:
+	$(MAKE) montegrappa grappino mgp2pdb
+	tests/run_tests.sh
+
+check-asan:
+	$(MAKE) version=ASAN
+	tests/run_tests.sh --asan errors regression echeck restart cells
+
+check-stat:
+	$(MAKE) montegrappa
+	tests/run_tests.sh stat
 
 cleanobj:
 	rm -rf obj/SERIAL obj/STEMPERING obj/MPI obj/ASAN obj/TOOLS

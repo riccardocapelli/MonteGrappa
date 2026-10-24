@@ -367,7 +367,7 @@ struct angles Cartesian2Spherical( struct vector A, struct vector B,
 struct vector Spherical2Cartesian(struct vector A, struct vector B,
                                   struct vector C, struct angles W, struct s_tables *tables, int *out)
 {
-  struct vector Z;
+  struct vector Z = {0.,0.,0.};				// returned (with *out=0) when the geometry is degenerate
   double dumb[3],sb;
   double ZR[3];
   double M[3][3];
@@ -567,7 +567,14 @@ int AddSidechain(struct s_polymer *p, int istart, int istop, int ch)
 	int i,iside,irot,ib1,ib2,ib3,out;
 //	int flag;
 	//quite slow for a small system #pragma omp parallel for private(iside,irot,ib1,ib2,ib3,b1,b2,b3,ang,out) shared(flag)
+	double e2,e2max;
+
+	if (istart < 0) istart = 0;
+	if (istop > (p+ch)->nback-1) istop = (p+ch)->nback-1;
+
 	for (i=istart;i<=istop;++i)
+	{
+		e2max = 0;
 		for (iside=0;iside<(((p+ch)->back)+i)->nside;++iside)
 		{
 			irot = (((p+ch)->back)+i)->irot;								// which is the rotamer to insert
@@ -581,7 +588,16 @@ int AddSidechain(struct s_polymer *p, int istart, int istop, int ch)
  			(((((p+ch)->back)+i)->side)+iside)->pos = Spherical2Cartesian(b1,b2,b3,ang,p->tables,&out);
 			//if (out==0) flag=0; 
 			if(out==0)	return 0;
+			e2 = Dist2( (((((p+ch)->back)+i)->side)+iside)->pos, (((p+ch)->back)+i)->pos );
+			if (e2 > e2max) e2max = e2;
 		}
+		(((p+ch)->back)+i)->ext = sqrt(e2max);					// used to skip far pairs in EnergyPair
+		if (p->cells)
+		{
+			p->cells->ext[p->cells->offset[ch]+i] = (((p+ch)->back)+i)->ext;
+			if (p->cells->active && (((p+ch)->back)+i)->ext > p->cells->extcap) p->cells->dirty = 1;
+		}
+	}
 	//if(flag==0) return flag; else return 1;
 	return 1;
 }
@@ -688,10 +704,6 @@ int Pivot(struct s_polymer *p, int iw, double dw, int ip, struct s_mc_parms *par
 /********************************************************************
  Square distance between two vectors
  ********************************************************************/
-inline double Dist2(struct vector a, struct vector b)
-{
-	return (a.x-b.x)*(a.x-b.x) + (a.y-b.y)*(a.y-b.y) + (a.z-b.z)*(a.z-b.z);
-}
 
 /*****************************************************************************
   Angle between B, C and D
@@ -714,11 +726,13 @@ double Angle( struct vector B, struct vector C, struct vector D, struct s_tables
 
   dotprod = (B.x-C.x)*(D.x-C.x) + (B.y-C.y)*(D.y-C.y) + (B.z-C.z)*(D.z-C.z);
 
+  if (BC2*length2 < EPSILON*EPSILON) return ang;	// overlapping atoms: angle undefined (*out=0)
+
   temp = dotprod/FastSqrt(BC2*length2,tables);
 
-//  if(temp >=  1) { fprintf(stderr,"temp>1 in Angle"); return ang; }
-
+  // rounding can push |temp| slightly beyond 1
   if(temp <= -1)  { ang = 180.;  }
+  else if (temp >= 1) { ang = 0.; }
   else ang = FastAcos(temp,tables);
 
   *out = 1;
@@ -919,6 +933,7 @@ void CopyPolymer(struct s_polymer *from, struct s_polymer *to, int cfrom, int ct
 		(((to+cto)->back)+i)->e_ang = (((from+cfrom)->back)+i)->e_ang;
 		(((to+cto)->back)+i)->e_dih = (((from+cfrom)->back)+i)->e_dih;
 		(((to+cto)->back)+i)->e_hfs = (((from+cfrom)->back)+i)->e_hfs;
+		(((to+cto)->back)+i)->ext = (((from+cfrom)->back)+i)->ext;
 		(((to+cto)->back)+i)->d2_next = (((from+cfrom)->back)+i)->d2_next;
 		(((to+cto)->back)+i)->d_next = (((from+cfrom)->back)+i)->d_next;
 		(((to+cto)->back)+i)->iapdb = (((from+cfrom)->back)+i)->iapdb;
@@ -1109,165 +1124,64 @@ void    RotationZ(struct s_polymer *p,int ip,double dtheta)
 
 
 
-void RotationClusterX(struct s_polymer *p,int ip,double dtheta,int icluster,int cluster[NCHAINMAX][NCHAINMAX],int npol_cluster)
+
+
+
+
+/*****************************************************************************
+ Difference between two dihedrals (degrees), folded into [-180,180]
+ *****************************************************************************/
+double DihedralDiff(double a, double b)
 {
+	double d = a - b;
 
-        double cmy=0;
-        double cmz=0;
-        int i,j,k;
-        double fact=0;
-        double y,z,ys,zs;
-
-        for(i=0;i<npol_cluster;++i)
-                fact+=(p+cluster[icluster][i])->nback;
-        fact=1./fact;
-
-
-
-        for(j=0;j<npol_cluster;++j)
-        {
-
-
-
-
-	        for(i=0;i<(p+cluster[icluster][j])->nback;++i)
-       		 {
-                	cmy+=((((p+cluster[icluster][j])->back)+i)->pos).y;
-                	cmz+=((((p+cluster[icluster][j])->back)+i)->pos).z;
-        	}
-
-	}
-
-
-        cmy=cmy*fact;
-        cmz=cmz*fact;
-
-
-
-        for(k=0;k<npol_cluster;++k)
-        {
-
-
-
-
-	        for (i=0;i<(p+cluster[icluster][k])->nback;++i)
-       		{
-                	y=((((p+cluster[icluster][k])->back)+i)->pos).y-cmy;
-                	z=((((p+cluster[icluster][k])->back)+i)->pos).z-cmz;
-                	((((p+cluster[icluster][k])->back)+i)->pos).y = cmy+(cos(dtheta)*y)-(sin(dtheta)*z);
-                	((((p+cluster[icluster][k])->back)+i)->pos).z = cmz+ (sin(dtheta)*y)+(cos(dtheta)*z);
-		
-	
-
-	                for (j=0;j<(((p+cluster[icluster][k])->back)+i)->nside;++j)
-        	        {
-                	        ys=((((((p+cluster[icluster][k])->back)+i)->side)+j)->pos).y -cmy;
-                       		zs=((((((p+cluster[icluster][k])->back)+i)->side)+j)->pos).z -cmz ;
-                        	((((((p+cluster[icluster][k])->back)+i)->side)+j)->pos).y = cmy+ (cos(dtheta)*ys)-(sin(dtheta)*zs);
-                        	((((((p+cluster[icluster][k])->back)+i)->side)+j)->pos).z = cmz+ (sin(dtheta)*ys)+(cos(dtheta)*zs);
-                	}
-        	}
-
-	}
-
-
-
+	while (d > 180.) d -= 360.;
+	while (d < -180.) d += 360.;
+	return d;
 }
 
-void RotationClusterY(struct s_polymer *p,int ip,double dtheta,int icluster,int cluster[NCHAINMAX][NCHAINMAX],int npol_cluster)
+/*****************************************************************************
+ Check that the locked (move==0) dihedrals of chain ip with index in
+ [kfrom,kto] are within tol of their reference d_next (dihedral k is defined
+ by backbone atoms k-2..k+1). tol<=0 disables the check.
+ *****************************************************************************/
+int CheckLockedDihedralRange(struct s_polymer *p, int ip, int kfrom, int kto, double tol)
 {
+	int k,out;
+	double dih;
+	struct s_back *b = (p+ip)->back;
 
-        double cmx=0;
-        double cmz=0;
-        int i,j,k;
-	double fact=0;
-        double x,z,xs,zs;
+	if (tol <= 0) return 1;
+	if (kfrom < 2) kfrom = 2;
+	if (kto > (p+ip)->nback-2) kto = (p+ip)->nback-2;
 
-        for(i=0;i<npol_cluster;++i)
-                fact+=(p+cluster[icluster][i])->nback;
-        fact=1./fact;
-
-        for(j=0;j<npol_cluster;++j)
-        {
-
-
-	        for(i=0;i<(p+cluster[icluster][j])->nback;++i)
-        	{
-                	cmx+=((((p+cluster[icluster][j])->back)+i)->pos).x;
-                	cmz+=((((p+cluster[icluster][j])->back)+i)->pos).z;
-       		}
-	}
-
-        cmx=cmx*fact;
-        cmz=cmz*fact;
-
-
-        for(k=0;k<npol_cluster;++k)
-        {
-
-
-	        for (i=0;i<(p+cluster[icluster][k])->nback;++i)
-        	{
-                	x=((((p+cluster[icluster][k])->back)+i)->pos).x-cmx;
-                	z=((((p+cluster[icluster][k])->back)+i)->pos).z-cmz;
-                	((((p+cluster[icluster][k])->back)+i)->pos).x = cmx+ (cos(dtheta)*x) + (sin(dtheta)*z);
-                	((((p+cluster[icluster][k])->back)+i)->pos).z = cmz+ (-sin(dtheta)*x)+(cos(dtheta)*z);
-
-                	for (j=0;j<(((p+cluster[icluster][k])->back)+i)->nside;++j)
-                	{
-                        	xs=((((((p+cluster[icluster][k])->back)+i)->side)+j)->pos).x-cmx ;
-                        	zs=((((((p+cluster[icluster][k])->back)+i)->side)+j)->pos).z -cmz;
-                        	((((((p+cluster[icluster][k])->back)+i)->side)+j)->pos).x = cmx+(cos(dtheta)*xs) +(sin(dtheta)*zs);
-                        	((((((p+cluster[icluster][k])->back)+i)->side)+j)->pos).z = cmz+(-sin(dtheta)*xs)+(cos(dtheta)*zs);
-                	}
-        	}	
-	}
-
+	for (k=kfrom;k<=kto;++k)
+		if ((b+k)->move == 0)
+		{
+			dih = Dihedral( (b+k-2)->pos, (b+k-1)->pos, (b+k)->pos, (b+k+1)->pos, (p+ip)->tables, &out);
+			if (out==0 || DAbs(DihedralDiff(dih,(b+k)->d_next)) > tol) return 0;
+		}
+	return 1;
 }
-void RotationClusterZ(struct s_polymer *p,int ip,double dtheta,int icluster,int cluster[NCHAINMAX][NCHAINMAX],int npol_cluster)
-{
-        double cmx=0;
-        double cmy=0;
-	double fact=0;
-        int i,j,k;
-	for(i=0;i<npol_cluster;++i)
-		fact+=(p+cluster[icluster][i])->nback;
-        fact=1./fact;
-        double x,y,xs,ys;
 
-	for(j=0;j<npol_cluster;++j)
+/*****************************************************************************
+ Check that the bond angles of chain ip centred on backbone atoms in
+ [kfrom,kto] are within tol of their reference a_next. tol<=0 disables it.
+ *****************************************************************************/
+int CheckAngleRange(struct s_polymer *p, int ip, int kfrom, int kto, double tol)
+{
+	int k,out;
+	double ang;
+	struct s_back *b = (p+ip)->back;
+
+	if (tol <= 0) return 1;
+	if (kfrom < 1) kfrom = 1;
+	if (kto > (p+ip)->nback-2) kto = (p+ip)->nback-2;
+
+	for (k=kfrom;k<=kto;++k)
 	{
-        	for(i=0;i<(p+cluster[icluster][j])->nback;++i)
-        	{
-                	cmx+=((((p+cluster[icluster][j])->back)+i)->pos).x;
-                	cmy+=((((p+cluster[icluster][j])->back)+i)->pos).y;
-        	}
+		ang = Angle( (b+k-1)->pos, (b+k)->pos, (b+k+1)->pos, (p+ip)->tables, &out);
+		if (out==0 || DAbs(ang - (b+k)->a_next) > tol) return 0;
 	}
-
-        cmx=cmx*fact;
-        cmy=cmy*fact;
-
-	for(k=0;k<npol_cluster;++k)
-	{
-        	for (i=0;i<(p+cluster[icluster][k])->nback;++i)
-        	{	
-                	x=((((p+cluster[icluster][k])->back)+i)->pos).x-cmx;
-                	y=((((p+cluster[icluster][k])->back)+i)->pos).y-cmy;
-                	((((p+cluster[icluster][k])->back)+i)->pos).x = cmx+(cos(dtheta)*x) - (sin(dtheta)*y);
-                	((((p+cluster[icluster][k])->back)+i)->pos).y = cmy+(sin(dtheta)*x)+(cos(dtheta)*y);
-
-                	for (j=0;j<(((p+cluster[icluster][k])->back)+i)->nside;++j)
-                	{
-                         	xs=((((((p+cluster[icluster][k])->back)+i)->side)+j)->pos).x -cmx;
-                         	ys=((((((p+cluster[icluster][k])->back)+i)->side)+j)->pos).y -cmy;
-                         	((((((p+cluster[icluster][k])->back)+i)->side)+j)->pos).x =cmx+(cos(dtheta)*xs )-( sin(dtheta)*ys);
-                         	((((((p+cluster[icluster][k])->back)+i)->side)+j)->pos).y = cmy+(sin(dtheta)*xs)+(cos(dtheta)*ys);
-                	}
-
-        	}
-
-	}
-
-
+	return 1;
 }
-

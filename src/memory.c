@@ -296,7 +296,7 @@ struct s_potential *AlloPotential(int natoms, int ntypes, int noangpot, int nodi
                   *((x->dih0)+i) = (int *) calloc(2,sizeof(int));
                   if (!(*((x->dih0)+i))) Error("Cannot allocate dih0 in potential structure");
                   *((x->ab_propensity)+i) = (double *) calloc(NAAMAX,sizeof(double));
-                  if (!(*((x->sigma)+i))) Error("Cannot allocate ab-propensity in potential structure");
+                  if (!(*((x->ab_propensity)+i))) Error("Cannot allocate ab-propensity in potential structure");
                   for (k=0;k<2;++k)
                   {
                         (x->sigma)[i][k] = 0;

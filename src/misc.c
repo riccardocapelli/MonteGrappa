@@ -35,6 +35,8 @@
  *      Author: guido
  */
 
+#include <stdint.h>
+#include <unistd.h>
 #include "montegrappa.h"
 #include <time.h>
 
@@ -44,41 +46,112 @@
 /*****************************************************************************
  Dumb generator of integer random numbers
  *****************************************************************************/
-int irand(int r)
-{
-  int i;
+/*****************************************************************************
+ Random numbers: xoshiro256** (D. Blackman, S. Vigna, 2018), seeded with
+ splitmix64. Each MPI replica uses its own stream, separated from the others
+ by 2^128 numbers (jump), so streams never overlap. The state can be saved
+ and restored for exact restarts.
+ *****************************************************************************/
+static uint64_t rng_s[4];
 
-  i=(int)(rand() / (((double)RAND_MAX + 1)/ r)); 
-  return i;
+static inline uint64_t rotl(const uint64_t x, int k)
+{
+	return (x << k) | (x >> (64 - k));
 }
 
-/*****************************************************************************
- Dumb generator of double random numbers
- *****************************************************************************/
+static uint64_t RNGNext(void)
+{
+	const uint64_t result = rotl(rng_s[1] * 5, 7) * 9;
+	const uint64_t t = rng_s[1] << 17;
+
+	rng_s[2] ^= rng_s[0];
+	rng_s[3] ^= rng_s[1];
+	rng_s[1] ^= rng_s[2];
+	rng_s[0] ^= rng_s[3];
+	rng_s[2] ^= t;
+	rng_s[3] = rotl(rng_s[3], 45);
+
+	return result;
+}
+
+// equivalent to 2^128 calls to RNGNext
+static void RNGJump(void)
+{
+	static const uint64_t JUMP[] = { 0x180ec6d33cfd0aba, 0xd5a61266f0c9392c, 0xa9582618e03fc9aa, 0x39abdc4529b1661c };
+	uint64_t s0=0, s1=0, s2=0, s3=0;
+	int i,b;
+
+	for (i=0;i<4;++i)
+		for (b=0;b<64;++b)
+		{
+			if (JUMP[i] & UINT64_C(1) << b)
+			{
+				s0 ^= rng_s[0];
+				s1 ^= rng_s[1];
+				s2 ^= rng_s[2];
+				s3 ^= rng_s[3];
+			}
+			RNGNext();
+		}
+	rng_s[0] = s0; rng_s[1] = s1; rng_s[2] = s2; rng_s[3] = s3;
+}
+
+static uint64_t SplitMix64(uint64_t *x)
+{
+	uint64_t z = (*x += UINT64_C(0x9e3779b97f4a7c15));
+	z = (z ^ (z >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+	z = (z ^ (z >> 27)) * UINT64_C(0x94d049bb133111eb);
+	return z ^ (z >> 31);
+}
+
+void SeedRNG(long seed, int stream)
+{
+	uint64_t x = (uint64_t) seed;
+	int i;
+
+	for (i=0;i<4;++i) rng_s[i] = SplitMix64(&x);
+	for (i=0;i<stream;++i) RNGJump();
+}
+
+void GetRNGState(unsigned long long state[4])
+{
+	int i;
+	for (i=0;i<4;++i) state[i] = rng_s[i];
+}
+
+void SetRNGState(unsigned long long state[4])
+{
+	int i;
+	for (i=0;i<4;++i) rng_s[i] = state[i];
+}
+
+// uniform in [0,1) with 53 random bits
 double frand()
 {
-  double q;
-
-  q=(double) rand()/(RAND_MAX+1.0);
-  return q;
+	return (RNGNext() >> 11) * 0x1.0p-53;
 }
 
-/*****************************************************************************
- Initialize random number with seed (-1 to use computer time)
- *****************************************************************************/
-long Randomize(int n)
+// uniform integer in [0,r)
+int irand(int r)
 {
-  int i;
+	if (r<=0) return 0;
+	return (int) (frand() * r);
+}
 
-  if (n==-1)
-  {
-	  n = (time(0) - 760650080) % 3600; 
-	  fprintf(stderr,"Random seed = %d\n",n);
-  }
- 
-  for (i=0;i<n;++i) irand(i); 
+// a seed from the clock, for seed=-1
+long TimeSeed(void)
+{
+	long n = (long) ((time(0) ^ ((long) getpid() << 16)) & 0x7fffffff);
+	fprintf(stderr,"Random seed = %ld\n",n);
+	return n;
+}
 
-  return n;
+// seed the generator with stream "stream" (the MPI rank) and return the seed
+long Randomize(long n, int stream)
+{
+	if (n==-1) n = TimeSeed();
+	SeedRNG(n,stream);
+	return n;
 }
 
 /*****************************************************************************
@@ -196,18 +269,6 @@ void MatrixVectorProduct(double T[][3], struct vector in, struct vector *out)
 	out->x = T[0][0] * in.x + T[0][1] * in.y + T[0][2] * in.z;
 	out->y = T[1][0] * in.x + T[1][1] * in.y + T[1][2] * in.z;
 	out->z = T[2][0] * in.x + T[2][1] * in.y + T[2][2] * in.z;
-}
-
-int Abs(int x)
-{
-	if (x>=0) return x;
-	return -x;
-}
-
-double DAbs(double x)
-{
-	if (x>=0) return x;
-	return -x;
 }
 
 /*****************************************************************************

@@ -79,6 +79,7 @@ void FreeFragment(struct s_polymer *fragment,struct s_mc_parms *parms)
 {
 
 	int i;
+	if (!fragment) return;
 	for(i=0;i<parms->npol;++i)
         {
 	        FreeDoubleMatrix((fragment+i)->A,parms->nmul_local);
@@ -146,46 +147,8 @@ void TransposedMatOnVect( double **Mat, double *vect, double *risu, int n)
       return;
 }
 
-double Gauss(long *idum, double mean, double sigma)
-{
- static int iset=0;
- static double gset;
- double fac, r, v1, v2;
-
- if (iset==0)
-   {
-    do {
-        v1 = 2.0 * drand48() - 1.0;
-        v2 = 2.0 * drand48() - 1.0;
-                                       /** v1 = 2.0 * drand48() - 1.0;      
-                                           v2 = 2.0 * drand48() - 1.0; **/
-              r = v1*v1 + v2*v2;
-       }
-    while(r >= 1.0 || r == 0.0);
-    fac = sqrt(-2.0*log(r)/r);
-    gset = v1*fac;
-    iset = 1;
-    return(v2*fac*sigma + mean);
-   }
- else
-   {
-    iset = 0;
-    return (gset*sigma + mean);
-   }
-
-}
 
 
-int Gaussian_Angles(double *angles,int n)
-{
-	int i;
-
-      	for(i=0;i<n;i++)
-	  angles[i]=Gauss((long*)42,0.0,1.0);	 	
-
-	return 0;
-
-}
 
 void MatA( double **A, double **G, int dim,double a,double b)
 {
@@ -230,43 +193,13 @@ void Cholesky_2( double **L, double **A, int dim)
       return;
 }
       
-void CopyBack(struct s_back *from, struct s_back *to)
-{
-      (to)->nside=(from)->nside;
-      
-      (to->pos).x = (from->pos).x;
-      (to->pos).y = (from->pos).y;
-      (to->pos).z = (from->pos).z;
-      (to)->move=(from)->move;
-      strncpy(to->type,from->type,5);
-  
-}
-
-
-void CopyFragment(struct s_polymer *p,struct s_polymer *f,int iw,int natom_fragment,int ip)
-{     
-        int i;
-
-	for(i=0;i<natom_fragment;i++)
-        	CopyBack((((p+ip)->back)+iw+i), (((f+ip)->back)+i));
-       
-}
 
 
 
 
 
-int B_Metropolis(double deltaE,double temp,double WN,double WD,struct s_tables *t)
-{
-	if (deltaE<=0)
-        	return 1;
-			
-	if(frand()<(WN/WD)*FastExp(-deltaE/temp,t))
-	    	return 1;
-      	
 
-     return 0;
-}
+
 
 
 
@@ -275,258 +208,78 @@ int B_Metropolis(double deltaE,double temp,double WN,double WD,struct s_tables *
 
 
 
-int CheckDistance(struct s_polymer *p,int ip,int iw,int nmul){
-  
-  double distance=Dist2( (((p+ip)->back)+(iw+nmul-1))->pos,(((p+ip)->back)+(iw+nmul))->pos );
-  double d2next=( ( (p+ip)->back)+iw+nmul-1)->d2_next;
-
-  if( DAbs(distance-d2next)<0.05)
-    return 1;
-
-  else return 0; 
-  
-}
-
-int CheckAngles(struct s_polymer *p,int ip,int iw,int nmul){
-
-  double angle;
-  int out;
 
 
-  angle=Angle( (((p+ip)->back)+iw+nmul-2)->pos, (((p+ip)->back)+iw+nmul-1)->pos, (((p+ip)->back)+iw+nmul)->pos,p->tables,&out);
- 
-  if(DAbs(angle-(((p+ip)->back)+iw+nmul-1)->a_next) > 2.0) return 0;
-  
-  
-  angle=Angle( (((p+ip)->back)+iw+nmul-1)->pos, (((p+ip)->back)+iw+nmul)->pos, (((p+ip)->back)+iw+nmul+1)->pos,p->tables,&out);
-  
-  if ( DAbs(angle-(((p+ip)->back)+iw+nmul)->a_next) > 2.0) return 0;  
-
-  else return 1; 
-}
-
-int CheckDihedral(struct s_polymer *p,int ip,int iw,int nmul){
-
-  double dihedral;
-  double dihcheck;
-  int out;
-  
-  if((((p+ip)->back)+iw+nmul-1)->move==0){
-
-    dihedral=Dihedral( (((p+ip)->back)+iw+nmul-3)->pos, (((p+ip)->back)+iw+nmul-2)->pos, (((p+ip)->back)+iw+nmul-1)->pos, (((p+ip)->back)+iw+nmul)->pos, p->tables, &out );
-    dihcheck=(((p+ip)->back)+iw+nmul-1)->d_next;
-
-  }
-  else if((((p+ip)->back)+iw+nmul-2)->move==0){
 
 
-    dihedral=Dihedral( (((p+ip)->back)+iw+nmul-1)->pos, (((p+ip)->back)+iw+nmul)->pos, (((p+ip)->back)+iw+nmul+1)->pos, (((p+ip)->back)+iw+nmul+2)->pos, p->tables, &out );
-    dihcheck=(((p+ip)->back)+iw+nmul+1)->d_next;
-
-  
-    
-  }
-  else if((((p+ip)->back)+iw+nmul-3)->move==0){
 
 
-     dihedral=Dihedral( (((p+ip)->back)+iw+nmul-2)->pos, (((p+ip)->back)+iw+nmul-1)->pos, (((p+ip)->back)+iw+nmul)->pos, (((p+ip)->back)+iw+nmul+1)->pos, p->tables, &out );
-     dihcheck=(((p+ip)->back)+iw+nmul)->d_next;
-    
-  }
-  else return 1;
-  
-  if( DAbs( DAbs(dihedral)-DAbs(dihcheck) ) > 2.0 ) return 0;
-  else return 1;
-  
-}
 
 
-/********************************************************************
- 
- As PivotForward (geometry.c) :
- Pivot n atoms after iw of dih dw (moves from iw+2 on)
- affecting dihedral of iw+1
- 
- pivots using initial coordinates of polymer p
- new coordinates on the fragment 
- p coordinates unchanged
- ********************************************************************/
-int PivotForwardOnFragment(struct s_polymer *p,struct s_polymer *fragment, int iw, double dw, int n, struct s_mc_parms *parms)
+
+
+
+
+	  
+/*****************************************************************************
+ Biased Gaussian steps (Favrin, Irbaeck, Sjunnesson, J Chem Phys 114 (2001) 8154)
+
+ The free dihedrals kd[0..nang-1] of the segment [iw,iw+nmul-1] are changed
+ by dphi ~ det(L) exp(-1/2 dphi^T A dphi), A = L L^T = a/2 (1 + b G), where
+ G_ij = sum_e dr_e/dphi_i . dr_e/dphi_j over the three last moved atoms
+ iw+nmul-3..iw+nmul-1, which are bound to the fixed rest of the chain.
+ Dihedral k is the rotation around the bond (k-1,k), which moves the atoms
+ k+1..iw+nmul-1 (PivotForward(k-1)); angles are in degrees.
+ *****************************************************************************/
+static void BGS_GMatrix(struct s_polymer *p, int ip, int iw, int nmul, int *kd, int nang, double **G)
 {
-	
-	int i,ifrag;
-	struct vector C,V,U,W;
-	double norm,inv_norm,M[3][3],cw,sw,ocw;
+	int m,n,e,c;
+	double der[nang][3][3],norm;
+	struct vector ax,r;
+	struct s_back *b = (p+ip)->back;
 
-	#ifdef DEBUG
-	if (iw+n+1 >= p->nback) Error("attempting to pivot beyond the end of the chain");
-	#endif
-
-	// the pivoting atom
-	C.x = (((p->back)+iw)->pos).x;
-	C.y = (((p->back)+iw)->pos).y;
-	C.z = (((p->back)+iw)->pos).z;
-
-	// the normalized vector around which to pivot
-	V.x = (((p->back)+iw+1)->pos).x - C.x;
-	V.y = (((p->back)+iw+1)->pos).y - C.y;
-	V.z = (((p->back)+iw+1)->pos).z - C.z;
-
-	norm = FastSqrt(Norm2(V),p->tables);
-	if (norm<EPSILON) return 0; 		//PARANOID
-	inv_norm = 1. / norm;
-	if (inv_norm<EPSILON) return 0; 	//PARANOID
-	V.x *= inv_norm;
-	V.y *= inv_norm;
-	V.z *= inv_norm;
-
-
-	// the rotation matrix
-	cw = FastCos(dw,p->tables);
-	sw = FastSin(dw,p->tables);
-	ocw = 1. - cw;
-
-	M[0][0] = V.x * V.x * ocw + cw;
-	M[0][1] = V.x * V.y * ocw + V.z * sw;
-	M[0][2] = V.x * V.z * ocw - V.y * sw;
-
-	M[1][0] = V.x * V.y * ocw - V.z * sw;
-	M[1][1] = V.y * V.y * ocw + cw;
-	M[1][2] = V.y * V.z * ocw + V.x * sw;
-
-	M[2][0] = V.x * V.z * ocw + V.y * sw;
-	M[2][1] = V.y * V.z * ocw - V.x * sw;
-	M[2][2] = V.z * V.z * ocw + cw;
-	
-	
-
-        ifrag=0;
-	for (i=iw+2;i<iw+2+n;++i)
+	for (m=0;m<nang;++m)
 	{
+		ax.x = (b+kd[m])->pos.x - (b+kd[m]-1)->pos.x;
+		ax.y = (b+kd[m])->pos.y - (b+kd[m]-1)->pos.y;
+		ax.z = (b+kd[m])->pos.z - (b+kd[m]-1)->pos.z;
+		norm = sqrt(Norm2(ax)) * 180. / PI;			// derivative per degree
+		ax.x /= norm; ax.y /= norm; ax.z /= norm;
 
-		U.x = (((p->back)+i)->pos).x - C.x;
-		U.y = (((p->back)+i)->pos).y - C.y;
-		U.z = (((p->back)+i)->pos).z - C.z;
-
-		// rotate
-		W.x = M[0][0] * U.x + M[1][0] * U.y + M[2][0] * U.z;
-		W.y = M[0][1] * U.x + M[1][1] * U.y + M[2][1] * U.z;
-		W.z = M[0][2] * U.x + M[1][2] * U.y + M[2][2] * U.z;
-
-		
-		(((fragment)->back)+ifrag)->pos.x = W.x + C.x;
-		(((fragment)->back)+ifrag)->pos.y = W.y + C.y;
-		(((fragment)->back)+ifrag)->pos.z = W.z + C.z;
-   
-		ifrag++;
-	  
+		for (e=0;e<3;++e)
+		{
+			if (iw+nmul-3+e < kd[m]+1)				// atom not moved by this dihedral
+			{
+				for (c=0;c<3;++c) der[m][e][c] = 0.;
+				continue;
+			}
+			r.x = (b+iw+nmul-3+e)->pos.x - (b+kd[m])->pos.x;
+			r.y = (b+iw+nmul-3+e)->pos.y - (b+kd[m])->pos.y;
+			r.z = (b+iw+nmul-3+e)->pos.z - (b+kd[m])->pos.z;
+			der[m][e][0] = ax.y * r.z - ax.z * r.y;
+			der[m][e][1] = ax.z * r.x - ax.x * r.z;
+			der[m][e][2] = ax.x * r.y - ax.y * r.x;
+		}
 	}
-	
 
-	return 1;
+	for (m=0;m<nang;++m)
+		for (n=0;n<nang;++n)
+		{
+			G[m][n] = 0.;
+			for (e=0;e<3;++e)
+				for (c=0;c<3;++c)
+					G[m][n] += der[m][e][c] * der[n][e][c];
+		}
 }
 
-
-int G_Matrix(struct s_polymer *fragment,struct s_polymer *p,int ip,int iw,int nmul,int nang,struct s_mc_parms *parms)
+/*****************************************************************************
+ Weight of the proposal, given g = L^T dphi: det(L) exp(-|g|^2/2)
+ *****************************************************************************/
+static double BGS_Weight(double **L, double *g, int nang)
 {
-  int i,j,l;
-  
-  double x1,y1,z1,x2,y2,z2,x3,y3,z3;
-  double deriv1[nang][3],deriv2[nang][3],deriv3[nang][3];
-  double fact,dw;
-  
-  
-  x1=(((fragment+ip)->back)+nmul-3)->pos.x;
-  y1=(((fragment+ip)->back)+nmul-3)->pos.y;
-  z1=(((fragment+ip)->back)+nmul-3)->pos.z;
-  
-  x2=(((fragment+ip)->back)+nmul-2)->pos.x;
-  y2=(((fragment+ip)->back)+nmul-2)->pos.y;
-  z2=(((fragment+ip)->back)+nmul-2)->pos.z;
-  
-  x3=(((fragment+ip)->back)+nmul-1)->pos.x;
-  y3=(((fragment+ip)->back)+nmul-1)->pos.y;
-  z3=(((fragment+ip)->back)+nmul-1)->pos.z;
-  
- 
-  
-
-  dw=2.0;
-  fact=1.0/dw;
-
-  j=0;
-  int k=0;
-  for(i=iw;i<iw+nmul;++i)
-  {
-    
-    
-    
-    k++;
-    if ( (((p+ip)->back)+i)->move == 0 )  
-      continue; 
-     
-    int nmoved=(nmul-2)-(k)+2;
-
-    PivotForwardOnFragment((p+ip),(fragment+ip),i-1,dw,nmoved,parms);
-
-
-
-    if ( 2 < nmoved)
-    {
-      deriv1[j][0]=(((( (fragment+ip)->back)+parms->nmul_local-3-k)->pos.x )-x1)*fact;
-      deriv1[j][1]=(((( (fragment+ip)->back)+parms->nmul_local-3-k)->pos.y )-y1)*fact;
-      deriv1[j][2]=(((( (fragment+ip)->back)+parms->nmul_local-3-k)->pos.z )-z1)*fact;
-    }
-    
-    else
-    {
-      deriv1[j][0]=0;
-      deriv1[j][1]=0;
-      deriv1[j][2]=0;           
-    }
-    
-    if( 1 < nmoved)
-    {
-    deriv2[j][0]=(((( (fragment+ip)->back)+parms->nmul_local-3-k+1)->pos.x )-x2)*fact;
-    deriv2[j][1]=(((( (fragment+ip)->back)+parms->nmul_local-3-k+1)->pos.y )-y2)*fact;
-    deriv2[j][2]=(((( (fragment+ip)->back)+parms->nmul_local-3-k+1)->pos.z )-z2)*fact;
-    }
-
-    else
-    {
-     deriv2[j][0]=0;
-     deriv2[j][1]=0;
-     deriv2[j][2]=0;
-    }
-    
-    deriv3[j][0]=(((( (fragment+ip)->back)+parms->nmul_local-3-k+2)->pos.x )-x3)*fact;
-    deriv3[j][1]=(((( (fragment+ip)->back)+parms->nmul_local-3-k+2)->pos.y )-y3)*fact;
-    deriv3[j][2]=(((( (fragment+ip)->back)+parms->nmul_local-3-k+2)->pos.z )-z3)*fact;    
-    
-     
-    j++;    
-    
-    
-  }
-  
-   for(i=0;i<j;++i)
-     for(k=0;k<j;++k)
-       (fragment+ip)->G[i][k]=0.;
-    
-  
-  for(i=0;i<j;++i)
-    for(k=0;k<j;++k)
-      for(l=0;l<3;++l)      			                  
-        (fragment+ip)->G[i][k]+=(deriv1[i][l]*deriv1[k][l])+(deriv2[i][l]*deriv2[k][l])+(deriv3[i][l]*deriv3[k][l]);
-  
-  return 0; 
+	return DetTriang(L,nang) * exp(-0.5*Squared_n_Norma(g,nang));
 }
 
-
-
-
-
-	  
 int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct s_polymer *fragment,struct s_potential *pot,int nmul,struct s_mc_parms *parms, double t)
 {
   
@@ -537,16 +290,16 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
 
   if (iw < nmul+3)
   {
-    if ( (((p+ip)->back)+iw+1)->move == 0 ) { parms->mov++; return 0;}
+    if ( (((p+ip)->back)+iw+1)->move == 0 ) { return 0;}
 
     deltaE = -GetEnergyMonomerRange(p,0,iw,ip);							// two-body energy
   
     if (!parms->nodihpot)
       deltaE -= (((p+ip)->back)+iw+1)->e_dih;							// old dihedral energy
     if (!parms->nohfields)
-      deltaE -= GetHFields(p,ip);										// old H fields energy
+      deltaE -= GetHFields(p,parms->npol);										// old H fields energy
   
-    ok = PivotBackward((p+ip),iw+1,0.2*(0.5-frand()),iw,parms);							// moved atoms are in [0,iw-1]; changed dihedral is iw+1
+    ok = PivotBackward((p+ip),iw+1,0.2*(0.5-frand())*180./PI,iw,parms);		// +-0.1 rad, in degrees; moved atoms are in [0,iw-1]; changed dihedral is iw+1
 
     ok *= AddSidechain(p,0,iw,ip);
     
@@ -555,8 +308,7 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
     if (!parms->nodihpot)
       deltaE += EnergyDihedrals(p,pot,iw+1,ip,1);
     if (!parms->nohfields)
-	for(i=0;i<(p+ip)->nback;++i)
-          deltaE += EnergyHFields(p,pot,parms,i,ip,1);
+	deltaE += EnergyHFieldsAll(p,pot,parms);
 
     ok *= Metropolis(deltaE,t,p->tables);
 
@@ -580,16 +332,16 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
   
   else if ( iw > ( (p+ip)->nback -3 -nmul   )  ) // do small forward
   { 
-     if ( (((p+ip)->back)+iw)->move == 0 ) { parms->mov++; return 0; }
+     if ( (((p+ip)->back)+iw)->move == 0 ) { return 0; }
 
      deltaE=-GetEnergyMonomerRange(p,iw,(p+ip)->nback-1,ip);
      
      if (!parms->nodihpot)
         deltaE -= (((p+ip)->back)+iw)->e_dih;		
     if (!parms->nohfields)
-       deltaE -= GetHFields(p,ip);
+       deltaE -= GetHFields(p,parms->npol);
 
-    ok = PivotForward((p+ip),iw-1,0.2*(0.5-frand()),(p+ip)->nback-iw-1,parms);			// moved atoms are in [iw+1,nback-1]; changed dihedral of iw
+    ok = PivotForward((p+ip),iw-1,0.2*(0.5-frand())*180./PI,(p+ip)->nback-iw-1,parms);	// +-0.1 rad, in degrees; moved atoms are in [iw+1,nback-1]; changed dihedral of iw
    
     ok *= AddSidechain(p,iw,(p+ip)->nback-1,ip);
     
@@ -600,10 +352,7 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
    
     if (!parms->nohfields)
     {
-      for(i=0;i<(p+ip)->nback;++i)
-      {
-	deltaE += EnergyHFields(p,pot,parms,i,ip,1);
-      }
+      deltaE += EnergyHFieldsAll(p,pot,parms);
       
     }
 
@@ -627,93 +376,91 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
   
   
   else {
-    
-    nang=0;
-    
-    for(i=0;i<nmul;i++)
-      nang+=(((p+ip)->back)+(iw+i) )->move;
 
-    CopyFragment(p,fragment,iw,parms->nmul_local+3,ip);
-    
-    
+    struct s_back *b = (p+ip)->back;
+    struct s_polymer *f = fragment+ip;
+    int kd[nmul],k;
+    double rnd,r;
+
+    // free dihedrals of the segment (see BGS_GMatrix)
+    nang=0;
+    for (k=iw+1;k<=iw+nmul-2;++k)
+      if ((b+k)->move) kd[nang++] = k;
+    if (nang==0) return 0;
+
     deltaE=-GetEnergyMonomerRange(p,iw,iw+nmul,ip);
-    
+
     if (!parms->nodihpot)
       for(i=0;i<nmul+3;i++)
-        deltaE -= (((p+ip)->back)+iw+i)->e_dih;							// old dihedral energy
-    
-    if (!parms->nohfields)
-      deltaE -= GetHFields(p,ip);
-    
-    Gaussian_Angles((fragment+ip)->g_ang,nang);        
-    G_Matrix(fragment,p,ip,iw,nmul,nang,parms);    
-    MatA((fragment+ip)->A,(fragment+ip)->G,nang,parms->bgs_a,parms->bgs_b);    
-    Cholesky_2((fragment+ip)->L,(fragment+ip)->A,nang);    
-    W1=exp(-Squared_n_Norma((fragment+ip)->g_ang,nang))*DetTriang((fragment+ip)->L,nang);
-    InvertTriang((fragment+ip)->Y,(fragment+ip)->L,nang);
-    TransposedMatOnVect((fragment+ip)->Y,(fragment+ip)->g_ang,(fragment+ip)->d_ang,nang);
-        
-    m=0;
-    
-    for(i=0;i<nmul-1;i++)
+        deltaE -= (b+iw+i)->e_dih;							// old dihedral energy
+    if (!parms->noangpot)
     {
-      if( (((p+ip)->back)+iw+i+1)->move==0) continue;
-      PivotForward((p+ip),iw+i,(fragment+ip)->d_ang[m],nmul-i-2,parms);
-      m++;      
+      deltaE -= (b+iw+nmul-1)->e_ang;							// old angular energy at the closure
+      deltaE -= (b+iw+nmul)->e_ang;
     }
+    if (!parms->nohfields)
+      deltaE -= GetHFields(p,parms->npol);
 
-    ok*=CheckDistance(p,ip,iw,nmul);
-    ok*=CheckAngles(p,ip,iw,nmul);
-    ok*=CheckDihedral(p,ip,iw,nmul);
-    
-    
-    if(ok==1)
+    // draw g ~ N(0,1) and set dphi = L^-T g, so that g = L^T dphi
+    for (m=0;m<nang;++m) f->g_ang[m] = gauss(0.,1.);
+    BGS_GMatrix(p,ip,iw,nmul,kd,nang,f->G);
+    MatA(f->A,f->G,nang,parms->bgs_a,parms->bgs_b);
+    Cholesky_2(f->L,f->A,nang);
+    W1 = BGS_Weight(f->L,f->g_ang,nang);
+    InvertTriang(f->Y,f->L,nang);
+    TransposedMatOnVect(f->Y,f->g_ang,f->d_ang,nang);
+
+    for (m=0;m<nang;++m)
+      ok *= PivotForward((p+ip),kd[m]-1,f->d_ang[m],iw+nmul-1-kd[m],parms);
+
+    // the bond, angles and locked dihedrals that join the segment to the rest of the chain
+    if (DAbs( Dist2( (b+iw+nmul-1)->pos, (b+iw+nmul)->pos ) - (b+iw+nmul-1)->d2_next ) > 0.05) ok=0;
+    if (ok) ok = CheckAngleRange(p,ip,iw+nmul-1,iw+nmul,2.0);
+    if (ok) ok = CheckLockedDihedralRange(p,ip,iw+nmul-1,iw+nmul+1,2.0);
+
+    if (ok && !parms->nosidechains)
+      ok = AddSidechain(p,iw,iw+nmul,ip);
+
+    if (ok)
     {
-      
-      if(!parms->nosidechains)
-       	ok *= AddSidechain(p,iw,iw+nmul,ip);
-      
       deltaE += EnergyMonomerRange(p,pot,iw,iw+nmul,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);
-      
+
       if (!parms->nodihpot)
         for(i=0;i<nmul+3;i++)
-      	  deltaE+=EnergyDihedrals(p,pot,iw+i,ip,1);
-                      
-      
-      
+          deltaE+=EnergyDihedrals(p,pot,iw+i,ip,1);
+      if (!parms->noangpot)
+      {
+        deltaE += EnergyAngles(p,pot,iw+nmul-1,ip,1);
+        deltaE += EnergyAngles(p,pot,iw+nmul,ip,1);
+      }
       if (!parms->nohfields)
-      	for(i=0;i<(p+ip)->nback;++i)
-	  deltaE += EnergyHFields(p,pot,parms,i,ip,1);
-	            
-      
-      G_Matrix(fragment,p,ip,iw,nmul,nang,parms);
-      MatA((fragment+ip)->A,(fragment+ip)->G,nang,parms->bgs_a,parms->bgs_b);
-      Cholesky_2((fragment+ip)->L,(fragment+ip)->A,nang);    
-      TransposedMatOnVect((fragment+ip)->L,(fragment+ip)->d_ang,(fragment+ip)->g_ang,nang);
-      W2=exp(-Squared_n_Norma((fragment+ip)->g_ang,nang))*DetTriang((fragment+ip)->L,nang);
-      ok*=B_Metropolis(deltaE,t,W2,W1,p->tables);
-      
-      if(ok==1)
-      {
-	UpdateMonomerRange(p,oldp,iw,iw+nmul,ip,parms->shell);  
-	parms->acc++;
-	p->etot += deltaE;
-	return 1;
-      }
-      else
-      {
-	UpdateMonomerRange(oldp,p,iw,iw+nmul,ip,parms->shell);
-	return 0;
-      }
-            
+        deltaE += EnergyHFieldsAll(p,pot,parms);
+
+      // weight of the reverse step (-dphi) from the new conformation
+      BGS_GMatrix(p,ip,iw,nmul,kd,nang,f->G);
+      MatA(f->A,f->G,nang,parms->bgs_a,parms->bgs_b);
+      Cholesky_2(f->L,f->A,nang);
+      TransposedMatOnVect(f->L,f->d_ang,f->g_ang,nang);
+      W2 = BGS_Weight(f->L,f->g_ang,nang);
+
+      // the proposal is not symmetric: the ratio of weights enters also when deltaE<=0
+      // as in Metropolis, the random number is always drawn
+      r = frand();
+      rnd = (W2/W1) * exp(-deltaE/t);
+      if (rnd < 1. && r >= rnd) ok = 0;
     }
-                
-    else
+
+    if (ok)
     {
-      UpdateMonomerRange(oldp,p,iw,iw+nmul,ip,parms->shell);
-      return 0;
+      UpdateMonomerRange(p,oldp,iw,iw+nmul,ip,parms->shell);
+      parms->acc++;
+      p->etot += deltaE;
+      return 1;
     }
-    
+
+    UpdateMonomerRange(oldp,p,iw,iw+nmul,ip,parms->shell);
+    return 0;
+
   }// end of local forward
   
   
@@ -724,7 +471,7 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
 
 int LocalMove(struct s_polymer *p, struct s_polymer *oldp,struct s_polymer *fragment,struct s_potential *pot,int nmul,struct s_mc_parms *parms, double t)
 {
-        int ip,iw,idir;
+        int ip,iw;
 	int ok=1;
 	
 	
@@ -741,62 +488,69 @@ int LocalMove(struct s_polymer *p, struct s_polymer *oldp,struct s_polymer *frag
 }	
 
 
-int BackRub(struct s_polymer *p, struct s_polymer *oldp,struct s_potential *pot,struct s_mc_parms *parms,double t)
+/*****************************************************************************
+ Backrub move: rotate the five backbone atoms iw-2..iw+2 (iw is a CA) around
+ the axis joining the CAs iw-3 and iw+3. The bond angles at iw-3 and iw+3 and
+ the dihedrals iw-3, iw-2, iw+3, iw+4 change. If newrot, a new rotamer is also
+ chosen for residue iw (backsiderub).
+ *****************************************************************************/
+static int BackRubMove(struct s_polymer *p, struct s_polymer *oldp,struct s_potential *pot,struct s_mc_parms *parms,double t,int newrot)
 {
-
   int ok=1;
   int iw,ip;
-  int i,out;
+  int out;
 
   double dw,deltaE;
 
   ip=irand( parms->npol);
   iw=3*irand((p+ip)->nback/3)+1;
-  //iw=16;
   dw = 2.0 * (0.5 - frand());
 
-  if(iw<3)
-  {
-    return ok;
+  // the angle checks need the backbone atoms iw-4 and iw+4
+  if (iw<4 || iw+4>(p+ip)->nback-1)
+    return 0;
 
-  }
-  if(iw>(p+ip)->nback-3)
-  {
-    return ok;
-  }
-  
+  parms->mov++;
 
-  //fprintf(stdout,"backrub: iw = %d \t type : %s \n",iw,(((p+ip)->back)+iw)->type);
   deltaE = -GetEnergyMonomerRange(p,iw-3,iw+3,ip);                                                 // two-body energy
 
   if (!parms->nodihpot)
   {
       deltaE -= (((p+ip)->back)+iw-3)->e_dih;                                                   // old dihedral energy
       deltaE -= (((p+ip)->back)+iw-2)->e_dih;
-      
       deltaE -= (((p+ip)->back)+iw+3)->e_dih;
       deltaE -= (((p+ip)->back)+iw+4)->e_dih;
   }
-    if (!parms->nohfields)
-      deltaE -= GetHFields(p,ip);                   
+  if (!parms->noangpot)
+  {
+      deltaE -= (((p+ip)->back)+iw-3)->e_ang;                                                   // old angular energy
+      deltaE -= (((p+ip)->back)+iw+3)->e_ang;
+  }
+  if (!parms->nohfields)
+      deltaE -= GetHFields(p,parms->npol);
 
-  ok=BackFlip(p,iw,dw);
+  ok=BackFlip(p+ip,iw,dw);
 
-  if( DAbs( Angle( (((p+ip)->back)+iw-4)->pos, (((p+ip)->back)+iw-3)->pos, (((p+ip)->back)+iw-2)->pos,p->tables,&out)-(((p+ip)->back)+iw-3)->a_next) > 5.0)
-    ok=0;
-  if(ok!=0) 
-    if( DAbs( Angle( (((p+ip)->back)+iw+2)->pos, (((p+ip)->back)+iw+3)->pos, (((p+ip)->back)+iw+4)->pos,p->tables,&out)-(((p+ip)->back)+iw-3)->a_next) > 5.0)
+  if (ok)
+    if( DAbs( Angle( (((p+ip)->back)+iw-4)->pos, (((p+ip)->back)+iw-3)->pos, (((p+ip)->back)+iw-2)->pos,p->tables,&out)-(((p+ip)->back)+iw-3)->a_next) > 5.0)
+      ok=0;
+  if (ok)
+    if( DAbs( Angle( (((p+ip)->back)+iw+2)->pos, (((p+ip)->back)+iw+3)->pos, (((p+ip)->back)+iw+4)->pos,p->tables,&out)-(((p+ip)->back)+iw+3)->a_next) > 5.0)
       ok=0;
 
-
-  if(ok==1)
+  if (ok)
   {
+    if (newrot)
+      (((p+ip)->back)+iw)->irot = irand( (((p+ip)->back)+iw)->nrot );
 
     if(!parms->nosidechains)
-          ok *= AddSidechain(p,iw-3,iw+3,ip);
-  
+      ok *= AddSidechain(p,iw-3,iw+3,ip);
+  }
+
+  if (ok)
+  {
     deltaE += EnergyMonomerRange(p,pot,iw-3,iw+3,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);
-  
+
     if (!parms->nodihpot)
     {
       deltaE += EnergyDihedrals(p,pot,iw-3,ip,1);
@@ -804,133 +558,37 @@ int BackRub(struct s_polymer *p, struct s_polymer *oldp,struct s_potential *pot,
       deltaE += EnergyDihedrals(p,pot,iw+3,ip,1);
       deltaE += EnergyDihedrals(p,pot,iw+4,ip,1);
     }
-  
-     if (!parms->nohfields)
-       for(i=0;i<(p+ip)->nback;++i)
-         deltaE += EnergyHFields(p,pot,parms,i,ip,1);
-  
-      ok *= Metropolis(deltaE,t,p->tables);
-
-
-    }
-
-
-    if (ok == 0)                        // move rejected
+    if (!parms->noangpot)
     {
-      UpdateMonomerRange(oldp,p,iw-3,iw+3,ip,0);
-      return 0;
+      deltaE += EnergyAngles(p,pot,iw-3,ip,1);
+      deltaE += EnergyAngles(p,pot,iw+3,ip,1);
     }
+    if (!parms->nohfields)
+      deltaE += EnergyHFieldsAll(p,pot,parms);
 
-    else
-    {
-      UpdateMonomerRange(p,oldp,iw-3,iw+3,ip,0);
-      parms->acc++;
-      p->etot+=deltaE;
-      return 1;
-    }
+    ok *= Metropolis(deltaE,t,p->tables);
+  }
 
-  return ok;
+  if (ok == 0)                        // move rejected
+  {
+    UpdateMonomerRange(oldp,p,iw-3,iw+3,ip,0);
+    return 0;
+  }
 
+  UpdateMonomerRange(p,oldp,iw-3,iw+3,ip,0);
+  parms->acc++;
+  p->etot+=deltaE;
+  return 1;
 }
 
+
+int BackRub(struct s_polymer *p, struct s_polymer *oldp,struct s_potential *pot,struct s_mc_parms *parms,double t)
+{
+  return BackRubMove(p,oldp,pot,parms,t,0);
+}
 
 
 int BackSideRub(struct s_polymer *p, struct s_polymer *oldp,struct s_potential *pot,struct s_mc_parms *parms,double t)
 {
-
-  int ok=1;
-  int iw,ir,ip;
-  int i,out;
-
-  double dw,deltaE;
-
-  ip=irand( parms->npol);
-  iw=3*irand((p+ip)->nback/3)+1;
-  //iw=16;
-  dw = 2.0 * (0.5 - frand());
-
-  if(iw<3)
-  {
-    return ok;
-
-  }
-  if(iw>(p+ip)->nback-3)
-  {
-    return ok;
-  }
-
-
-  //fprintf(stdout,"backrub: iw = %d \t type : %s \n",iw,(((p+ip)->back)+iw)->type);
-  deltaE = -GetEnergyMonomerRange(p,iw-3,iw+3,ip);                                                 // two-body energy
-
-  if (!parms->nodihpot)
-  {
-      deltaE -= (((p+ip)->back)+iw-3)->e_dih;                                                   // old dihedral energy
-      deltaE -= (((p+ip)->back)+iw-2)->e_dih;
-
-      deltaE -= (((p+ip)->back)+iw+3)->e_dih;
-      deltaE -= (((p+ip)->back)+iw+4)->e_dih;
-  }
-    if (!parms->nohfields)
-      deltaE -= GetHFields(p,ip);
-
-  ok=BackFlip(p,iw,dw);
-
- if( DAbs( Angle( (((p+ip)->back)+iw-4)->pos, (((p+ip)->back)+iw-3)->pos, (((p+ip)->back)+iw-2)->pos,p->tables,&out)-(((p+ip)->back)+iw-3)->a_next) > 5.0)
-    ok=0;
-  if(ok!=0)
-    if( DAbs( Angle( (((p+ip)->back)+iw+2)->pos, (((p+ip)->back)+iw+3)->pos, (((p+ip)->back)+iw+4)->pos,p->tables,&out)-(((p+ip)->back)+iw-3)->a_next) > 5.0)
-      ok=0;
-
-
-  if(ok==1)
-  {
-
-    ir=irand( (((p+ip)->back)+iw)->nrot );
-    (((p+ip)->back)+iw)->irot=ir;
-    //    ok = AddSidechain(p,iw,iw,ip);
-
-
-
-    if(!parms->nosidechains)
-          ok *= AddSidechain(p,iw-3,iw+3,ip);
-
-    deltaE += EnergyMonomerRange(p,pot,iw-3,iw+3,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);
-
-    if (!parms->nodihpot)
-    {
-      deltaE += EnergyDihedrals(p,pot,iw-3,ip,1);
-      deltaE += EnergyDihedrals(p,pot,iw-2,ip,1);
-      deltaE += EnergyDihedrals(p,pot,iw+3,ip,1);
-      deltaE += EnergyDihedrals(p,pot,iw+4,ip,1);
-    }
-
-     if (!parms->nohfields)
-       for(i=0;i<(p+ip)->nback;++i)
-         deltaE += EnergyHFields(p,pot,parms,i,ip,1);
-
-      ok *= Metropolis(deltaE,t,p->tables);
-
-
-    }
-
-
-    if (ok == 0)                        // move rejected
-    {
-      UpdateMonomerRange(oldp,p,iw-3,iw+3,ip,0);
-      return 0;
-    }
-
-    else
-    {
-      UpdateMonomerRange(p,oldp,iw-3,iw+3,ip,0);
-      parms->acc++;
-      p->etot+=deltaE;
-      return 1;
-    }
-
-  return ok;
-
+  return BackRubMove(p,oldp,pot,parms,t,1);
 }
-
-

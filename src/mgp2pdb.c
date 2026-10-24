@@ -15,10 +15,10 @@ int polymercounter(char* filename);
 int main(int argc, char *argv[])
 {
 	struct s_polymer *polymer;
-	char pol_file[100] = " ", pdb_file[100] = " ";
+	char pol_file[FNAMEMAX] = "", pdb_file[FNAMEMAX] = "";
 	
 	int npol=1;
-	int i,nat,ntypes;
+	int i,nat,ntypes,nbackmax,nsidemax,nrotmax,natommax;
 	
 	FILE *logfile=NULL, *pdbout=NULL;
 	
@@ -42,12 +42,12 @@ int main(int argc, char *argv[])
 				return 1;
 				break;
 			case 'i':
-				strcpy(pol_file,optarg);
+				snprintf(pol_file,sizeof(pol_file),"%s",optarg);
 				fprintf(stderr," -> input pol file: %s\n",pol_file);
 				fprintf(logfile,"Input pol file: %s\n",pol_file);
 				break;
 			case 'o':
-				strcpy(pdb_file,optarg);
+				snprintf(pdb_file,sizeof(pdb_file),"%s",optarg);
 				fprintf(stderr," -> output pdb file: %s\n",pdb_file);
 				fprintf(logfile,"Output pdb file: %s\n",pdb_file);
 				break;
@@ -67,6 +67,8 @@ int main(int argc, char *argv[])
 				abort ();
 	}
 	
+	if (!strcmp(pol_file,"") || !strcmp(pdb_file,"")) { fprintf(stderr,"usage: mgp2pdb -i polfile -o pdbfile\n"); return 1; }
+
 	npol = polymercounter(pol_file);
 	
 	fprintf(stderr," -> number of chains: %d\n",npol);
@@ -77,7 +79,8 @@ int main(int argc, char *argv[])
 	
 	
 	// Polymer allocation
-	polymer = AlloPolymer(npol,NRESMAX,NSIDEMAX,NROTMAX,NATOMMAX,0,0,logfile);
+	ScanPolymerSizes(pol_file,npol,&nbackmax,&nsidemax,&nrotmax,&natommax);
+	polymer = AlloPolymer(npol,nbackmax,nsidemax,nrotmax,natommax,0,0,logfile);
 	
 	// Polymer reading
 	ReadPolymer(pol_file,polymer,logfile,npol,0, &nat, &ntypes);
@@ -85,7 +88,7 @@ int main(int argc, char *argv[])
 	// SideChains adding
 	fprintf(stderr," -> adding sidechains\n");
 	for (i=0;i<npol;++i)
-		AddSidechain(polymer,0,polymer->nback,i);
+		AddSidechain(polymer,0,(polymer+i)->nback-1,i);
 	
 	// Polymer printing
 	fprintf(logfile,"Printing pdb file %s\n",pdb_file);
@@ -93,7 +96,7 @@ int main(int argc, char *argv[])
 	PrintPDBStream(polymer,npol,pdbout);
 	
 	
-	FreePolymer(polymer,npol,NRESMAX,NSIDEMAX,0,0);
+	FreePolymer(polymer,npol,nbackmax,nsidemax,0,0);
 
 	fclose(pdbout);
 	fclose(logfile);

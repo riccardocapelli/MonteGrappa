@@ -36,6 +36,8 @@
  */
 #include "stempering.h"
 
+double frand(void);		// random numbers from misc.c (seeded by montegrappa)
+
 // Stempering is carried out if there is the file _STEMPERING in the current dir.
 //
 // The file contains:
@@ -682,7 +684,7 @@ int DoSTempering(double energy, struct st_stuff *p)
     else if (p->st_itemp==p->st_ntemp-1) iw=-1;
     else
     {
-    	if (rand()>RAND_MAX/2) iw=1;
+    	if (frand()<0.5) iw=1;
     	else iw=-1;
     }
 
@@ -692,7 +694,7 @@ int DoSTempering(double energy, struct st_stuff *p)
     delta = (beta1-beta2) * energy + p->st_g[p->st_itemp+iw] - p->st_g[p->st_itemp];
 
 
-    if (delta>0 || (double)rand()/RAND_MAX<exp(delta))
+    if (delta>0 || frand()<exp(delta))
     {
 		if (iw == 1) p->st_prob_down[p->st_itemp]++;
 		else p->st_prob_up[p->st_itemp]++;

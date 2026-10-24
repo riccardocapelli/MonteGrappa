@@ -1,0 +1,4 @@
+[ global ]
+boxtype p
+boxsize 30
+

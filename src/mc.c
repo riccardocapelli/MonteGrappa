@@ -43,14 +43,58 @@
  *****************************************************************************/
 int softexit;
 
-void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *replica, struct s_polymer *native, struct s_potential *pot, struct s_mc_parms *parms, FILE *ftrj, FILE *fe, struct s_polymer *oldp, FILE *fproc,int irun, unsigned long long chkp_step, struct s_mpi_parms *mpiparms)
+/*****************************************************************************
+ Debug aid (keyword echeck): compare the incrementally updated energy with a
+ full recalculation after a move, report the first mismatches of each move
+ type and resynchronize p->etot so that later moves are tested independently
+ *****************************************************************************/
+static void CheckEnergyDrift(struct s_polymer *p, struct s_polymer *oldp, struct s_potential *pot, struct s_mc_parms *parms, int move, unsigned long long istep, int my_rank)
 {
-	int i,ok=0,iprinttrj=0,iprintlog=0,iprinte=0,icheckpoint=0,ntm=0,ci,mcount[NMOVES],macc[NMOVES],mdone[NMOVES];
+	static int nreported[NMOVES],nreported_old[NMOVES];
+	double etrue;
+	int ic,i,k,q,found;
+	struct s_back *a,*b;
+
+	// after a move, oldp must be an exact copy of p (positions and contacts)
+	for (ic=0;ic<parms->npol;++ic)
+		for (i=0;i<(p+ic)->nback;++i)
+		{
+			a = ((p+ic)->back)+i;
+			b = ((oldp+ic)->back)+i;
+			found = (a->ncontacts == b->ncontacts && a->pos.x == b->pos.x && a->pos.y == b->pos.y && a->pos.z == b->pos.z);
+			for (k=0;k<a->ncontacts && found;++k)
+			{
+				found = 0;
+				for (q=0;q<b->ncontacts;++q)
+					if (a->contacts[k]==b->contacts[q] && a->contacts_p[k]==b->contacts_p[q] && a->e[k]==b->e[q]) found = 1;
+			}
+			if (!found && nreported_old[move]++ < 5)
+				fprintf(stderr,"ECHECK: oldp differs from p after move %d at step %llu (chain %d residue %d)\n",move,istep,ic,i);
+		}
+
+	// before TotalEnergy, which rebuilds them
+	if (p->cells && (k = CellsCheck(p)) > 0)
+		fprintf(stderr,"ECHECK: cell list out of date for %d residues after move %d at step %llu\n",k,move,istep);
+
+	etrue = TotalEnergy(p,pot,parms,parms->npol,0,parms->nosidechains,0,my_rank);
+	if (fabs(etrue - p->etot) > 1e-6*(1.+fabs(etrue)))
+	{
+		if (nreported[move]++ < 5)
+			fprintf(stderr,"ECHECK: energy drift after move %d at step %llu: Etot=%lf Etot(true)=%lf\n",move,istep,p->etot,etrue);
+		p->etot = etrue;
+	}
+}
+
+
+void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *replica, struct s_polymer *native, struct s_potential *pot, struct s_mc_parms *parms, FILE *ftrj, FILE *fe, struct s_polymer *oldp, FILE *fproc,int irun, struct s_checkpoint *chk, struct s_mpi_parms *mpiparms)
+{
+	int i,ok=0,iprinttrj=0,iprintlog=0,iprinte=0,icheckpoint=0,ntm=0,ci,mcount[NMOVES];
+	long long macc[NMOVES],mdone[NMOVES];
 //	int anneal_count=0, anneal_status=0;
 
 	double t;
-	unsigned long long istep=chkp_step;
-	char fchkp[100];
+	unsigned long long istep=0;
+	char fchkp[FNAMEMAX];
 		
 	if(parms->shell==1)
 		parms->ishell=0;
@@ -66,7 +110,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 	#ifdef STEMPERING
 	int st_iprint=0;
 	int st_o=0;
-	int nconf;
+	int nconf=0;
 	#endif
        
 
@@ -79,14 +123,19 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 	
 	int ptempering_count=0;
 	int ex_count[(parms->ntemp)-1],ex_acc[(parms->ntemp)-1];
+	for (i=0;i<parms->ntemp-1;++i) { ex_count[i]=0; ex_acc[i]=0; }
 	t=parms->T[my_rank];
-        
-	FILE *fexchange=fopen("exchange.dat","w");	
+
+	char fexname[100];
+	sprintf(fexname,"exchange_proc%d.dat",my_rank);			// one file per rank: they would overwrite each other
+	FILE *fexchange=fopen(fexname,"w");
+	if (!fexchange) Error("Cannot open exchange file");
 	#else
 	int my_rank=0;
 	t=parms->T;
 	#endif
 	softexit =0;
+	int stop=0;		// softexit as agreed by all ranks
 	
 	// print debug info
 	if (parms->debug>0)
@@ -110,6 +159,30 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 		macc[i]=0;
 		mdone[i]=0;
 	}
+
+	// continue from a checkpoint: restore the loop state saved at the end of a step
+	if (chk->restart)
+	{
+		istep = chk->istep;
+		iprinttrj = chk->iprinttrj;
+		iprintlog = chk->iprintlog;
+		iprinte = chk->iprinte;
+		icheckpoint = chk->icheckpoint;
+		parms->acc = chk->acc;
+		parms->mov = chk->mov;
+		for(i=0;i<NMOVES;++i)
+		{
+			mcount[i] = chk->mcount[i];
+			macc[i] = chk->macc[i];
+			mdone[i] = chk->mdone[i];
+		}
+		#ifdef ACTIVE_MPI
+		ptempering_count = chk->ptcount;
+		#endif
+		SetRNGState(chk->rng);
+	}
+	CheckpointName(fchkp,sizeof(fchkp),my_rank);
+	time_t tcheckpoint = time(NULL);
 
  
 	#ifdef OPTIMIZEPOT
@@ -206,15 +279,16 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			ok = MoveBackboneFlip(p,oldp,parms,pot,istep,parms->debug,t);
 			if (ok>-1) mcount[0] = 0;
 			if (ok==1) macc[0]++;
-			mdone[0]++;
+			mdone[0]++; if (parms->echeck) CheckEnergyDrift(p,oldp,pot,parms,0,istep,my_rank);
 		}
 
 	        if (mcount[3] == parms->movetype[3])                                            // move of sidechain
                 {
                         ok = MoveSidechain(p,oldp,parms,pot,istep,parms->debug,t);
+                        if (ok==-1) ok = 0;						// no residue with rotamers found: just skip this move
                         if (ok>-1) mcount[3] = 0;
                         if (ok==1) macc[3]++;
-                        mdone[3]++;
+                        mdone[3]++; if (parms->echeck) CheckEnergyDrift(p,oldp,pot,parms,3,istep,my_rank);
                 }
 
                if (mcount[4] == parms->movetype[4])                                            // loose pivot
@@ -222,7 +296,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
                         ok = MoveLoosePivot(p,oldp,pot,parms->nmul_lpivot,parms,t);
                         if (ok>-1) mcount[4] = 0;
                         if (ok==1) macc[4]++;
-                        mdone[4]++;
+                        mdone[4]++; if (parms->echeck) CheckEnergyDrift(p,oldp,pot,parms,4,istep,my_rank);
                 }
 
 		if (mcount[5] == parms->movetype[5])                                            // multiple flip
@@ -230,7 +304,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
                         ok = MoveMultipleFlip(p,oldp,parms,pot,istep,parms->debug,t);
                         if (ok>-1) mcount[5] = 0;
                         if (ok==1) macc[5]++;
-                        mdone[5]++;
+                        mdone[5]++; if (parms->echeck) CheckEnergyDrift(p,oldp,pot,parms,5,istep,my_rank);
                 }
 
 		if (mcount[7] == parms->movetype[7])
@@ -238,7 +312,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
                         ok=LocalMove(p,oldp,fragment,pot,parms->nmul_local,parms,t);
                         if(ok>-1) mcount[7]=0;
                         if(ok==1) macc[7]++;
-                        mdone[7]++;
+                        mdone[7]++; if (parms->echeck) CheckEnergyDrift(p,oldp,pot,parms,7,istep,my_rank);
                 }
 
 		if( mcount[11] == parms->movetype[11])
@@ -246,14 +320,14 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			ok=BackRub(p,oldp,pot,parms,t);
 			if(ok>-1) mcount[11]=0;
 			if(ok==1) macc[11]++;
-			mdone[11]++;
+			mdone[11]++; if (parms->echeck) CheckEnergyDrift(p,oldp,pot,parms,11,istep,my_rank);
 		}
 	    	if ( mcount[12] == parms->movetype[12] )
 		{
 			ok=BackSideRub(p,oldp,pot,parms,t);
 			if(ok>-1) mcount[12]=0;
 			if(ok==1) macc[12]++;
-			mdone[12]++;
+			mdone[12]++; if (parms->echeck) CheckEnergyDrift(p,oldp,pot,parms,12,istep,my_rank);
 
 		}
 		
@@ -264,7 +338,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			ok = MoveBackbonePivot(p,oldp,pot,parms,t);
 			if (ok>-1) mcount[1] = 0;
 			if (ok==1) macc[1]++;
-			mdone[1]++;
+			mdone[1]++; if (parms->echeck) CheckEnergyDrift(p,oldp,pot,parms,1,istep,my_rank);
 		}
 	
 		if (mcount[2] == parms->movetype[2])						// multiple pivot of backbone
@@ -272,7 +346,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			ok = MoveMultiplePivot(p,oldp,pot,parms->nmul_mpivot,parms,t);
 			if (ok>-1) mcount[2] = 0;
 			if (ok==1) macc[2]++;
-			mdone[2]++;
+			mdone[2]++; if (parms->echeck) CheckEnergyDrift(p,oldp,pot,parms,2,istep,my_rank);
 		}
 		
 		if (mcount[6] == parms->movetype[6])						// move of center of mass
@@ -280,7 +354,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			ok = MoveCoM(p,oldp,parms,pot,istep,parms->debug,t);
 			if (ok>-1) mcount[6] = 0;
 			if (ok==1) macc[6]++;
-			mdone[6]++;
+			mdone[6]++; if (parms->echeck) CheckEnergyDrift(p,oldp,pot,parms,6,istep,my_rank);
 		}
 
 		if (mcount[8] == parms->movetype[8])
@@ -288,7 +362,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			ok=MoveRotation(p,oldp,parms,pot,istep,parms->debug,t);
 			if(ok>-1) mcount[8]=0;
 			if(ok==1) macc[8]++;
-			mdone[8]++;
+			mdone[8]++; if (parms->echeck) CheckEnergyDrift(p,oldp,pot,parms,8,istep,my_rank);
 		}
 				
 		// if you want to anneal
@@ -300,7 +374,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			ok=MoveClusterCoM(p,oldp,parms,pot,istep,parms->debug,t,fproc,my_rank);
 			if(ok>-1) mcount[9]=0;
 			if(ok==1) macc[9]++;
-			mdone[9]++;
+			mdone[9]++; if (parms->echeck) CheckEnergyDrift(p,oldp,pot,parms,9,istep,my_rank);
 		}
 
 		if (mcount[10] == parms->movetype[10])
@@ -308,7 +382,15 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			ok=MoveClusterRot(p,oldp,parms,pot,istep,parms->npol,parms->debug,t,fproc,my_rank);
 			if(ok>-1) mcount[10]=0;
 			if(ok==1) macc[10]++;
-			mdone[10]++;
+			mdone[10]++; if (parms->echeck) CheckEnergyDrift(p,oldp,pot,parms,10,istep,my_rank);
+		}
+
+		if (mcount[13] == parms->movetype[13])						// aggregation-volume-bias move
+		{
+			ok=MoveAVB(p,oldp,parms,pot,t);
+			if(ok>-1) mcount[13]=0;
+			if(ok==1) macc[13]++;
+			mdone[13]++; if (parms->echeck) CheckEnergyDrift(p,oldp,pot,parms,13,istep,my_rank);
 		}
 
 /************************************************\
@@ -353,6 +435,10 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			//fprintf(stderr,"Total Energy:\t%lf\n\n",TotalEnergy(p,pot,parms,parms->npol,0,parms->nosidechains,parms->debug,0));
 		}
 
+		// print the observables of aggregation
+		if (parms->fobs && parms->nprintobs>0 && istep%parms->nprintobs==0)
+			PrintObservables(parms->fobs,p,parms->npol,istep);
+
 		// print energies
 		if (fe != NULL && iprinte == parms->nprinte && ok>-1)
 		{
@@ -361,32 +447,6 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			iprinte = 0;
 		}
 		
-		// print checkpoint
-		if (icheckpoint == parms->ncheckpoint && ok>-1){
-			//Define checkpoint filename
-			#ifdef ACTIVE_MPI
-			sprintf(fchkp,"checkpoint_proc%d.pol",my_rank);
-			#else
-			sprintf(fchkp,"checkpoint.pol");
-			#endif
-			
-			PrintPolymer(fchkp,p,parms->npol);
-			icheckpoint = 0;
-			#ifdef ACTIVE_MPI
-			if(my_rank == 0)
-			{
-				FILE *chkpf=fopen("checkpoint.dat","w");
-				fprintf(chkpf,"%llu\n",istep);
-				fclose(chkpf);
-			}
-			#else
-			FILE *chkpf=fopen("checkpoint.dat","w");
-			fprintf(chkpf,"%llu\n",istep);
-			fclose(chkpf);
-			#endif
-			
-			
-		}
 		
 //		fprintf(stderr,"ETOT\t%lf\n",p->etot);
 		// update shell
@@ -575,8 +635,17 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			
 			ptempering_count=0;                        
                 }
+
+		// a soft exit (SIGUSR1) must stop all ranks at the same step, or the others hang in the next exchange
+		if (parms->ntemp>1)
+		{
+			if (ptempering_count==1) MPI_Allreduce(&softexit,&stop,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD);
+		}
+		else stop = softexit;
                 
 		ptempering_count++;
+		#else
+		stop = softexit;
 		#endif
 
 		
@@ -600,46 +669,58 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
                  //       parms->ishell ++;
                 }
 
-	} while (istep<parms->nstep && softexit==0);	
+		// rebuild the cell list from time to time (the shape of the system changes, see cells.c)
+		if (p->cells && istep%10000==0) CellsBuild(p,pot->rcut,pot->boxtype=='p' ? pot->lbox : 0.);
+
+		// checkpoint at the end of a step, so that a restart continues exactly from here
+		// (by default on wall-clock time: writing a checkpoint does not change the trajectory)
+		if (parms->ncheckpoint>0 ? icheckpoint >= parms->ncheckpoint :
+				(icheckpoint % 1000 == 0 && difftime(time(NULL),tcheckpoint) >= parms->tcheckpoint))
+		{
+			tcheckpoint = time(NULL);
+			icheckpoint = 0;
+			chk->istep = istep;
+			chk->irun = irun;
+			GetRNGState(chk->rng);
+			chk->iprinttrj = iprinttrj;
+			chk->iprintlog = iprintlog;
+			chk->iprinte = iprinte;
+			chk->icheckpoint = icheckpoint;
+			chk->acc = parms->acc;
+			chk->mov = parms->mov;
+			for(i=0;i<NMOVES;++i)
+			{
+				chk->mcount[i] = mcount[i];
+				chk->macc[i] = macc[i];
+				chk->mdone[i] = mdone[i];
+			}
+			#ifdef ACTIVE_MPI
+			chk->ptcount = ptempering_count;
+			#else
+			chk->ptcount = 0;
+			#endif
+			WriteCheckpoint(fchkp,chk,p,parms->npol);
+		}
+
+	} while (istep<parms->nstep && stop==0);	
 	///////////////////////////////////////// end MC LOOP
 		
 	// print summary
 	#ifdef ACTIVE_MPI	
 	fclose(fexchange);	
-	fprintf(stderr,"\nRank %d Acceptance:\t%d / %d = %lf\n",my_rank,parms->acc,parms->mov,(double)parms->acc/parms->mov);
+	fprintf(stderr,"\nRank %d Acceptance:\t%lld / %lld = %lf\n",my_rank,parms->acc,parms->mov,parms->mov ? (double)parms->acc/parms->mov : 0.);
+	if (my_rank<parms->ntemp-1 && ex_count[my_rank]>0)
+		fprintf(stderr,"Rank %d Exchanges with rank %d:\t%d / %d = %lf\n",my_rank,my_rank+1,ex_acc[my_rank],ex_count[my_rank],(double)ex_acc[my_rank]/ex_count[my_rank]);
 	#else
-	fprintf(stderr,"\nAcceptance:\t%d / %d = %lf\n",parms->acc,parms->mov,(double)parms->acc/parms->mov);
+	fprintf(stderr,"\nAcceptance:\t%lld / %lld = %lf\n",parms->acc,parms->mov,parms->mov ? (double)parms->acc/parms->mov : 0.);
 	#endif
-	if(parms->movetype[0]!=-1)
-		fprintf(stderr,"\tFlip:\t%d / %d = %lf\n",macc[0],mdone[0],(double)macc[0]/mdone[0]);
-	if(parms->movetype[11]!=-1)
-                fprintf(stderr,"\tBackRub:\t%d / %d = %lf\n",macc[11],mdone[11],(double)macc[11]/mdone[11]);
-	if(parms->movetype[12]!=-1)
-                fprintf(stderr,"\tBackSideRub:\t%d / %d = %lf\n",macc[12],mdone[12],(double)macc[12]/mdone[12]);
-
-	if(parms->movetype[1]!=-1) 
-		fprintf(stderr,"\tPivot:\t%d / %d = %lf\n",macc[1],mdone[1],(double)macc[1]/mdone[1]);
-	if(parms->movetype[2]!=-1) 
-		fprintf(stderr,"\tMPivot:\t%d / %d = %lf\n",macc[2],mdone[2],(double)macc[2]/mdone[2]);
-	if(parms->movetype[3]!=-1) 
-		fprintf(stderr,"\tSidechain:\t%d / %d = %lf\n",macc[3],mdone[3],(double)macc[3]/mdone[3]);
-	if(parms->movetype[4]!=-1) 
-		fprintf(stderr,"\tLPivot:\t%d / %d = %lf\n",macc[4],mdone[4],(double)macc[4]/mdone[4]);
-	if(parms->movetype[5]!=-1) 
-		fprintf(stderr,"\tMFlip:\t%d / %d = %lf\n",macc[5],mdone[5],(double)macc[5]/mdone[5]);
-	if(parms->movetype[6]!=-1) 
-		fprintf(stderr,"\tCoM shift:\t%d / %d = %lf\n",macc[6],mdone[6],(double)macc[6]/mdone[6]);
-	if(parms->movetype[7]!=-1)
-		fprintf(stderr,"\tLocal:\t%d / %d = %lf\n",macc[7],mdone[7],(double)macc[7]/mdone[7]); 
-	 if(parms->movetype[8]!=-1)
-                fprintf(stderr,"\tRotation:\t%d / %d = %lf\n",macc[8],mdone[8],(double)macc[8]/mdone[8]);
-
-         if(parms->movetype[9]!=-1)
-                fprintf(stderr,"\tCluster CoM:\t%d / %d = %lf\n",macc[9],mdone[9],(double)macc[9]/mdone[9]);
-
-         if(parms->movetype[10]!=-1)
-                fprintf(stderr,"\tCluster Rot:\t%d / %d = %lf\n",macc[10],mdone[10],(double)macc[10]/mdone[10]);
-
+	{
+		static const char *movename[NMOVES] = {"Flip","Pivot","MPivot","Sidechain","LPivot","MFlip","CoM shift",
+							"Local","Rotation","Cluster CoM","Cluster Rot","BackRub","BackSideRub","AVB"};
+		for (i=0;i<NMOVES;++i)
+			if (parms->movetype[i]!=-1)
+				fprintf(stderr,"\t%s:\t%lld / %lld = %lf\n",movename[i],macc[i],mdone[i],mdone[i] ? (double)macc[i]/mdone[i] : 0.);
+	}
 
 	fprintf(stderr,"\n");
 	sprintf(p->title,"final");
@@ -655,7 +736,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 int MoveBackboneFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,
 		unsigned long long istep, int debug, double t)
 {
-	int iw,ip,i,ok=0,out;
+	int iw,ip,ok=0,out;
 	double dw,deltaE=0.;
 
 	ip = irand(parms->npol);						// which chain to move
@@ -684,7 +765,7 @@ int MoveBackboneFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 	if (!parms->nohfields)
 	{
 		//We store ALL the H fields energy for the change of configuration
-		deltaE -= GetHFields(p,ip);
+		deltaE -= GetHFields(p,parms->npol);
 	}
 
 	// make the move in p
@@ -716,15 +797,7 @@ int MoveBackboneFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 			if ( DAbs( Angle( (((p+ip)->back)+iw)->pos, (((p+ip)->back)+iw+1)->pos, (((p+ip)->back)+iw+2)->pos, (p+ip)->tables, &out)
 					- (((p+ip)->back)+iw+1)->a_next) > parms->a_cloose || out==0) ok=0;
 	}
-	if (parms->d_cloose>0)
-	{
-		if (iw-3>=0 && (((p+ip)->back)+iw-1)->move == 0)
-			if ( DAbs( Dihedral( (((p+ip)->back)+iw-3)->pos, (((p+ip)->back)+iw-2)->pos, (((p+ip)->back)+iw-1)->pos, (((p+ip)->back)+iw)->pos, (p+ip)->tables, &out)
-						- (((p+ip)->back)+iw-1)->d_next) > parms->d_cloose || out==0) ok=0;
-		if (ok && iw+3<(p+ip)->nback && (((p+ip)->back)+iw+2)->move == 0)
-			if ( DAbs( Dihedral( (((p+ip)->back)+iw)->pos, (((p+ip)->back)+iw+1)->pos, (((p+ip)->back)+iw+2)->pos, (((p+ip)->back)+iw+3)->pos, (p+ip)->tables, &out)
-						- (((p+ip)->back)+iw+2)->d_next) > parms->d_cloose || out==0) ok=0;
-	}
+	if (ok) ok = CheckLockedDihedralRange(p,ip,iw-1,iw+2,parms->d_cloose);			// a flip of iw changes the dihedrals iw-1..iw+2
 
 	// calculate new energy
 	if (ok)
@@ -745,10 +818,7 @@ int MoveBackboneFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 	
 		if (!parms->nohfields)
 		{
-			for(i=0;i<(p+ip)->nback;++i)
-			{
-				deltaE += EnergyHFields(p,pot,parms,i,ip,1);
-			}
+			deltaE += EnergyHFieldsAll(p,pot,parms);
 		}
 	}
 
@@ -790,6 +860,7 @@ void CopyResiduePositions(struct s_back *from, struct s_back *to)
 	(to->sph).ang = (from->sph).ang;
 	(to->sph).dih = (from->sph).dih;
 	(to->sph).r = (from->sph).r;
+	to->ext = from->ext;
 
 	//sidechain
 	for (k=0;k<from->nside;++k)
@@ -832,6 +903,7 @@ void CopyResiduePositions_NOCONT(struct s_back *from, struct s_back *to)
         (to->sph).ang = (from->sph).ang;
         (to->sph).dih = (from->sph).dih;
         (to->sph).r = (from->sph).r;
+	to->ext = from->ext;
 	
 	 for (k=0;k<from->nside;++k)
         {
@@ -856,7 +928,7 @@ void CopyResiduePositions_NOCONT(struct s_back *from, struct s_back *to)
  *****************************************************************************/
 int MoveBackbonePivot(struct s_polymer *p,struct s_polymer *oldp, struct s_potential *pot, struct s_mc_parms *parms, double t)
 {
-	int iw,ok=0,half,ip,i;
+	int iw,ok=0,half,ip;
 	double dw=0,deltaE;
 		
 	ip = irand(parms->npol);
@@ -866,7 +938,7 @@ int MoveBackbonePivot(struct s_polymer *p,struct s_polymer *oldp, struct s_poten
 	iw = 1 + irand((p+ip)->nback-2);
 
 	if (parms->randdw==1) dw = parms->dw_pivot * (0.5 - frand());						// dihedral to pivot
-	else if (parms->randdw==2) dw = parms->dw_pivot * gasdev(&(parms->seed));
+	else if (parms->randdw==2) dw = parms->dw_pivot * gauss(0.,1.);
 
 	#ifdef DEBUG
 		if (parms->debug>2) fprintf(stderr,"pivot ip = %d iw=%d dw=%lf half=%d\n",ip,iw,dw,half);
@@ -887,7 +959,7 @@ int MoveBackbonePivot(struct s_polymer *p,struct s_polymer *oldp, struct s_poten
 		}
 		if (!parms->nohfields)
 		{
-			deltaE -= GetHFields(p,ip);										// old H fields energy
+			deltaE -= GetHFields(p,parms->npol);										// old H fields energy
 		}
 		
 		// move
@@ -899,10 +971,7 @@ int MoveBackbonePivot(struct s_polymer *p,struct s_polymer *oldp, struct s_poten
 			deltaE += EnergyDihedrals(p,pot,iw+1,ip,1);
 		if (!parms->nohfields)
 		{
-			for(i=0;i<(p+ip)->nback;++i)
-			{
-				deltaE += EnergyHFields(p,pot,parms,i,ip,1);
-			}
+			deltaE += EnergyHFieldsAll(p,pot,parms);
 		}
 	}
 	// if it belong to the second half, pivot forward (moving dih of iw)
@@ -919,7 +988,7 @@ int MoveBackbonePivot(struct s_polymer *p,struct s_polymer *oldp, struct s_poten
 		}
 		if (!parms->nohfields)
 		{
-			deltaE -= GetHFields(p,ip);										// old H fields energy
+			deltaE -= GetHFields(p,parms->npol);										// old H fields energy
 		}
 		// move
 		ok = PivotForward((p+ip),iw-1,dw,(p+ip)->nback-iw-1,parms);			// moved atoms are in [iw+1,nback-1]; changed dihedral of iw
@@ -930,10 +999,7 @@ int MoveBackbonePivot(struct s_polymer *p,struct s_polymer *oldp, struct s_poten
 			deltaE += EnergyDihedrals(p,pot,iw,ip,1);
 		if (!parms->nohfields)
 		{
-			for(i=0;i<(p+ip)->nback;++i)
-			{
-			deltaE += EnergyHFields(p,pot,parms,i,ip,1);
-			}
+			deltaE += EnergyHFieldsAll(p,pot,parms);
 		}
 	}
 
@@ -985,7 +1051,7 @@ int MoveBackbonePivot(struct s_polymer *p,struct s_polymer *oldp, struct s_poten
 int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potential *pot, int nmul, struct s_mc_parms *parms, double t)
 {
 
-	int half,ok=1,m,iw,ip,idir,i;
+	int half,ok=1,m,iw,ip,idir;
 	double dw=0,deltaE;
 
 	if(nmul<0) nmul=2+irand(-nmul-1);				//generate random nmul in [2,-mul] if required
@@ -1011,7 +1077,7 @@ int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_pote
 		if (!parms->nodihpot)
 			for (m=0;m<nmul;++m) deltaE -= (((p+ip)->back)+iw-m+1)->e_dih;	// old dihedral energy
 		if (!parms->nohfields){
-			deltaE -= GetHFields(p,ip);										// old H fields energy
+			deltaE -= GetHFields(p,parms->npol);										// old H fields energy
 		}
 			
 		
@@ -1019,7 +1085,7 @@ int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_pote
 			if ( (((p+ip)->back)+iw-m+1)->move == 1 )						// check if it you can move it
 			{
 				if (parms->randdw==1) dw = parms->dw_mpivot * (0.5 - frand());				// dihedral to pivot
-				else if (parms->randdw==2) dw = parms->dw_mpivot *gasdev(&(parms->seed));
+				else if (parms->randdw==2) dw = parms->dw_mpivot *gauss(0.,1.);
 
  				ok *= PivotBackward((p+ip),iw+1-m,dw,iw-m,parms);				// moves in [0,iw-1]
 			}
@@ -1033,10 +1099,7 @@ int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_pote
 			for (m=0;m<nmul;++m) deltaE += EnergyDihedrals(p,pot,iw-m+1,ip,1);
 		if (!parms->nohfields)
 		{
-			for(i=0;i<(p+ip)->nback;++i)
-			{
-				deltaE += EnergyHFields(p,pot,parms,i,ip,1);
-			}
+			deltaE += EnergyHFieldsAll(p,pot,parms);
 		}
 	}
 	// if it belong to the second half, pivot forward
@@ -1048,13 +1111,13 @@ int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_pote
 		if (!parms->nodihpot)
 			for (m=0;m<nmul;++m)deltaE -= (((p+ip)->back)+iw+m)->e_dih;				// old dihedral energy
 		if (!parms->nohfields)
-			deltaE -= GetHFields(p,ip);												// old H fields energy
+			deltaE -= GetHFields(p,parms->npol);												// old H fields energy
 
 		for (m=0;m<nmul;++m)														// apply nmul pivot moves
 			if ( (((p+ip)->back)+iw+m)->move == 1 )								// check if it you can move it
 			{
 				if (parms->randdw==1) dw = parms->dw_mpivot * (0.5 - frand());					// dihedral to pivot
-				else if (parms->randdw==2) dw = parms->dw_mpivot * gasdev(&(parms->seed));
+				else if (parms->randdw==2) dw = parms->dw_mpivot * gauss(0.,1.);
 
 				ok *= PivotForward((p+ip),iw-1+m,dw,(p+ip)->nback-iw-1-m,parms);	// moves in [iw+1,nback-1]
 			}
@@ -1067,10 +1130,7 @@ int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_pote
 			for (m=0;m<nmul;++m) deltaE += EnergyDihedrals(p,pot,iw+m,ip,1);
 		if (!parms->nohfields)
 		{
-			for(i=0;i<(p+ip)->nback;++i)
-			{
-				deltaE += EnergyHFields(p,pot,parms,i,ip,1);
-			}
+			deltaE += EnergyHFieldsAll(p,pot,parms);
 		}
 	}
 
@@ -1132,16 +1192,13 @@ int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_pote
  *****************************************************************************/
 int Metropolis(double deltaE, double T, struct s_tables *t)
 {
-	double p;
+	// the random number is drawn also when deltaE<=0, so that the stream of random
+	// numbers does not depend on the sign of a deltaE which is zero up to rounding
+	double r = frand();
+
 	if (deltaE<=0)
-       		 return 1;
-	
-	p = FastExp(-deltaE/T,t);
-      
-	if (frand()<p)
- 	 return 1;
-	
-	return 0;
+		return 1;
+	return ( r < FastExp(-deltaE/T,t) );
 }
 
 
@@ -1152,34 +1209,126 @@ int Metropolis(double deltaE, double T, struct s_tables *t)
  *****************************************************************************/
 void UpdateMonomer(struct s_polymer *from, struct s_polymer *to, int w, int n, int shell)
 {
-	int i,j,l[NCONTMAX2],lp[NCONTMAX2],ntm;//ll[NSHELLMAX],llp[NSHELLMAX];
-	// control beginning and end
-	if (w<0) w=0;
-	if (w>(from+n)->nback-1) w = (from+n)->nback-1;
+	UpdateChainRanges(from,to,1,&n,&w,&w);
+}
 
+void UpdateMonomerRange(struct s_polymer *from, struct s_polymer *to, int wfrom, int wto, int p, int shell)
+{
+	UpdateChainRanges(from,to,1,&p,&wfrom,&wto);
+}
+
+/*****************************************************************************
+ Copy residues [wfrom[r],wto[r]] of chains ch[r] (r=0..nr-1), and the contact
+ lists of all residues which are or were in contact with them, from "from"
+ to "to". All the partners are collected before anything is copied: copying
+ one chain at a time would overwrite the contact lists needed to find the
+ partners of the next one.
+ *****************************************************************************/
+void UpdateChainRanges(struct s_polymer *from, struct s_polymer *to, int nr, int *ch, int *wfrom, int *wto)
+{
+	// work arrays, grown as needed: partners found (l,lp) and marks per (chain,residue)
+	static int *l=NULL,*lp=NULL,lsize=0,nchainmark=0;
+	static unsigned int *mark=NULL,stamp=0;
+	int r,i,w,j,ntm,p,wf,wt,c;
+	struct s_back *b;
+
+	if (++stamp == 0)						// stamp wrapped around: clear marks
+	{
+		if (mark) memset(mark,0,(size_t)nchainmark*NRESMAX*sizeof(unsigned int));
+		stamp = 1;
+	}
+
+	// Find all residues that are or were in contact with moved monomers (each one only once)
 	ntm=0;
-	// Find all residues that are or were in contact with w
-	for (i=0;i< (((from+n)->back)+w)->ncontacts;++i)
+	for (r=0;r<nr;++r)
 	{
-		l[ntm] = ((((from+n)->back)+w)->contacts)[i];				// which backbone is close to in the from structure
-		lp[ntm] = ((((from+n)->back)+w)->contacts_p)[i];			// which chain
-		++ntm;
-		if (ntm>NCONTMAX2) Error("NCONTMAX2 too small in UpdateMonomerRange");
+		p = ch[r];
+		wf = (wfrom[r]<0) ? 0 : wfrom[r];
+		wt = (wto[r]>(from+p)->nback-1) ? (from+p)->nback-1 : wto[r];
+		for (w=wf;w<=wt;++w)
+		{
+			b = ((from+p)->back)+w;
+			for (i=0;i<b->ncontacts;++i)
+			{
+				c = (b->contacts_p)[i];
+				if (c >= nchainmark)					// a chain not seen yet: enlarge the marks
+				{
+					mark = (unsigned int *) realloc(mark,(size_t)(c+1)*NRESMAX*sizeof(unsigned int));
+					if (!mark) Error("Cannot allocate in UpdateChainRanges");
+					memset(mark+(size_t)nchainmark*NRESMAX,0,(size_t)(c+1-nchainmark)*NRESMAX*sizeof(unsigned int));
+					nchainmark = c+1;
+				}
+				if (mark[(size_t)c*NRESMAX+(b->contacts)[i]] != stamp)
+				{
+					mark[(size_t)c*NRESMAX+(b->contacts)[i]] = stamp;
+					if (ntm >= lsize)
+					{
+						lsize = 2*lsize + 1024;
+						l = (int *) realloc(l,lsize*sizeof(int));
+						lp = (int *) realloc(lp,lsize*sizeof(int));
+						if (!l || !lp) Error("Cannot allocate in UpdateChainRanges");
+					}
+					l[ntm] = (b->contacts)[i];
+					lp[ntm] = c;
+					++ntm;
+				}
+			}
+			b = ((to+p)->back)+w;
+			for (i=0;i<b->ncontacts;++i)
+			{
+				c = (b->contacts_p)[i];
+				if (c >= nchainmark)					// a chain not seen yet: enlarge the marks
+				{
+					mark = (unsigned int *) realloc(mark,(size_t)(c+1)*NRESMAX*sizeof(unsigned int));
+					if (!mark) Error("Cannot allocate in UpdateChainRanges");
+					memset(mark+(size_t)nchainmark*NRESMAX,0,(size_t)(c+1-nchainmark)*NRESMAX*sizeof(unsigned int));
+					nchainmark = c+1;
+				}
+				if (mark[(size_t)c*NRESMAX+(b->contacts)[i]] != stamp)
+				{
+					mark[(size_t)c*NRESMAX+(b->contacts)[i]] = stamp;
+					if (ntm >= lsize)
+					{
+						lsize = 2*lsize + 1024;
+						l = (int *) realloc(l,lsize*sizeof(int));
+						lp = (int *) realloc(lp,lsize*sizeof(int));
+						if (!l || !lp) Error("Cannot allocate in UpdateChainRanges");
+					}
+					l[ntm] = (b->contacts)[i];
+					lp[ntm] = c;
+					++ntm;
+				}
+			}
+		}
 	}
 
-	for (i=0;i<(((to+n)->back)+w)->ncontacts;++i)
+	for (r=0;r<nr;++r)
 	{
-		l[ntm]=((((to+n)->back)+w)->contacts)[i];
-		lp[ntm] = ((((to+n)->back)+w)->contacts_p)[i];
-		++ntm;
-		if (ntm>NCONTMAX2) Error("NCONTMAX2 too small in UpdateMonomerRange");
+		p = ch[r];
+		wf = (wfrom[r]<0) ? 0 : wfrom[r];
+		wt = (wto[r]>(from+p)->nback-1) ? (from+p)->nback-1 : wto[r];
 
+		// Update angle/dihedral energies from w-1 to w+2
+		for (w=wf;w<=wt;++w)
+		{
+			(((to+p)->back)+w)->e_ang = (((from+p)->back)+w)->e_ang;
+			if (w>0) (((to+p)->back)+w-1)->e_ang = (((from+p)->back)+w-1)->e_ang;
+			if (w<(from+p)->nback-1) (((to+p)->back)+w+1)->e_ang = (((from+p)->back)+w+1)->e_ang;
+
+			if (w>0) (((to+p)->back)+w-1)->e_dih = (((from+p)->back)+w-1)->e_dih;
+			(((to+p)->back)+w)->e_dih = (((from+p)->back)+w)->e_dih;
+			if (w<((from+p)->nback)-1) (((to+p)->back)+w+1)->e_dih = (((from+p)->back)+w+1)->e_dih;
+			if (w<((from+p)->nback)-2) (((to+p)->back)+w+2)->e_dih = (((from+p)->back)+w+2)->e_dih;
+
+			(((to+p)->back)+w)->irot = (((from+p)->back)+w)->irot;
+			(((to+p)->back)+w)->e_hfs = (((from+p)->back)+w)->e_hfs;
+		}
 	}
-
 
 	// Copy those contacts
 	for (i=0;i<ntm;++i)
 	{
+		(((to+lp[i])->back)+l[i])->e_hfs = (((from+lp[i])->back)+l[i])->e_hfs;		// H fields depend on the number of contacts
 		(((to+lp[i])->back)+l[i])->ncontacts = (((from+lp[i])->back)+l[i])->ncontacts;
 		for (j=0;j<(((from+lp[i])->back)+l[i])->ncontacts;++j)
 		{
@@ -1189,118 +1338,16 @@ void UpdateMonomer(struct s_polymer *from, struct s_polymer *to, int w, int n, i
 		}
 	}
 
-	(((to+n)->back)+w)->e_ang = (((from+n)->back)+w)->e_ang;
-	if (w>0) (((to+n)->back)+w-1)->e_ang = (((from+n)->back)+w-1)->e_ang;
-	if (w<(from+n)->nback-1) (((to+n)->back)+w+1)->e_ang = (((from+n)->back)+w+1)->e_ang;
-
-	if (w>1) (((to+n)->back)+w-2)->e_dih = (((from+n)->back)+w-2)->e_dih;
-	if (w>0) (((to+n)->back)+w-1)->e_dih = (((from+n)->back)+w-1)->e_dih;
-	(((to+n)->back)+w)->e_dih = (((from+n)->back)+w)->e_dih;
-	if (w<((from+n)->nback)-1) (((to+n)->back)+w+1)->e_dih = (((from+n)->back)+w+1)->e_dih;
-        (((to+n)->back)+w)->irot = (((from+n)->back)+w)->irot;
-
-	if (w<((from+n)->nback)-2) (((to+n)->back)+w+2)->e_dih = (((from+n)->back)+w+2)->e_dih;
-
-	for(i=0;i<(to+n)->nback;++i){
-		(((to+n)->back)+i)->e_hfs = (((from+n)->back)+i)->e_hfs;
-
-
-	}         
-  	// Finally, copy w itself
-	CopyResiduePositions( (((from+n)->back)+w), (((to+n)->back)+w) );
-
-}
-
-void UpdateMonomerRange(struct s_polymer *from, struct s_polymer *to, int wfrom, int wto, int p, int shell)
-{
-	int i,w,j,l[NCONTMAX2],lp[NSHELLMAX],ntm,k,chk;
-
-	// Control beginning and end
-	if (wfrom<0) wfrom=0;
-	if (wto>(from+p)->nback-1) wto = (from+p)->nback-1;
-	// Find all residues that are or were in contact with moved monomers w
-
-	ntm=0;
-	int error=1;
-	//#pragma omp parallel for private(i,chk,k) shared(error) reduction(+ : ntm) 
-	for (w=wfrom;w<=wto;++w)											// w ranges over all changed residues
-		for (i=0;i< (((from+p)->back)+w)->ncontacts;++i)			// i ranges over the contacts of w
-		{
-			chk=0;														// count contacts only once
-			for (k=0;k<ntm;++k)
-				if (l[k]==((((from+p)->back)+w)->contacts)[i] && lp[k]==((((from+p)->back)+w)->contacts_p)[i] ) chk=1;
-			if (chk==0)
-			{
-
-				l[ntm] = (((from+p)->back)+w)->contacts[i];				// which backbone is close to in the from structure
-				lp[ntm] = (((from+p)->back)+w)->contacts_p[i];			// which chain
-				++ntm;
-				if (ntm>NCONTMAX2) error=0; 
-			}
-		}
-	if (error==0) Error("NCONTMAX2 too small in UpdateMonomerRange");
-	
-	for (w=wfrom;w<=wto;++w)											// w ranges over all changed residues
-		for (i=0;i< (((to+p)->back)+w)->ncontacts;++i)
-		{
-			chk=0;
-												// count contacts only once
-			for (k=0;k<ntm;++k)
-				if (l[k]==((((to+p)->back)+w)->contacts)[i] && lp[k]==((((to+p)->back)+w)->contacts_p)[i] ) chk=1;
-			if (chk==0)
-			{
-				
-				l[ntm] = ((((to+p)->back)+w)->contacts)[i];				// same in the to structure
-				lp[ntm] = ((((to+p)->back)+w)->contacts_p)[i];
-				++ntm;
-				if (ntm>NCONTMAX2) Error("NCONTMAX2 too small in UpdateMonomerRange");
-			}
-		}
-
-
-	
-	// Update angle/dihedral energies from w-1 to w+2
-	//so slow #pragma omp parallel for
-	for (w=wfrom;w<=wto;++w)
+	// Finally, copy the moved residues themselves
+	for (r=0;r<nr;++r)
 	{
-		(((to+p)->back)+w)->e_ang = (((from+p)->back)+w)->e_ang;
-		if (w>0) (((to+p)->back)+w-1)->e_ang = (((from+p)->back)+w-1)->e_ang;
-		if (w<(from+p)->nback-1) (((to+p)->back)+w+1)->e_ang = (((from+p)->back)+w+1)->e_ang;
-
-		if (w>0) (((to+p)->back)+w-1)->e_dih = (((from+p)->back)+w-1)->e_dih;
-		(((to+p)->back)+w)->e_dih = (((from+p)->back)+w)->e_dih;
-		if (w<((from+p)->nback)-1) (((to+p)->back)+w+1)->e_dih = (((from+p)->back)+w+1)->e_dih;
-		if (w<((from+p)->nback)-2) (((to+p)->back)+w+2)->e_dih = (((from+p)->back)+w+2)->e_dih;
-
-		(((to+p)->back)+w)->irot = (((from+p)->back)+w)->irot;
-		if (w<((from+p)->nback)-2) (((to+p)->back)+w+2)->e_dih = (((from+p)->back)+w+2)->e_dih;
-
+		p = ch[r];
+		wf = (wfrom[r]<0) ? 0 : wfrom[r];
+		wt = (wto[r]>(from+p)->nback-1) ? (from+p)->nback-1 : wto[r];
+		for (w=wf;w<=wt;++w)
+			CopyResiduePositions( ((from+p)->back)+w, ((to+p)->back)+w) ;
+		if (to->cells) CellsUpdateRange(to,p,wf,wt);
 	}
-	
-	// Update hfields energies for all the sequence
-	for (w=0;w<=(from+p)->nback;++w)
-	{
-		(((to+p)->back)+w)->e_hfs = (((from+p)->back)+w)->e_hfs;
-	}
-	
-	// Copy those contacts
-	//so slow #pragma omp parallel for private(j)
-	for (i=0;i<ntm;++i)
-	{
-
-		        (((to+lp[i])->back)+l[i])->ncontacts = (((from+lp[i])->back)+l[i])->ncontacts;
- 	                for (j=0;j<(((from+lp[i])->back)+l[i])->ncontacts;++j)
-			{
-				((((to+lp[i])->back)+l[i])->contacts)[j] = ((((from+lp[i])->back)+l[i])->contacts)[j];
-                                ((((to+lp[i])->back)+l[i])->contacts_p)[j] = ((((from+lp[i])->back)+l[i])->contacts_p)[j];
-                                ((((to+lp[i])->back)+l[i])->e)[j] = ((((from+lp[i])->back)+l[i])->e)[j];
-			}
-	}
-	
-	// Finally, copy w itself
-	for (w=wfrom;w<=wto;++w)											// w ranges over all changed residues
-		CopyResiduePositions( ((from+p)->back)+w, ((to+p)->back)+w) ;
-
 }
 
 
@@ -1316,7 +1363,7 @@ void UpdateMonomerRange(struct s_polymer *from, struct s_polymer *to, int wfrom,
 int MoveSidechain(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *mc_parms, struct s_potential *pot,
 		unsigned long long istep, int debug, double t)
 {
-	int iw,ok=0,chk=0,ir,ip,i;
+	int iw,ok=0,chk=0,ir,ip;
 	double deltaE;
 
 
@@ -1340,7 +1387,7 @@ int MoveSidechain(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms 
 	deltaE = - GetEnergyMonomer(p,ip,iw);								// old energy of iw with the others
 
 	if (!mc_parms->nohfields){
-		deltaE -= GetHFields(p,ip);										// old H fields energy
+		deltaE -= GetHFields(p,mc_parms->npol);										// old H fields energy
 	}
 	
 	ir = irand( (((p+ip)->back)+iw)->nrot );
@@ -1352,10 +1399,7 @@ int MoveSidechain(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms 
 	
 	if (!mc_parms->nohfields)
 	{
-		for(i=0;i<(p+ip)->nback;++i)
-		{
-			deltaE += EnergyHFields(p,pot,mc_parms,i,ip,1);
-		}
+		deltaE += EnergyHFieldsAll(p,pot,mc_parms);
 	}
 	
 	#ifdef DEBUG
@@ -1462,7 +1506,7 @@ void CompareStructures(struct s_polymer *a, struct s_polymer *b, int nc, int nat
 
 int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potential *pot, int nmul, struct s_mc_parms *parms, double t)
 {
-      int half,ok=1,m,iw,ip,idir,i;
+      int half,ok=1,m,iw,ip,idir;
       double dw=0,deltaE,rc2;
 
       if(nmul<0) nmul=2+irand(-nmul-1);                     //generate random nmul in [2,-mul] if required
@@ -1484,6 +1528,7 @@ int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potenti
       if (idir == -1)
       {
             if ( iw-nmul-1 < 2 ) nmul = iw - 1;                                                       // if nmul beyond beginning of the chain, decrease it
+            if (nmul < 1) { parms->mov ++; return 0; }                                                // nothing to move
 
             deltaE = -GetEnergyMonomerRange(p,iw-nmul-1,iw,ip);                                 // calculate old energy
             if (!parms->nodihpot)
@@ -1494,19 +1539,21 @@ int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potenti
 				deltaE -= (((p+ip)->back)+iw-nmul)->e_ang;
 			}
 			if (!parms->nohfields)
-				deltaE -= GetHFields(p,ip);													  // old H fields energy
+				deltaE -= GetHFields(p,parms->npol);													  // old H fields energy
 		  
 		  
             for (m=0;m<nmul;++m)                                                                            // apply nmul pivot moves
-                  if ( (((p+ip)->back)+iw-m)->move == 1 )                                             // check if it you can move it
+                  if ( (((p+ip)->back)+iw+1-m)->move == 1 )                                           // PivotBackward(k) changes dihedral k
                   {
                         if (parms->randdw==1) dw = parms->dw_lpivot * (0.5 - frand());                            // dihedral to pivot
-                        else if (parms->randdw==2) dw = parms->dw_lpivot * gasdev(&(parms->seed));
+                        else if (parms->randdw==2) dw = parms->dw_lpivot * gauss(0.,1.);
 
                         ok *= PivotBackward((p+ip),iw+1-m,dw,nmul-m,parms);                     // moves iw-1-m => overall moves in [iw-nmul,iw-1] (and sidechains of iw-imul-1 and iw)
                   }
             if (iw-nmul-1>=0)
-                  if ( Abs(Dist2( (((p+ip)->back)+iw-nmul)->pos, (((p+ip)->back)+iw-nmul-1)->pos ) - (((p+ip)->back)+iw-nmul-1)->d2_next) > rc2 ) ok=0;           // if covalent bond is broken
+                  if ( DAbs(Dist2( (((p+ip)->back)+iw-nmul)->pos, (((p+ip)->back)+iw-nmul-1)->pos ) - (((p+ip)->back)+iw-nmul-1)->d2_next) > rc2 ) ok=0;           // if covalent bond is broken
+            // the stretched bond changes the angles at iw-nmul-1, iw-nmul and the dihedrals iw-nmul-1..iw-nmul+1
+            if (ok) ok = CheckAngleRange(p,ip,iw-nmul-1,iw-nmul,parms->a_cloose) && CheckLockedDihedralRange(p,ip,iw-nmul-1,iw-nmul+1,parms->d_cloose);
 
             if (ok==1)
             {
@@ -1524,16 +1571,14 @@ int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potenti
 				
 				if (!parms->nohfields)
 				{
-					for(i=0;i<(p+ip)->nback;++i)
-					{
-						deltaE += EnergyHFields(p,pot,parms,i,ip,1);
-					}
+					deltaE += EnergyHFieldsAll(p,pot,parms);
 				}
             }
       }
       else
       {
             if ( iw+2+nmul > (p+ip)->nback - 1 ) nmul = (p+ip)->nback - 3 - iw;                // if nmul is beyond the end, decrease it
+            if (nmul < 1) { parms->mov ++; return 0; }                                                // nothing to move
 
             deltaE = -GetEnergyMonomerRange(p,iw,iw+nmul+1,ip);                                // calculate old energy
             if (!parms->nodihpot)
@@ -1544,18 +1589,20 @@ int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potenti
 				deltaE -= (((p+ip)->back)+iw+nmul)->e_ang;
 			}
 		    if (!parms->nohfields)
-				deltaE -= GetHFields(p,ip);													  // old H fields energy
+				deltaE -= GetHFields(p,parms->npol);													  // old H fields energy
 
             for (m=0;m<nmul;++m)                                                               // apply nmul pivot moves
-				if ( (((p+ip)->back)+iw-1+m)->move == 1 )                                      // check if it you can move it
+				if ( (((p+ip)->back)+iw+m)->move == 1 )                                        // PivotForward(k) changes dihedral k+1
 				{
 					if (parms->randdw==1) dw = parms->dw_lpivot * (0.5 - frand());                      // dihedral to pivot
-					else if (parms->randdw==2) dw = parms->dw_lpivot * gasdev(&(parms->seed));
+					else if (parms->randdw==2) dw = parms->dw_lpivot * gauss(0.,1.);
 
 					ok *= PivotForward((p+ip),iw-1+m,dw,nmul-m,parms);                            // moves iw+1+m => overall moves in [iw+1,iw+nmul]
 				}
             if (iw+nmul+1<(p+ip)->nback)
-                  if ( Abs(Dist2( (((p+ip)->back)+iw+nmul)->pos, (((p+ip)->back)+iw+nmul+1)->pos ) - (((p+ip)->back)+iw+nmul+1)->d2_next) > rc2 ) ok=0;           // if covalent bond is broken
+                  if ( DAbs(Dist2( (((p+ip)->back)+iw+nmul)->pos, (((p+ip)->back)+iw+nmul+1)->pos ) - (((p+ip)->back)+iw+nmul)->d2_next) > rc2 ) ok=0;           // if covalent bond is broken
+            // the stretched bond changes the angles at iw+nmul, iw+nmul+1 and the dihedrals iw+nmul..iw+nmul+2
+            if (ok) ok = CheckAngleRange(p,ip,iw+nmul,iw+nmul+1,parms->a_cloose) && CheckLockedDihedralRange(p,ip,iw+nmul,iw+nmul+2,parms->d_cloose);
 
             if (ok==1)
             {
@@ -1573,10 +1620,7 @@ int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potenti
 				
 				if (!parms->nohfields)
 				{
-					for(i=0;i<(p+ip)->nback;++i)
-					{
-						deltaE += EnergyHFields(p,pot,parms,i,ip,1);
-					}
+					deltaE += EnergyHFieldsAll(p,pot,parms);
 				}
 				
             }
@@ -1631,7 +1675,10 @@ int MoveMultipleFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 	double dw,deltaE=0;
 
 	ip = irand(parms->npol);						// which chain to move
+	if ((p+ip)->nback < 10) { parms->mov++; return 0; }			// no room for a multiple flip
 	iw1 = irand( (p+ip)->nback-6 ) + 3;					// which backbone to move as first
+	// the loop below needs some i in [-nmul_mflip,nmul_mflip-1] with |i|>=3 and iw1+i in [3,nback-4]
+	if ( (iw1-3 < 3 || parms->nmul_mflip < 3) && (iw1+3 > (p+ip)->nback-4 || parms->nmul_mflip < 4) ) { parms->mov++; return 0; }
 	do { i = irand(2*parms->nmul_mflip) - parms->nmul_mflip; } while ( iw1+i > (p+ip)->nback-4 || iw1+i < 3 || (i>-3 && i<3) );
 	iw2 = iw1 + i;								// ... which to move as last
 	if (iw2<iw1) { i = iw1; iw1=iw2; iw2=i; }				// iw1 should be lower than iw2 for geometry
@@ -1656,7 +1703,7 @@ int MoveMultipleFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 		if (iw2<(p+ip)->nback-2) deltaE -= (((p+ip)->back)+iw2+2)->e_dih;
 	}
 	if (!parms->nohfields)
-		deltaE -= GetHFields(p,ip);								// old H fields energy
+		deltaE -= GetHFields(p,parms->npol);								// old H fields energy
 
 	// make the move in p
 
@@ -1666,6 +1713,7 @@ int MoveMultipleFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 	if (ok==0)
 	{
 		UpdateMonomerRange(oldp,p,iw1-1,iw2+1,ip,parms->shell);		// return to the old position, contacts, etc.
+		parms->mov ++;
 		return 0;
 	}
 
@@ -1679,15 +1727,8 @@ int MoveMultipleFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 			if ( DAbs( Angle( (((p+ip)->back)+iw2)->pos, (((p+ip)->back)+iw2+1)->pos, (((p+ip)->back)+iw2+2)->pos, (p+ip)->tables, &out)
 					- (((p+ip)->back)+iw2+1)->a_next) > parms->a_cloose  || out==0 ) ok=0;
 	}
-	if (parms->d_cloose>0)
-	{
-		if (iw1-3>=0 && (((p+ip)->back)+iw1-1)->move == 0)
-			if ( DAbs( Dihedral( (((p+ip)->back)+iw1-3)->pos, (((p+ip)->back)+iw1-2)->pos, (((p+ip)->back)+iw1-1)->pos, (((p+ip)->back)+iw1)->pos, (p+ip)->tables, &out)
-						- (((p+ip)->back)+iw1-1)->d_next ) > parms->d_cloose || out==0 ) ok=0;
-		if (ok && iw2+3<(p+ip)->nback && (((p+ip)->back)+iw2+2)->move == 0)
-			if ( DAbs( Dihedral( (((p+ip)->back)+iw2)->pos, (((p+ip)->back)+iw2+1)->pos, (((p+ip)->back)+iw2+2)->pos, (((p+ip)->back)+iw2+3)->pos, (p+ip)->tables, &out)
-						- (((p+ip)->back)+iw2+2)->d_next ) > parms->d_cloose || out==0) ok=0;
-	}
+	// flipping [iw1,iw2] changes the dihedrals iw1-1, iw1, iw2+1 and iw2+2
+	if (ok) ok = CheckLockedDihedralRange(p,ip,iw1-1,iw1,parms->d_cloose) && CheckLockedDihedralRange(p,ip,iw2+1,iw2+2,parms->d_cloose);
 
 	if (ok) ok = AddSidechain(p,iw1-1,iw2+1,ip);
 
@@ -1711,10 +1752,7 @@ int MoveMultipleFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 		
 		if (!parms->nohfields)
 		{
-			for(i=0;i<(p+ip)->nback;++i)
-			{
-				deltaE += EnergyHFields(p,pot,parms,i,ip,1);
-			}
+			deltaE += EnergyHFieldsAll(p,pot,parms);
 		}
 
 		#ifdef DEBUG
@@ -1752,7 +1790,7 @@ int MoveMultipleFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 int MoveCoM(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,
 		unsigned long long istep, int debug, double t)
 {
-	int ip,i,ok;
+	int ip,ok;
 	double dx,dy,dz,deltaE;
 
 	ip = irand(parms->npol);
@@ -1769,7 +1807,7 @@ int MoveCoM(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms
 	
 	if (!parms->nohfields)
 	{
-		deltaE -= GetHFields(p,ip);										// old H fields energy
+		deltaE -= GetHFields(p,parms->npol);										// old H fields energy
 	}
 	
 	
@@ -1782,10 +1820,7 @@ int MoveCoM(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms
 	// new hfields
 	if (!parms->nohfields)
 	{
-		for(i=0;i<(p+ip)->nback;++i)
-		{
-			deltaE += EnergyHFields(p,pot,parms,i,ip,1);
-		}
+		deltaE += EnergyHFieldsAll(p,pot,parms);
 	}
 	
 #ifdef DEBUG
@@ -1835,6 +1870,9 @@ int MoveRotation(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *
 
 	deltaE = - GetEnergyMonomerRange(p,0,(p+ip)->nback-1,ip);
 
+	if (!parms->nohfields)
+		deltaE -= GetHFields(p,parms->npol);								// old H fields energy
+
 	idir=irand(3);
 	
 	if(idir==0)
@@ -1848,6 +1886,9 @@ int MoveRotation(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *
 	
 	deltaE += EnergyMonomerRange(p,pot,0,(p+ip)->nback-1,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
 	
+	if (!parms->nohfields)
+		deltaE += EnergyHFieldsAll(p,pot,parms);
+
 	ok = Metropolis(deltaE,t,p->tables);
 
         if (ok == 0)                            // move rejected
@@ -1880,326 +1921,298 @@ int MoveRotation(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *
 }
 
 
-int MoveClusterCoM(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,
-                  int istep, int debug, double t, FILE *fproc, int iproc)
+
+/*****************************************************************************
+ Returns 1 if the chains of cluster ic have no contact with other chains
+ *****************************************************************************/
+static int ClusterIsIsolated(struct s_polymer *p, int *members, int n, int *cluster_of, int ic)
 {
-	int ip,ok,ic,jc;
-	int k,i;//,ind;
-	int ctrl, old_ctrl;
-	int ncluster,ind_cluster,cont,sum;
-	double dx,dy,dz,deltaE;
-	int adjacency[NCHAINMAX][NCHAINMAX];
-	int cluster[NCHAINMAX][NCHAINMAX];
-	int avector[NCHAINMAX];
-	int npol_cluster[NCHAINMAX];
+	int i,ires,k;
+	struct s_back *b;
 
-	for(ic=0;ic<NCHAINMAX;++ic)
-	{
-		for(jc=0;jc<NCHAINMAX;++jc)
-	    {
-			adjacency[ic][jc]=0;
-			cluster[ic][jc]=-1;
-		}
-	}
-
-	for(ic=0;ic<parms->npol;++ic)
-	{
-		for (i=0;i<(p+ic)->nback;++i)
+	for (i=0;i<n;++i)
+		for (ires=0;ires<(p+members[i])->nback;++ires)
 		{
-			for (k=0;k<(((p+ic)->back)+i)->ncontacts;++k)
-			{
-				adjacency[ic][((((p+ic)->back)+i)->contacts_p)[k]] = 1;
-			}
+			b = ((p+members[i])->back)+ires;
+			for (k=0;k<b->ncontacts;++k)
+				if (cluster_of[(b->contacts_p)[k]] != ic) return 0;
 		}
-	}
+	return 1;
+}
 
-	cont=0;
-	ncluster=0;
-	while(1)
+/*****************************************************************************
+ Periodic box: shift the chains of a cluster by box vectors (which does not
+ change any energy) so that each one is at the image nearest to the chain
+ through which it is reached. Returns 0 if the cluster wraps around the box
+ (e.g. a fibril through the periodic boundary), which then cannot be rotated.
+ *****************************************************************************/
+static int UnwrapCluster(struct s_polymer *p, int *members, int n, int *cluster_of, int ic, double L)
+{
+	int head,i,k,a,c2,placed[n],idx;
+	double dx,dy,dz;
+	struct s_back *b,*b2;
+
+	for (i=0;i<n;++i) placed[i] = (i==0);
+	for (head=0;head<n;++head)
 	{
-		ctrl=99;
-		for(ic=0;ic<parms->npol;++ic)
-			avector[ic]=adjacency[cont][ic];
-            
-	    ind_cluster=0;
-		old_ctrl=0;
-
-		while( (old_ctrl-ctrl) != 0)
-	    {
-			old_ctrl=ctrl;
-			ctrl=0;
-			for(ic=cont;ic<parms->npol;++ic)
+		a = members[head];
+		if (!placed[head]) continue;
+		for (i=0;i<(p+a)->nback;++i)
+		{
+			b = ((p+a)->back)+i;
+			for (k=0;k<b->ncontacts;++k)
 			{
-				sum=0;
-				for(jc=0;jc<parms->npol;++jc)
-					{
-						sum += avector[jc]*adjacency[ic][jc];
-					}
-				if(sum!=0)
+				c2 = (b->contacts_p)[k];
+				if (cluster_of[c2] != ic || c2 == a) continue;
+				for (idx=0;members[idx]!=c2;++idx) ;
+				b2 = ((p+c2)->back)+(b->contacts)[k];
+				dx = b2->pos.x - b->pos.x;
+				dy = b2->pos.y - b->pos.y;
+				dz = b2->pos.z - b->pos.z;
+				if (!placed[idx])
 				{
-					cluster[ncluster][ind_cluster] = ic;
-					++ind_cluster;
-					++ctrl;
-					for(jc=0;jc<parms->npol;++jc)
-					{
-						if(avector[jc]+adjacency[ic][jc]>=1)
-							avector[jc]=1;
-
-						adjacency[ic][jc]=0;
-					}
+					DisplaceCoM(p,c2,-L*round(dx/L),-L*round(dy/L),-L*round(dz/L));
+					placed[idx] = 1;
 				}
+				else if (fabs(dx) > 0.5*L || fabs(dy) > 0.5*L || fabs(dz) > 0.5*L) return 0;
 			}
 		}
-
-		npol_cluster[ncluster]=ind_cluster;
-		++ncluster;
-		++cont;
-
-		for(i=cont;i<parms->npol;++i)
-	    {
-			if(adjacency[i][i] == 0)
-				++cont;
-			else
-			{
-				cont=i;
-				break;
-			}
-		}
-		if(cont==parms->npol) break;
 	}
+	for (i=0;i<n;++i) if (!placed[i]) return 0;				// the visit of FindClusters reaches all of them
+	return 1;
+}
 
+/*****************************************************************************
+ Rotate the chains members[0..n-1] by dtheta (radians) around the axis idir
+ (0=x, 1=y, 2=z) through the centre of mass of their backbone atoms
+ *****************************************************************************/
+static void RotateChains(struct s_polymer *p, int *members, int n, int idir, double dtheta)
+{
+	int k,i,j,nat=0;
+	double c[3]={0,0,0},cs=cos(dtheta),sn=sin(dtheta),u,v;
+	double *x,*y;
+	struct s_back *b;
+	struct vector *r;
+
+	for (k=0;k<n;++k)
+		for (i=0;i<(p+members[k])->nback;++i)
+		{
+			b = ((p+members[k])->back)+i;
+			c[0] += b->pos.x; c[1] += b->pos.y; c[2] += b->pos.z;
+			nat++;
+		}
+	for (i=0;i<3;++i) c[i] /= nat;
+
+	for (k=0;k<n;++k)
+		for (i=0;i<(p+members[k])->nback;++i)
+			for (j=-1;j<(((p+members[k])->back)+i)->nside;++j)	// j=-1 is the backbone atom
+			{
+				r = (j<0) ? &((((p+members[k])->back)+i)->pos) : &((((((p+members[k])->back)+i)->side)+j)->pos);
+				if (idir==0)      { x = &(r->y); y = &(r->z); u = r->y - c[1]; v = r->z - c[2]; *x = c[1] + cs*u - sn*v; *y = c[2] + sn*u + cs*v; }
+				else if (idir==1) { x = &(r->z); y = &(r->x); u = r->z - c[2]; v = r->x - c[0]; *x = c[2] + cs*u - sn*v; *y = c[0] + sn*u + cs*v; }
+				else              { x = &(r->x); y = &(r->y); u = r->x - c[0]; v = r->y - c[1]; *x = c[0] + cs*u - sn*v; *y = c[1] + sn*u + cs*v; }
+			}
+}
+
+/*****************************************************************************
+ Rigid translation (rot=0) or rotation (rot=1) of a cluster of chains.
+ A move after which the cluster touches other chains is rejected: it would
+ change the decomposition into clusters, making the reverse move impossible.
+ *****************************************************************************/
+static int MoveCluster(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot, double t, int rot)
+{
+	int npol=parms->npol,member[npol],start[npol+1],cluster_of[npol],wfrom[npol],wto[npol];
+	int ncluster,ic,n,i,ok,idir=0,*m;
+	double dx=0,dy=0,dz=0,dtheta=0,deltaE=0.;
+
+	if (rot) dtheta = parms->dtheta * (0.5 - frand());
+
+	ncluster = FindClusters(p,npol,member,start,cluster_of);
 	ic = irand(ncluster);
-
-	dx = parms->dx_clm * frand() - parms->dx_clm / 2;
-	dy = parms->dx_clm * frand() - parms->dx_clm / 2;
-	dz = parms->dx_clm * frand() - parms->dx_clm / 2;
-
-	deltaE=0.;
-	for(i=0;i<npol_cluster[ic];++i)
+	m = member+start[ic];
+	n = start[ic+1]-start[ic];
+	for(i=0;i<n;++i)
 	{
-		ip = cluster[ic][i];
-
-		#ifdef DEBUG
-		if (debug>2) fprintf(fproc,"step=%d com ip=%d\n",istep,ip); fflush(stderr);
-		#endif
-
-		deltaE -= GetEnergyMonomerRange(p,0,(p+ip)->nback-1,ip);                                    // old energy  (iw1-1 & iw2+1 because I move their sidechains)
-		DisplaceCoM(p,ip,dx,dy,dz);
-
-		//deltaE += EnergyMonomerRange(p,pot,0,(p+ip)->nback,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);
-	    deltaE += EnergyMonomerRange(p,pot,0,(p+ip)->nback-1,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
+		wfrom[i] = 0;
+		wto[i] = (p+m[i])->nback-1;
 	}
 
-	#ifdef DEBUG
-	if (debug>2) fprintf(fproc,"deltaE=%lf\n",deltaE); fflush(stderr);
-	#endif
-
-	ok = Metropolis(deltaE,t,p->tables);
-
-	if (ok == 0)                        // move rejected
+	if (rot)
 	{
-		for(i=0;i<npol_cluster[ic];++i)
-	    {
-			ip = cluster[ic][i];
-			//UpdateMonomerRange(oldp,p,0,(p+ip)->nback,ip,parms->shell);                                     // return to the old position, contacts, etc.
-			UpdateMonomerRange(oldp,p,0,(p+ip)->nback-1,ip,0);
+		idir = irand(3);
+		if (pot->boxtype=='p' && !UnwrapCluster(p,m,n,cluster_of,ic,pot->lbox))
+		{
+			UpdateChainRanges(oldp,p,n,m,wfrom,wto);			// undo the shifts
+			parms->mov ++;
+			return 0;
 		}
+		for(i=0;i<n;++i) deltaE -= GetEnergyMonomerRange(p,0,(p+m[i])->nback-1,m[i]);
+		RotateChains(p,m,n,idir,dtheta);
+		if (p->cells)							// all chains moved before their energies are computed
+			for(i=0;i<n;++i) CellsUpdateRange(p,m[i],0,(p+m[i])->nback-1);
+		for(i=0;i<n;++i)
+			deltaE += EnergyMonomerRange(p,pot,0,(p+m[i])->nback-1,m[i],npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
 	}
-
-	else                          // move accepted
+	else
 	{
-		for(i=0;i<npol_cluster[ic];++i)
-	    {
-			ip = cluster[ic][i];
-			//UpdateMonomerRange(p,oldp,0,(p+ip)->nback,ip,parms->shell);                                     // update oldp
-			UpdateMonomerRange(p,oldp,0,(p+ip)->nback-1,ip,0);
-
-			if(parms->shell==1 )            // if shells are active, update them
-			{
-//				UpdateShell(p,parms);
-//				CopyShell(p,oldp,parms);
-				parms->ishell=1;
-			}
-  
-
-
-			p->etot += deltaE;
-			parms->acc ++;
-
-			#ifdef DEBUG
-			if (debug>2) fprintf(fproc,"accept=%d\n",ok); fflush(stderr);
-			#endif
-		}
+		// all chains are displaced before any energy is computed: moving them one at a
+		// time would make them overlap with their neighbours not moved yet
+		dx = parms->dx_clm * frand() - parms->dx_clm / 2;
+		dy = parms->dx_clm * frand() - parms->dx_clm / 2;
+		dz = parms->dx_clm * frand() - parms->dx_clm / 2;
+		for(i=0;i<n;++i) deltaE -= GetEnergyMonomerRange(p,0,(p+m[i])->nback-1,m[i]);
+		for(i=0;i<n;++i) DisplaceCoM(p,m[i],dx,dy,dz);
+		if (p->cells)
+			for(i=0;i<n;++i) CellsUpdateRange(p,m[i],0,(p+m[i])->nback-1);
+		for(i=0;i<n;++i)
+			deltaE += EnergyMonomerRange(p,pot,0,(p+m[i])->nback-1,m[i],npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
 	}
 
+	if (ClusterIsIsolated(p,m,n,cluster_of,ic))
+		ok = Metropolis(deltaE,t,p->tables);
+	else
+		ok = 0;
+
+	if (ok == 0)                        // move rejected: return to the old position, contacts, etc.
+		UpdateChainRanges(oldp,p,n,m,wfrom,wto);
+	else                                // move accepted
+	{
+		UpdateChainRanges(p,oldp,n,m,wfrom,wto);
+		if(parms->shell==1) parms->ishell=1;
+		p->etot += deltaE;
+		parms->acc ++;
+	}
 	parms->mov ++;
 
-	if (ok == 0) return 0;
-	else return 1;
+	return ok;
+}
+
+int MoveClusterCoM(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,
+                  unsigned long long istep, int debug, double t, FILE *fproc, int iproc)
+{
+	return MoveCluster(p,oldp,parms,pot,t,0);
+}
+
+int MoveClusterRot(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,
+                  unsigned long long istep, int npol,int debug, double t, FILE *fproc, int iproc)
+{
+	return MoveCluster(p,oldp,parms,pot,t,1);
 }
 
 
-int MoveClusterRot(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,
-                  int istep, int npol,int debug, double t, FILE *fproc, int iproc)
+/*****************************************************************************
+ Aggregation-volume-bias move (AVBMC, Chen & Siepmann, J. Phys. Chem. B 105,
+ 11275 (2001)): a target chain j is chosen; with probability avb_pin a chain
+ out of the bonded region of j (centre of mass farther than avb_rin) is put
+ at a random point of that region, otherwise a chain in the region is put at
+ a random point of the rest of the box. The moved chain keeps its internal
+ conformation and takes a random orientation. Periodic box only, so that the
+ volumes of the two regions are exact (V_in + V_out = L^3).
+ *****************************************************************************/
+static struct vector ChainCentre(struct s_polymer *p, int ic)
 {
-	int ip=0,ok,ic,jc;
-	int k,i;//,ind;
-	int ctrl, old_ctrl;
-	int ncluster,ind_cluster,cont,sum;
-	//double dx,dy,dz
-	double deltaE;
-	int adjacency[NCHAINMAX][NCHAINMAX];
-	int cluster[NCHAINMAX][NCHAINMAX];
-	int avector[NCHAINMAX];
-	int npol_cluster[NCHAINMAX];
-	double dtheta= parms->dtheta * (0.5 - frand());
+	struct vector c={0,0,0};
+	int i;
 
-
-
-	for(ic=0;ic<NCHAINMAX;++ic)
+	for (i=0;i<(p+ic)->nback;++i)
 	{
-		for(jc=0;jc<NCHAINMAX;++jc)
-	    {
-			adjacency[ic][jc]=0;
-			cluster[ic][jc]=-1;
-		}
+		c.x += (((p+ic)->back)+i)->pos.x;
+		c.y += (((p+ic)->back)+i)->pos.y;
+		c.z += (((p+ic)->back)+i)->pos.z;
 	}
+	c.x /= (p+ic)->nback; c.y /= (p+ic)->nback; c.z /= (p+ic)->nback;
+	return c;
+}
 
-	for(ic=0;ic<parms->npol;++ic)
+// rotate chain ic by the matrix R around its centre c, then put the centre at c2
+static void PlaceChain(struct s_polymer *p, int ic, double R[3][3], struct vector c, struct vector c2)
+{
+	int i,j;
+	double u,v,w;
+	struct vector *r;
+
+	for (i=0;i<(p+ic)->nback;++i)
+		for (j=-1;j<(((p+ic)->back)+i)->nside;++j)			// j=-1 is the backbone atom
+		{
+			r = (j<0) ? &((((p+ic)->back)+i)->pos) : &((((((p+ic)->back)+i)->side)+j)->pos);
+			u = r->x - c.x; v = r->y - c.y; w = r->z - c.z;
+			r->x = c2.x + R[0][0]*u + R[0][1]*v + R[0][2]*w;
+			r->y = c2.y + R[1][0]*u + R[1][1]*v + R[1][2]*w;
+			r->z = c2.z + R[2][0]*u + R[2][1]*v + R[2][2]*w;
+		}
+}
+
+// uniformly distributed rotation matrix (random unit quaternion, Shoemake)
+static void RandomRotation(double R[3][3])
+{
+	double u1=frand(),u2=2*PI*frand(),u3=2*PI*frand();
+	double a=sqrt(1-u1)*sin(u2),b=sqrt(1-u1)*cos(u2),c=sqrt(u1)*sin(u3),d=sqrt(u1)*cos(u3);	// q = d + a i + b j + c k
+
+	R[0][0] = 1-2*(b*b+c*c); R[0][1] = 2*(a*b-c*d);   R[0][2] = 2*(a*c+b*d);
+	R[1][0] = 2*(a*b+c*d);   R[1][1] = 1-2*(a*a+c*c); R[1][2] = 2*(b*c-a*d);
+	R[2][0] = 2*(a*c-b*d);   R[2][1] = 2*(b*c+a*d);   R[2][2] = 1-2*(a*a+b*b);
+}
+
+int MoveAVB(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot, double t)
+{
+	int npol=parms->npol,j,k,ip,in_move,nin=0,nout=0,cand[npol],ncand=0,ok;
+	double L=pot->lbox,rin=parms->avb_rin,r2,vin,vout,factor,deltaE,R[3][3];
+	struct vector cj,ci,c2,d;
+
+	j = irand(npol);
+	in_move = (frand() < parms->avb_pin);
+	cj = ChainCentre(p,j);
+
+	// chains in and out of the bonded region of j; the candidates to move
+	for (k=0;k<npol;++k)
+		if (k!=j)
+		{
+			ci = ChainCentre(p,k);
+			d.x = ci.x-cj.x; d.y = ci.y-cj.y; d.z = ci.z-cj.z;
+			d.x -= L*round(d.x/L); d.y -= L*round(d.y/L); d.z -= L*round(d.z/L);
+			if (d.x*d.x+d.y*d.y+d.z*d.z < rin*rin) { nin++; if (in_move==0) cand[ncand++] = k; }
+			else { nout++; if (in_move==1) cand[ncand++] = k; }
+		}
+
+	// the random numbers of the proposal are always drawn, also when nothing can be moved
+	ip = ncand ? cand[irand(ncand)] : -1;
+	RandomRotation(R);
+	do
 	{
-		for (i=0;i<(p+ic)->nback;++i)
-	    {
-			for (k=0;k<(((p+ic)->back)+i)->ncontacts;++k)
-			{
-				adjacency[ic][((((p+ic)->back)+i)->contacts_p)[k]] = 1;
-			}
-		}
+		d.x = (frand()-0.5)*L; d.y = (frand()-0.5)*L; d.z = (frand()-0.5)*L;
+		r2 = d.x*d.x+d.y*d.y+d.z*d.z;
 	}
+	while ( in_move ? (r2 >= rin*rin) : (r2 < rin*rin) );			// uniform in the sphere, or in the box out of it
 
-	cont=0;
-	ncluster=0;
-	while(1)
-	{
-		ctrl=99;
-		for(ic=0;ic<NCHAINMAX;++ic)
-	    {
-			avector[ic]=adjacency[cont][ic];
-		}
+	if (ip<0) { parms->mov++; return 0; }
 
-		ind_cluster=0;
-		old_ctrl=0;
+	vin = 4./3.*PI*rin*rin*rin;
+	vout = L*L*L - vin;
+	if (in_move) factor = (1-parms->avb_pin)*vin*nout / (parms->avb_pin*vout*(nin+1));
+	else factor = parms->avb_pin*vout*nin / ((1-parms->avb_pin)*vin*(nout+1));
 
-		while(old_ctrl-ctrl != 0)
-	    {
-			old_ctrl=ctrl;
-			ctrl=0;
-			for(ic=cont;ic<parms->npol;++ic)
-			{
-				sum=0;
-				for(jc=0;jc<parms->npol;++jc)
-					sum += avector[jc]*adjacency[ic][jc];
-				if(sum!=0)
-				{
-					cluster[ncluster][ind_cluster] = ic;
-					ind_cluster++;
-					++ctrl;
-					for(jc=0;jc<parms->npol;++jc)
-					{
-						if(avector[jc]+adjacency[ic][jc]>=1) avector[jc]=1;
-						adjacency[ic][jc]=0;
-					}
-				}
-			}
-		}
+	deltaE = - GetEnergyMonomerRange(p,0,(p+ip)->nback-1,ip);
+	if (!parms->nohfields) deltaE -= GetHFields(p,npol);
 
-		npol_cluster[ncluster]=ind_cluster;
-		++ncluster;
-		++cont;
-		for(i=cont;i<parms->npol;++i)
-	    {
-			if(adjacency[i][i] == 0)
-		  	++cont;
-			else
-			{
-				cont=i;
-				break;
-			}
-		}
-		if(cont==parms->npol) break;
-	}
+	ci = ChainCentre(p,ip);
+	c2.x = cj.x+d.x; c2.y = cj.y+d.y; c2.z = cj.z+d.z;
+	PlaceChain(p,ip,R,ci,c2);
 
-	ic = irand(ncluster);
-	deltaE=0.;
+	deltaE += EnergyMonomerRange(p,pot,0,(p+ip)->nback-1,ip,npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
+	if (!parms->nohfields) deltaE += EnergyHFieldsAll(p,pot,parms);
 
-	for(i=0;i<npol_cluster[ic];++i)
-	{
-		ip = cluster[ic][i];
+	ok = Metropolis(deltaE - t*log(factor),t,p->tables);		// acceptance min[1, factor exp(-deltaE/T)]
 
-		#ifdef DEBUG
-		if (debug>2) fprintf(fproc,"step=%d com ip=%d\n",istep,ip); fflush(stderr);
-		#endif
-
-		deltaE -= GetEnergyMonomerRange(p,0,(p+ip)->nback-1,ip);                                    // old energy  (iw1-1 & iw2+1 because I move their sidechains)
-
-		// deltaE += EnergyMonomerRange(p,pot,0,(p+ip)->nback,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);
-		// deltaE += EnergyMonomerRange(p,pot,0,(p+ip)->nback,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
-	}
-
-	int idir=irand(3);
-
-	if(idir==0)
-		RotationClusterX(p,ip,dtheta,ic,cluster,npol_cluster[ic]);
-	else if(idir==1)
-		RotationClusterY(p,ip,dtheta,ic,cluster,npol_cluster[ic]);
+	if (ok == 0)
+		UpdateMonomerRange(oldp,p,0,(p+ip)->nback-1,ip,0);
 	else
-		RotationClusterZ(p,ip,dtheta,ic,cluster,npol_cluster[ic]);
-
-	for(i=0;i<npol_cluster[ic];++i)
 	{
-	ip=cluster[ic][i];
-	//deltaE += EnergyMonomerRange(p,pot,0,(p+ip)->nback,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);
-	deltaE += EnergyMonomerRange(p,pot,0,(p+ip)->nback-1,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
+		UpdateMonomerRange(p,oldp,0,(p+ip)->nback-1,ip,0);
+		if(parms->shell==1) parms->ishell=1;
+		p->etot += deltaE;
+		parms->acc ++;
 	}
-
-	#ifdef DEBUG
-	if (debug>2) fprintf(fproc,"deltaE=%lf\n",deltaE); fflush(stderr);
-	#endif
-
-	ok = Metropolis(deltaE,t,p->tables);
-
-	if (ok == 0)                        // move rejected
-	{
-		for(i=0;i<npol_cluster[ic];++i)
-	    {
-			ip = cluster[ic][i];
-			//  UpdateMonomerRange(oldp,p,0,(p+ip)->nback,ip,parms->shell);                                     // return to the old position, contacts, etc.
-			UpdateMonomerRange(oldp,p,0,(p+ip)->nback-1,ip,0);
-	    }
-	}
-	else                          // move accepted
-	{
-		for(i=0;i<npol_cluster[ic];++i)
-	    {
-			ip = cluster[ic][i];
-			// UpdateMonomerRange(p,oldp,0,(p+ip)->nback,ip,parms->shell);    // update oldp
-			UpdateMonomerRange(p,oldp,0,(p+ip)->nback-1,ip,0);
-			if(parms->shell==1 )            // if shells are active, update them
-			{
-//				UpdateShell(p,parms);
-//				CopyShell(p,oldp,parms);
-				parms->ishell=1;
-			}
-			p->etot += deltaE;
-			parms->acc ++;
-
-			#ifdef DEBUG
-			if (debug>2) fprintf(fproc,"accept=%d\n",ok); fflush(stderr);
-			#endif
-		}
-	}
-
 	parms->mov ++;
 
-	if (ok == 0) return 0;
-	else return 1;
+	return ok;
 }

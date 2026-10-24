@@ -20,19 +20,19 @@
 
 struct s_parms
 {
-	char pdbfile[200];
-	char poutfile[200];
-	char eoutfile[200];
-	char cntfile[200];
-	char coevofile[200];
-	char ab_propensityfile[200];
-	char h_fieldsfile[200];
-	char maxcontfile[200];
-        char maxcontpairsfile[200];
+	char pdbfile[FNAMEMAX];
+	char poutfile[FNAMEMAX];
+	char eoutfile[FNAMEMAX];
+	char cntfile[FNAMEMAX];
+	char coevofile[FNAMEMAX];
+	char ab_propensityfile[FNAMEMAX];
+	char h_fieldsfile[FNAMEMAX];
+	char maxcontfile[FNAMEMAX];
+        char maxcontpairsfile[FNAMEMAX];
 
 
 	char potential[50];
-	char atomtypes[50];
+	char atomtypes[FNAMEMAX];
 	char model[50];
 	int hydrogens;
 	double rnat;
@@ -55,8 +55,8 @@ struct s_parms
 	double r_homo;				// its radius
 	int rotamers;				// how to deal with rotamers (0=off)
 	int sidescratch;				// build sidechain from rotamers instead than reading from pdb
-	char rotfile[200];			// file with rotamer library
-	int cb_pdb;				// wether to keep CB from PDB
+	char rotfile[FNAMEMAX];			// file with rotamer library
+	int cb_pdb;				// whether to keep CB from PDB (default) or replace it with a pseudo-CB (0)
 	int pdb_rot;				// whether to add the pdb rotamers or not
 	double e_dih1;				// energy dihedrals
 	double e_dih3;
@@ -68,12 +68,12 @@ struct s_parms
 	int go_noise;				// add noise to the go model (1=only to native contacts, 2=to any contact)
 	double go_noise_sigma;			// stdev of the noise distribution
 
-	char op_file[100];			//file to eventually write optimize potential datas for montegrappa
+	char op_file[FNAMEMAX];			//file to eventually write optimize potential datas for montegrappa
 	char op_kind[100];
 	int hydro_at[NTYPEMAX];
 	double hydro_e;
 	double hydro_r;
-	char typesfile[100];
+	char typesfile[FNAMEMAX];
 
     int dih_ram;				//energy dihedrals with minimum in Ramachandran dihedrals
 	double e_dihram;
@@ -188,6 +188,7 @@ void Go_Dihedrals(struct s_parms *parms, struct s_polymer *p, int nc, double *di
 void Go_Angles(struct s_parms *parms, struct s_polymer *p, int nc, double *ang, struct s_potential *u);
 void Ram_Dihedrals(struct s_parms *p, struct s_potential *u);
 int SetGoTypes(struct s_polymer *p, int nchains, int nat);
+int SetGoHomoTypes(struct s_polymer *p, int nchains, int nat);
 int SetGoAATypes(struct s_polymer *p, int nchains, int nat);
 void DisulphideBonds(struct s_parms *parms, struct s_polymer *p, double **e, double **r2, double **r02, int nchains, int nat);
 void OP_AddEnergy(struct s_polymer *p, int a1, int a2, double mul);

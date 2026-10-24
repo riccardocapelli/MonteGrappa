@@ -64,9 +64,16 @@ int ReadPDB(struct atom_s *x, char *pdbfile, int hydrogens, int *nchain, int *nb
       Error("Cannot find PDB file ");
   }
 
-  while(fgets(aux,500,fp)!=NULL)
-    //if the first four letters of aux are not ATOM
+  while(fgets(aux,sizeof(aux),fp)!=NULL)
+  {
+    // only the first model of a multi-model (e.g. NMR) pdb
+    if (!strncmp(aux,"ENDMDL",6))
+    {
+      if (iatom>0) { fprintf(stderr,"Only the first model of the pdb is read\n"); break; }
+      continue;
+    }
     if (!strncmp(aux,"ATOM",4)){
+      if (strlen(aux)<54) Error("ATOM line of the pdb too short");
       ok=1;
       // Copy atom name, positioned between 12 and 16 on the pdb lines
       k=0;
@@ -78,7 +85,8 @@ int ReadPDB(struct atom_s *x, char *pdbfile, int hydrogens, int *nchain, int *nb
       }
       atom[k]='\0';
 
-	  if (aux[16]!=' ') Error("Grappino can't handle alternate positions of atoms ");
+	  // alternate locations: keep only the first one (blank or A)
+	  if (aux[16]!=' ' && aux[16]!='A') continue;
       // remove hydrogens if requested
 	  if (hydrogens==0 && atom[0]=='H') ok=0;
         for(i=0;i<parms->n_back_a;++i)
@@ -159,11 +167,13 @@ int ReadPDB(struct atom_s *x, char *pdbfile, int hydrogens, int *nchain, int *nb
 
       // accept atom
       if (ok==1) iatom ++;
-      if (iatom>NATOMMAX)
+      if (iatom>=NATOMMAX)
         Error("NATOMMAX too small");
       }
+  }
 
 
+   fclose(fp);
    (*nchain)++;
 
    fprintf(stderr,"Read %d atoms in %d chains (nbackmax=%d)\n",iatom,*nchain,*nbackmax);
@@ -222,7 +232,7 @@ int PDB2CACB(struct atom_s *pdb, struct atom_s *ca, int n)
 	       nacb=0;
 	       cm.x=0; cm.y=0; cm.z=0;
 	       for(j=0;j<n;++j)
-	    	 if ( (pdb+j)->iaa == (pdb+i)->iaa )
+	    	 if ( (pdb+j)->iaa == (pdb+i)->iaa && (pdb+j)->chain == (pdb+i)->chain )
 	    	   if ( !strcmp( (pdb+j)->atom,"CB") )
 	    	   {
 	    		   cm.x += ((pdb+j)->pos).x;
@@ -230,6 +240,7 @@ int PDB2CACB(struct atom_s *pdb, struct atom_s *ca, int n)
 	    		   cm.z += ((pdb+j)->pos).z;
 	    		   nacb ++;
 	    	   }
+		    if (nacb==0) { fprintf(stderr,"chain %d residue %d %s\n",(pdb+i)->chain,(pdb+i)->iaa,(pdb+i)->aa); Error("Missing CB in the pdb"); }
 		    strcpy((ca+k)->aa,(pdb+i)->aa);
 		    strcpy((ca+k)->atom,"CB");
 		    (ca+k)->chain = (pdb+i)->chain;
@@ -294,7 +305,7 @@ int PDB2BackCB(struct atom_s *pdb, struct atom_s *ca, int n)
 				nacb=0;
 				cm.x=0; cm.y=0; cm.z=0;
 				for(j=0;j<n;++j)
-				if ( (pdb+j)->iaa == (pdb+i)->iaa )
+				if ( (pdb+j)->iaa == (pdb+i)->iaa && (pdb+j)->chain == (pdb+i)->chain )
 				if ( !strcmp( (pdb+j)->atom,"CB") )
 					{
 						cm.x += ((pdb+j)->pos).x;
@@ -302,6 +313,7 @@ int PDB2BackCB(struct atom_s *pdb, struct atom_s *ca, int n)
 						cm.z += ((pdb+j)->pos).z;
 						nacb ++;
 					}
+				if (nacb==0) { fprintf(stderr,"chain %d residue %d %s\n",(pdb+i)->chain,(pdb+i)->iaa,(pdb+i)->aa); Error("Missing CB in the pdb"); }
 				strcpy((ca+k)->aa,(pdb+i)->aa);
 				strcpy((ca+k)->atom,"CB");
 				(ca+k)->chain = (pdb+i)->chain;

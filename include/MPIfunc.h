@@ -35,7 +35,6 @@ void Create_rot_datatype(MPI_Datatype *Rottype);
 void Create_side_datatype(MPI_Datatype *Sidetype);
 void Create_back_datatype(MPI_Datatype *Backtype);
 void Create_pot_datatype(MPI_Datatype *Pottype);
-void Create_parms_datatype(MPI_Datatype *Parmstype);
 
 /*
 struct s_mpi_parms
@@ -43,7 +42,6 @@ struct s_mpi_parms
 	int my_rank;
 	int nprocs;
 	MPI_Datatype Rot_mpi;
-	MPI_Datatype Parms_mpi;
 	MPI_Datatype Back_mpi;
 	MPI_Datatype Side_mpi;
 	MPI_Datatype Pot_mpi;
@@ -53,7 +51,7 @@ struct s_mpi_parms
 */
 
 //Send-Receive
-struct s_mc_parms *send_parms(int iproc, int nprocs, MPI_Datatype Parmstype, struct s_mc_parms *parms, MPI_Status astatus);//,double *tmin);
+struct s_mc_parms *send_parms(int iproc, int nprocs, struct s_mc_parms *parms);
 void send_struct(int *nback, int iproc, int nprocs, int *nat, int *ntypes, MPI_Status astatus);
 void send_struct_to_proc(int *nback, int iproc, int jproc,int nprocs, int *nat, int *ntypes, MPI_Status astatus);
 struct s_polymer *send_pol(int iproc, int nprocs, int nback, MPI_Datatype Backtype, MPI_Datatype Sidetype,  MPI_Datatype Rottype, struct s_polymer *startp, MPI_Status astatus, int npol, int shell, int nosidechains);

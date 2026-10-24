@@ -1,0 +1,20 @@
+# TTR(105-115) protofilament (PDB 2M5N, model 1): structure-based all-heavy-atom model
+# whose native contacts, also between chains, are shared by all chains (go_homo)
+pdbfile         protofilament.pdb
+rotamers
+rotfile         ../../lib/rotamers.lib
+pdb_rot                         # the conformation of the PDB is one of the rotamers
+atomtypes       go_homo
+backbone_atoms  3 N CA C
+locked_atoms    N               # omega is not rotated
+imin            4
+r_hardcore      2.0
+r_native        4.5
+potential       go
+go-energy       -0.2
+go_dihedrals
+e_dih1          1.2
+e_dih3          0.4
+debug           1
+polfile         ttr_aa.pol
+potfile         ttr_aa.pot

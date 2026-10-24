@@ -18,6 +18,10 @@ have a look at the input file: we commented the previously used keyword
 different way than a classical GO model: modify the path to let grappino 
 find the library. For further information about "nosidechain", "rotamers", 
 "rot_file", "pdb_rot" and "atomtypes" please refer to the manual. 
+The CB of each residue is taken from the pdb; with "cb_pdb 0" it is replaced
+by a pseudo-CB in the plane of the backbone, as in grappino versions older than
+2026 (whose results/polyala.pol and polyala.pot are therefore different). The
+trajectories and rmsd in "results" were obtained with that older model.
 
 
 To optimize the potential, we need to calculate some restraints. There are a 

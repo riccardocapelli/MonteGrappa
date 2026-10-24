@@ -63,6 +63,8 @@ struct s_polymer
 	#ifdef OPTIMIZEPOT
 	struct s_optimizepot *op;
 	#endif
+
+	struct s_cells *cells;		// cell list of the system (only in polymer+0 of the simulated system, see cells.c)
 };
 
 struct s_back
@@ -90,6 +92,7 @@ struct s_back
 	double e_ang;			// angular energy
 	double e_dih;			// dihedral energy
 	double e_hfs;			// H fields energy
+	double ext;			// largest distance of its sidechain atoms from this backbone atom
 	int nshell;			// number of backbone atoms in the shell
 	int *shell;			// atoms in the shell
 	int *shell_p;			// ... which chain it belongs to
@@ -180,6 +183,8 @@ struct s_potential
 	
 	int h_fields;				//h-fields for CoCaInE potential
 	double *h_values;
+
+	double rcut;				// largest distance at which two atoms interact (incl. hard core)
 };
 
 ////////struct st_restart
@@ -294,14 +299,15 @@ struct s_mc_parms
 	double dw_mpivot;	// maximum angle allowed in a flip
 	double dw_lpivot;	// maximum angle allowed in a flip
 	double dw_mflip;	// maximum angle allowed in a multiple flip
-	char fntrj[50];		// name of trajectory file
-	char fne[50];		// name of energy file
-	char flastp[50];	// name of last conformation;
-	char fnproc[50];	// name of the log file
+	char fntrj[FNAMEMAX];		// name of trajectory file
+	char fne[FNAMEMAX];		// name of energy file
+	char flastp[FNAMEMAX];	// name of last conformation;
+	char fnproc[FNAMEMAX];	// name of the log file
 	int nprinttrj;		// when to print trajectory file
 	int nprintlog;		// when to print log
 	int nprinte;		// when to print energy
-	int ncheckpoint;	// when to print a checkpoint (.pol)
+	int ncheckpoint;	// write a checkpoint every ncheckpoint steps (<=0: every tcheckpoint seconds)
+	int tcheckpoint;	// wall-clock seconds between checkpoints when ncheckpoint<=0
 	FILE *flog;
 	int shell;		// 1=activate shell
 	int nshell;		// update shell every %d step
@@ -322,15 +328,21 @@ struct s_mc_parms
 	int noangpot;		//0=there is a potential on angles, 1; there is not
 	int nodihpot;		//0=there is a potential on dihedrals, 1; there is not
 	int nohfields;		//0=there is a H fields potential, 1: there is not
+	int echeck;		//1=check incremental energy against TotalEnergy after every move (slow, for debugging)
+	int cells;		//cell list for the energy: 1=on, 0=off, -1=automatic (on for large systems)
+	int nprintobs;		//write the observables of aggregation every nprintobs steps (0=never)
+	FILE *fobs;		//... to this file (opened for each run)
 	int nrun;		// number of repetitions of the MC
 	int always_restart;	//1=in different irun, start always from input structure
 	int record_native; //1=records the input (native( structure as first snapshot
-	int acc;		// # of accepted moves
-	int mov;		// # of attempted moves
+	long long acc;		// # of accepted moves
+	long long mov;		// # of attempted moves
 	int disentangle;	//0=if two atoms are closer than r_hardcore, then do not calculate the energy
 	int stempering;		//1=do stempering
 	double dx_com;		//displacemente oc center of mass
 	double dx_clm;		//displacement of cluster
+	double avb_rin;		// aggregation-volume-bias move: radius of the bonded region around a chain
+	double avb_pin;		// ... and probability of moving a chain into it
 	double dtheta;
 	double r_cloose;	// constrains in the bond distance,
 	double a_cloose;	// angles
@@ -339,13 +351,14 @@ struct s_mc_parms
 	double r_contact;	// threshold for contact distance in residue-residue interaction (H Field)
 	#ifdef OPTIMIZEPOT
 	 struct s_optimizepot_input *op_input;
-	 char fnop[50];		// name of file of experimental restrains
+	 char fnop[FNAMEMAX];		// name of file of experimental restrains
 	 char op_minim[50];	// optimize procedure: none, sample, steep
 	 int op_itermax;	// # of iteration steps
 	 double op_step;
 	 double op_T;		// temperature corresponding to the experimental data (can be different from T)
 	 int op_deltat;		// = nstep/op_nframes
 	 double op_stop;	// stop condition
+	 double op_tchi2;	// fictitious temperature of the Metropolis search on the reduced chi2 (0 = only downhill)
 	 int op_print;		// print log every * step
 	 double op_emin;	// matrix elements cannot go below this limit
 	 double op_emax;	// matrix elements cannot go below this limit
@@ -376,7 +389,7 @@ struct s_mc_parms
 
 	int iT_bias; 	//if replica index > iT_bias, no local move -> no shells
 	int nreplicas; // if nreplicas==ntemp, load a different polymer for each replica; if nreplicas==1 load the same polymer for each replica
-	char input_names[NREPMAX][30];
+	char input_names[NREPMAX][FNAMEMAX];
 };
 
 struct s_tables
@@ -388,4 +401,43 @@ struct s_tables
 	double *fast_expm;		// exp of negative numbers
 	double *fast_acos;		// arccos
 
+};
+
+/********************************************************************
+ State of the MC loop saved in a checkpoint (see checkpoint.c)
+ ********************************************************************/
+struct s_checkpoint
+{
+	int restart;			// 1 = Do_MC continues from this state (not saved)
+	char polname[FNAMEMAX];		// polymer file of the original start (reference geometry, native)
+	unsigned long long istep;	// first step to do
+	int irun;
+	unsigned long long rng[4];	// state of the random number generator
+	int iprinttrj,iprintlog,iprinte,icheckpoint,ptcount;
+	long long acc,mov;
+	int mcount[NMOVES];
+	long long macc[NMOVES],mdone[NMOVES];
+};
+
+/********************************************************************
+ Cell list of backbone atoms (see cells.c)
+ ********************************************************************/
+struct s_cells
+{
+	int npol,nres;			// chains and residues of the system
+	int *offset;			// global index of residue i of chain ic is offset[ic]+i
+	int *chain,*res;		// ... and back
+	double rcut,extcap;		// interaction range and bound on sidechain extents
+	double L,invL;			// cell side
+	int hsize,mask;			// buckets of the hash table (a power of 2)
+	int *head;			// first residue in each bucket
+	int *next,*prev,*bucket;	// linked lists, bucket of each residue
+	int *cand;			// candidates returned by CellsCandidates
+	double *x,*y,*z,*ext;		// compact copy of backbone positions and sidechain extents (always kept)
+	int dirty;			// 1 = to be rebuilt before use
+	int forced;			// 1 = always used (keyword cells 1)
+	int allowed;			// 0 = never used (keyword cells 0, or small system)
+	int active;			// 1 = used by EnergyMonomerRange (decided at each rebuild)
+	double box;			// side of the periodic box (0 = no periodic box)
+	int ncell;			// cells per side in the periodic box
 };

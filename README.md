@@ -23,78 +23,161 @@ The package contains three programs:
 
 The code needs GSL libraries and the MPI environment to be correctly 
 installed on your machine. This is a requirement to enable STEMPERING
-and PARALLEL TEMPERING functions. 
+and PARALLEL TEMPERING functions. A basic version of Montegrappa can be
+compiled without GSL and MPI.
 
-Please check these dependencies before installing the software, or skip 
-to the next section if you want a custom installation ( a basic version 
-of Montegrappa can be compiled without GSL and MPI).
+GSL is found with gsl-config; MPI with the mpicc wrapper in your PATH.
+Both can be set on the command line, e.g.
 
-By default, GSL libraries should be installed in /opt/local/lib and their
-headers installed in /opt/local/include.
-If they are in different locations, you have to modify the compilation 
-flags in the Makefile accordingly.
+	$ make version=STEMPERING GSL_PREFIX=/opt/local
+	$ make version=MPI MPICC=/usr/lib64/openmpi/bin/mpicc
 
-The whole distribution can be quickly compiled just typing in your terminal
+The whole distribution can be compiled typing
 
 	$ make all
 
-The binary files "montegrappa", "montegrappa_mpi", "grappino", "mhistogram", 
-and "mgp2pdb" will be created in the ./bin directory. 
+The binary files "montegrappa" (with STEMPERING), "montegrappa_mpi",
+"grappino", "mhistogram" and "mgp2pdb" will be created in the ./bin
+directory.
 
 
-OPENMP (experimental): To activate OpenMP, change the following lines 
-in the Makefile
+OPENMP (experimental): compile with
 
-	#CC=gcc
-	CC=gcc -fopenmp
-	#CCMP=/usr/lib64/openmpi/bin/mpicc
-	CCMP=/usr/lib64/openmpi/bin/mpicc -fopenmp
+	$ make OPENMP=1
 
-and set the variable
+(the compiler must support -fopenmp; on macOS the default clang does
+not) and set the variable
 
 	$ export OMP_NUM_THREADS=N
 
-where N is the number of threads you want to use. N=1 means
-no OpenMP parallelization. Performances are system and parameters
-dependent: always test your configuration before to run long simulations.  
+where N is the number of threads you want to use. Performances are
+system and parameters dependent: always test your configuration before
+running long simulations.
 
 ================ CUSTOM INSTALLATION ====================================
 
+Each version is compiled in its own directory obj/<version>, so there
+is no need to clean between versions; "make cleanobj" removes all of
+them.
 
 (1) MonteGrappa Single Core, no STEMPERING (no PARALLEL TEMPERING)
 
-	$ make cleanobj
 	$ make
 
 An executable called "montegrappa" will be created in the ./bin directory.
 
-(2) MonteGrappa Single Core, with STEPERING (no PARALLEL TEMPERING)
+(2) MonteGrappa Single Core, with STEMPERING (no PARALLEL TEMPERING)
 
     - SYSTEM REQUIREMENTS: GSL libraries
 
-	$ make cleanobj	
 	$ make version=STEMPERING
 
-As well as the (1) version, an executable called "montegrappa" will be created in the ./bin directory.
-
+As well as the (1) version, an executable called "montegrappa" will be
+created in the ./bin directory.
 
 (3) MonteGrappa Multi Core, with PARALLEL TEMPERING (no STEMPERING)
 
     - SYSTEM REQUIREMENTS: MPI environment
 
-
-	$ make cleanobj
 	$ make version=MPI
 
 An executable called "montegrappa_mpi" will be created in the ./bin directory.
 
+(4) MonteGrappa with AddressSanitizer and UndefinedBehaviorSanitizer,
+    to look for memory errors (slow, for development)
 
-(3) grappino and mhistogram --------------------------------------------------
- 
+	$ make version=ASAN
+
+An executable called "montegrappa_asan" will be created in the ./bin directory.
+
+(5) grappino, mhistogram and mgp2pdb
+
 The tools can be compiled alone, with the commands
 
-      $ make grappino
-      $ make mhistogram
-	  $ make mgp2pdb
+	$ make grappino
+	$ make mhistogram
+	$ make mgp2pdb
 
-The executables "grappino" and "mhistogram" will be created in the ./bin directory.
+
+(6) Tests
+
+	$ make check          (about 20 s)
+	$ make check-asan     (memory errors, about 1.5 min)
+	$ make check-stat     (detailed balance, a few minutes)
+
+See tests/README.md.
+
+
+================ NEW IN THIS REVISION ===================================
+
+Results:
+ - Random numbers come from xoshiro256** instead of the C library rand():
+   trajectories are the same on every platform, but differ from those of
+   previous versions for the same seed. Each MPI replica uses its own
+   independent stream (previously all replicas used the same numbers).
+ - Several moves did not satisfy detailed balance or did not update the
+   energy correctly (movebias, lpivot, flip/mflip with d_cloose, backrub
+   with several chains, cluster moves, H fields with several chains).
+   Simulations using them should be repeated.
+ - A missing Temp keyword is now an error (it silently ran at T=0).
+
+Restart:
+ - A checkpoint is written by default every 10 minutes (keyword
+   tcheckpoint, in seconds); "ncheckpoint N" writes it every N steps
+   instead. With MPI the default is every 100000 steps.
+ - The checkpoint (checkpoint.dat, or checkpoint_proc<rank>.dat with MPI)
+   contains the full state of the simulation. Restart with
+
+	$ montegrappa checkpoint potential.pot parameters.par
+
+   in the same directory: the run continues exactly as if it had not
+   been interrupted, appending to its trajectory and energy files. The
+   original polymer file must still be there. Simulated tempering state
+   and frames recorded for the optimization of the potential are not
+   saved.
+
+Periodic box:
+ - In the [ global ] chapter of the potential file,
+	boxtype p
+	boxsize L
+   puts the system in a periodic cubic box of side L (A), with minimum
+   image interactions (boxtype c and s are boxes with walls, as before).
+   L must exceed twice the range of interaction of two residues; shells
+   cannot be used with it. Coordinates are not wrapped into the box.
+ - Any number of chains (the limit was 25).
+
+New keywords of the parameter file:
+ - echeck          after every move, compare the energy with a full
+                   recalculation and report differences (slow, to test moves)
+ - cells N         cell list for the energy: 1 always, 0 never, -1 automatic
+                   (default; used for large systems when it is faster)
+ - tcheckpoint N   seconds between checkpoints (default 600)
+ - nprintobs N     every N steps, write observables of aggregation to obs.dat
+                   (obs_run<run>_proc<rank>.dat as for energies): number of
+                   clusters of chains, largest and mean cluster size, pairs of
+                   chains in contact, parallel and antiparallel pairs (cosine of
+                   the end-to-end vectors above 0.8), pairs in register and
+                   mean register, nematic order parameter
+ - op_tchi2 T      fictitious temperature of the Metropolis search of the
+                   potential optimization, on the reduced chi2 (default 0:
+                   only steps that lower chi2 are accepted, as before); the
+                   best matrix found is returned
+ - flag keywords accept an explicit 0 (e.g. "shell 0")
+ - avbmc N         aggregation-volume-bias move (Chen and Siepmann, J. Phys.
+                   Chem. B 105, 11275 (2001)), frequency as the other moves:
+                   a chain is moved, with a random orientation, into the
+                   bonded region of another chain (centre of mass within
+                   avb_rin of its centre of mass) or out of it, with the
+                   acceptance that keeps detailed balance. It helps chains in
+                   a dilute box find each other. Periodic box only, of side
+                   larger than 2*avb_rin.
+   avb_rin R       radius (A) of the bonded region (required)
+   avb_pin P       probability of a move into the bonded region (default 0.5)
+ - movebias without nmul_local is an error (it did nothing)
+
+Checkpoints written by earlier versions of this revision cannot be read
+(one more move type).
+
+Output:
+ - With MPI, each replica writes its exchanges to exchange_proc<rank>.dat
+   and the acceptance of exchanges is printed at the end.

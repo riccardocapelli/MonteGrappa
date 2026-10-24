@@ -20,9 +20,9 @@ so native contacts (also between chains) attract any pair of chains.
     ../../bin/grappino ttr_ca.in     # CA model, r_native 7.5 A -> ttr_ca.pol/pot
     ../../bin/grappino ttr_aa.in     # all heavy atoms, rotamers, r_native 4.5 A -> ttr_aa.pol/pot
 
-`ttr_aa.in` uses `pdb_rot` and `cb_pdb`, so that the experimental structure is
-reproduced exactly (the default CB of grappino is an achiral pseudo-CB in the
-backbone plane). For a periodic box of side 120 A (16 chains, about 15 mM, the
+`ttr_aa.in` uses `pdb_rot`, so that the experimental structure (sidechains
+included, with the CB of the PDB) is one of the rotamers and is reproduced
+exactly. For a periodic box of side 120 A (16 chains, about 15 mM, the
 experiments used 12 mM) add to the `[ global ]` chapter of the potential
 
     boxtype p
@@ -33,7 +33,7 @@ experiments used 12 mM) add to the `[ global ]` chapter of the potential
 | model | native fibril | assembly from dispersed chains |
 |---|---|---|
 | CA | stable up to T ~ 2, melts between 2.5 and 3 | 16 chains aggregate into parallel in-register sheets stacked in parallel, with lower energy than the native fibril: the CA model cannot tell the antiparallel pairing of the sheets |
-| all-atom | stable up to T = 2.0, melts between 2.0 and 2.5 | running (T = 1.8, 2.0) |
+| all-atom | stable at T = 1.2 over 5e6 steps, melts at T = 1.4 (runs of 2e5 steps are too short to tell) | no aggregation for T >= 1.3 in 3e7 steps; at T = 1.0 the chains form clusters of 6-16 chains with parallel in-register pairs, antiparallel pairs are few and never in register. The native fibril has lower energy (pair energy -770 at T = 1.2 against -550 at T = 1.0): the all-atom model prefers the native architecture, the assembly is kinetically trapped |
 
 `status.sh` prints the last observables of the all-atom assembly runs in
 `runs/`.

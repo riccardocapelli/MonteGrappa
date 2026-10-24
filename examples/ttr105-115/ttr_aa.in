@@ -4,7 +4,6 @@ pdbfile         protofilament.pdb
 rotamers
 rotfile         ../../lib/rotamers.lib
 pdb_rot                         # the conformation of the PDB is one of the rotamers
-cb_pdb                          # keep the CB of the PDB (the default CB is an achiral pseudo-CB in the backbone plane)
 atomtypes       go_homo
 backbone_atoms  3 N CA C
 locked_atoms    N               # omega is not rotated

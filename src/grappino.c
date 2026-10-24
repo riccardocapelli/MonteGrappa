@@ -18,8 +18,8 @@ int main(int argc, char *argv[])
 	struct s_potential *u;                  // potential structure
 	double **cm;                            // contact map
 	FILE *fin;
-	double dummy, r2, stdev;							// for contacts calculation
-	int i;
+	double stdev=1.;							// scale of the coevolutionary energies (used by h_fields)
+	int i,natalloc;
 	
     GrappinoWelcome(stderr);
     
@@ -49,11 +49,13 @@ int main(int argc, char *argv[])
     
 	// load rotamers
     
+	rotamers = NULL;
 	if (p->rotamers)
 	{
 		rotamers = AlloRotamer(AAKINDMAX,stderr);
 		nrot_kinds = ReadRotamers(p->rotfile,rotamers,p->debug);
 	}
+	else if (p->sidescratch && !p->nosidechain) Error("sidescratch needs rotamers and rotfile");
 
 	
 
@@ -63,7 +65,10 @@ int main(int argc, char *argv[])
 
 	// allocate polymer and tables
 	fprintf(stderr,"Allocate polymer\n");
-	polymer = AlloPolymer(nchain,nbackmax,NSIDEMAX,NROTMAX,npdb,0,0,stderr);
+	// sidechains built from scratch get atom ids after those of the pdb
+	natalloc = npdb;
+	if (p->sidescratch && !p->nosidechain) natalloc += nbackmax*(ROT_ATMAX+1);
+	polymer = AlloPolymer(nchain,nbackmax,NSIDEMAX,NROTMAX,natalloc,0,0,stderr);
 	polymer->tables = InitTables(stderr);
 	for (i=1;i<nchain;++i) (polymer+i)->tables = polymer->tables;			// tables of all polymers point to same address
 
@@ -75,14 +80,15 @@ int main(int argc, char *argv[])
 	/////////////////
 
 	// set atomtypes
-	if (!strcmp(p->atomtypes,"go")) ntypes = SetGoTypes(polymer,nchain,npdb);
-	else if (!strcmp(p->atomtypes,"go_aa")) ntypes = SetGoAATypes(polymer,nchain,npdb);
-	else if (!strcmp(p->atomtypes,"go_homo")) ntypes = SetGoHomoTypes(polymer,nchain,npdb);
-	else ntypes = ReadTypes(polymer,nchain,npdb,p->atomtypes);
+	if (!strcmp(p->atomtypes,"go")) ntypes = SetGoTypes(polymer,nchain,nat);
+	else if (!strcmp(p->atomtypes,"go_aa")) ntypes = SetGoAATypes(polymer,nchain,nat);
+	else if (!strcmp(p->atomtypes,"go_homo")) ntypes = SetGoHomoTypes(polymer,nchain,nat);
+	else if (strcmp(p->atomtypes,"")) ntypes = ReadTypes(polymer,nchain,nat,p->atomtypes);
+	else Error("atomtypes not defined (go, go_aa, go_homo or a file)");
 	
 	cm = ContactMap(p,polymer,nchain,ntypes,p->debug);
 	
-	u = AlloPotential(npdb,ntypes,0,0,0,0);
+	u = AlloPotential(nat,ntypes,0,0,0,0);
 	u->splice=0;
 	u->g_imin = p->imin;
 	fprintf(stderr,"imin = %d\n",u->g_imin);
@@ -94,14 +100,15 @@ int main(int argc, char *argv[])
 	}
 	else if (!strcmp(p->potential,"coevo"))
 	{
-	  stdev = Ext_Pairs(p,polymer,u->e,u->r_2,u->r0_2);
+		stdev = Ext_Pairs(p,polymer,u->e,u->r_2,u->r0_2);
 		u->g_r0hard = p->rhard;
 	}
+	else Error("potential must be go or coevo");
 
 	if (p->splice) {
 		u->splice=1;
 		u->ke_splice = p->ke_splice;
-		u->kr2_splice = p->kr_splice;	// warning: here kr2_splice is not squared, it's gonna be squared in montegrappa!
+		u->kr2_splice = p->kr_splice * p->kr_splice;	// PrintPotential writes its square root
 	}
 
 	// cysteine bridge
@@ -140,10 +147,10 @@ int main(int argc, char *argv[])
 		// Read and rescale the hfields file
 		ReadHFields(p->h_fieldsfile,p->maxcontfile,u,polymer,nchain,p->hfs_alpha,stdev);
 		// Print the potential file
-		PrintPotential(u,p->eoutfile,npdb,ntypes,0,0,0,0);
+		PrintPotential(u,p->eoutfile,nat,ntypes,0,0,0,0);
 		}
 	else
-		PrintPotential(u,p->eoutfile,npdb,ntypes,0,0,0,1);	// to avoid the h_fields printing
+		PrintPotential(u,p->eoutfile,nat,ntypes,0,0,0,1);	// to avoid the h_fields printing
 	AppendPotentialComments(p, p->eoutfile);
 
 	// print polymer
@@ -183,7 +190,7 @@ void Parse(FILE *fp, struct s_parms *p)
 	for(i=0;i<100;++i) p->move_a[i]=1;
 	p->debug=0;
 	p->rotamers=0;
-	p->cb_pdb = 0;
+	p->cb_pdb = 1;			// keep the CB of the pdb ("cb_pdb 0": pseudo-CB in the backbone plane)
 	p->pdb_rot = 0;
 	p->go_dih = 0;
 	p->go_ang = 0;
@@ -309,7 +316,7 @@ void Parse(FILE *fp, struct s_parms *p)
         //splice option in potential
 		if (!strncmp(aux,"splice",6)) {
             p->splice=1;
-            if ( sscanf(aux,"splice %lf %lf",&(p->kr_splice), &(p->ke_splice)) < 1 )
+            if ( sscanf(aux,"splice %lf %lf",&(p->kr_splice), &(p->ke_splice)) < 2 )
                 Error("Cannot read splice option in inputfile (splice <double> <double>)");
         }
 
@@ -334,7 +341,7 @@ void Parse(FILE *fp, struct s_parms *p)
 
     if (p->splice) {
         fprintf(stderr,"\n splice option enabled with kr_splice = %lf\t ke_splice = %lf\n",p->kr_splice,p->ke_splice);
-        if (p->kr_splice>1)
+        if (p->kr_splice>=1)
         Error("in spice option kr_splice can't be bigger than 1\n");
 		if (p->ke_splice>1) fprintf(stderr,"WARNING: in splice option ke_splice > 1 sounds strange, it makes long range interactions stronger than short range ones!!\n");
 		if (p->use_nativedist && p->kr_splice*p->k_native_r*p->rnat< p->k_native_hc*p->rnat) fprintf(stderr,"\n ** WARNING **: kr_splice*k_native_r*r_native < k_native_hc*r_native ==> spliced distance smaller than hardcore repulsion!!\n");

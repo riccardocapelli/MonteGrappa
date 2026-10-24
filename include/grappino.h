@@ -56,7 +56,7 @@ struct s_parms
 	int rotamers;				// how to deal with rotamers (0=off)
 	int sidescratch;				// build sidechain from rotamers instead than reading from pdb
 	char rotfile[FNAMEMAX];			// file with rotamer library
-	int cb_pdb;				// wether to keep CB from PDB
+	int cb_pdb;				// whether to keep CB from PDB (default) or replace it with a pseudo-CB (0)
 	int pdb_rot;				// whether to add the pdb rotamers or not
 	double e_dih1;				// energy dihedrals
 	double e_dih3;

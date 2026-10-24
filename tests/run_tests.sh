@@ -33,11 +33,12 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 DATA=$ROOT/tests/data
 REF=$ROOT/tests/reference
 MG=$ROOT/bin/montegrappa
+GRAPPINO=$ROOT/bin/grappino
 ASAN=0; UPDATE=0; KEEP=0; TGROUPS=""
 
 for a in "$@"; do
 	case $a in
-		--asan) ASAN=1; MG=$ROOT/bin/montegrappa_asan
+		--asan) ASAN=1; MG=$ROOT/bin/montegrappa_asan; [ -x $ROOT/bin/grappino_asan ] && GRAPPINO=$ROOT/bin/grappino_asan
 			export ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=0} ;;		# memory still allocated at exit is not an error here
 		--update-reference) UPDATE=1 ;;
 		--keep) KEEP=1 ;;
@@ -106,6 +107,9 @@ group_errors() {
 
 	mg err_nchains polyala.pol polyala.pot "nchains 2\nTemp 1\nnstep 10\npivot 1\n"
 	if [ $? -ne 0 ] && grep -q "chain" $WORK/err_nchains/stderr.log && sanitizer_ok $WORK/err_nchains; then pass "wrong nchains"; else fail "wrong nchains" "not refused"; fi
+
+	mg err_nmul polyala.pol polyala.pot "nchains 1\nTemp 1\nnstep 10\nmovebias 1\n"
+	if [ $? -ne 0 ] && grep -q "nmul_local" $WORK/err_nmul/stderr.log; then pass "movebias without nmul_local"; else fail "movebias without nmul_local" "not refused"; fi
 
 	local long=$(printf 'x%.0s' $(seq 1 300))
 	( cd $WORK && "$MG" "$long.pol" polyala.pot run.par > /dev/null 2> long.log )
@@ -259,29 +263,55 @@ group_cells() {
 group_tools() {
 	echo "tools"
 	local d=$WORK/grappino
-	if [ -x $ROOT/bin/grappino ]; then
+	if [ -x $GRAPPINO ]; then
 		mkdir -p $d; cp $ROOT/tutorial/tutorial_1/1YPC.pdb $ROOT/tutorial/tutorial_1/1YPC-CA.in $d/
-		( cd $d && $ROOT/bin/grappino 1YPC-CA.in > g.log 2>&1 )
+		( cd $d && $GRAPPINO 1YPC-CA.in > g.log 2>&1 )
 		if cmp -s $d/1YPC-CA.pol $DATA/ca.pol && cmp -s $d/1YPC-CA.pot $DATA/ca.pot; then pass "grappino (tutorial 1)"; else fail "grappino (tutorial 1)" "output differs from tests/data/ca.*"; fi
 	else
 		echo "  SKIP  grappino not built"
 	fi
-	if [ -x $ROOT/bin/grappino ]; then
+	if [ -x $GRAPPINO ]; then
 		# Go model of identical chains: the 16 chains of the TTR(105-115) protofilament share their atom types
 		d=$WORK/grappino_homo; mkdir -p $d; cp $DATA/ttr_protofilament.pdb $d/
 		printf "pdbfile ttr_protofilament.pdb\nbackbone_atoms 1 CA\nnosidechain\natomtypes go_homo\nimin 4\npotential go\nr_hardcore 4.0\nr_native 7.5\ngo-energy -1.0\ndebug 1\npolfile ttr.pol\npotfile ttr.pot\n" > $d/ttr.in
-		( cd $d && $ROOT/bin/grappino ttr.in > g.log 2>&1 )
+		( cd $d && $GRAPPINO ttr.in > g.log 2>&1 )
 		if grep -q "Found 32 Go contacts" $d/g.log && [ "$(awk '$1~/^[0-9]+$/ && NF==11 {print $4}' $d/ttr.pol | sort -u | wc -l)" -eq 11 ] && [ "$(awk '$1~/^[0-9]+$/ && NF==11' $d/ttr.pol | wc -l)" -eq 176 ]
 		then pass "grappino go_homo (TTR protofilament)"; else fail "grappino go_homo (TTR protofilament)" "wrong contacts or types"; fi
 
 		# all-atom model with rotamers of 16 chains numbered alike, then sidechain moves on it
 		d=$WORK/grappino_aa; mkdir -p $d; cp $DATA/ttr_protofilament.pdb $d/
-		printf "pdbfile ttr_protofilament.pdb\nrotamers\nrotfile $ROOT/lib/rotamers.lib\npdb_rot\ncb_pdb\natomtypes go_homo\nbackbone_atoms 3 N CA C\nlocked_atoms N\nimin 4\nr_hardcore 2.0\nr_native 4.5\npotential go\ngo-energy -0.2\ngo_dihedrals\ne_dih1 1.2\ne_dih3 0.4\ndebug 1\npolfile ttr.pol\npotfile ttr.pot\n" > $d/ttr.in
-		( cd $d && $ROOT/bin/grappino ttr.in > g.log 2>&1 )
+		printf "pdbfile ttr_protofilament.pdb\nrotamers\nrotfile $ROOT/lib/rotamers.lib\npdb_rot\natomtypes go_homo\nbackbone_atoms 3 N CA C\nlocked_atoms N\nimin 4\nr_hardcore 2.0\nr_native 4.5\npotential go\ngo-energy -0.2\ngo_dihedrals\ne_dih1 1.2\ne_dih3 0.4\ndebug 1\npolfile ttr.pol\npotfile ttr.pot\n" > $d/ttr.in
+		( cd $d && $GRAPPINO ttr.in > g.log 2>&1 )
 		par $d/run.par "nchains 16\nseed 1\nnstep 300\nTemp 0.5\nsidechain 1\nflip 2\necheck\nnprinttrj 1000\nnprinte 1000\nnprintlog 1000\n"
 		( cd $d && "$MG" ttr.pol ttr.pot run.par > o.log 2> e.log )
 		if [ $? -eq 0 ] && grep -q "Found 358 Go contacts" $d/g.log && ! grep -q ECHECK $d/e.log && ! grep -q "WARNING: overlap" $d/e.log
 		then pass "grappino all-atom rotamers, 16 chains"; else fail "grappino all-atom rotamers, 16 chains" "see $d"; fi
+
+		# rotamers of a protein with glycines (not in the library): with the pdb rotamer and the CB of the pdb
+		# (default), with library rotamers only and the pseudo-CB (cb_pdb 0), and sidechains built from scratch;
+		# montegrappa runs on all of them with consistent energies
+		for kind in pdb_rot lib scratch; do
+			d=$WORK/grappino_rot_$kind; mkdir -p $d; cp $ROOT/tutorial/tutorial_3/hairpin.pdb $d/
+			case $kind in pdb_rot) extra="pdb_rot\n" ;; lib) extra="cb_pdb 0\n" ;; scratch) extra="sidescratch\n" ;; esac
+			printf "pdbfile hairpin.pdb\nrotamers\nrotfile $ROOT/lib/rotamers.lib\n${extra}atomtypes $ROOT/lib/atomtypes.1.lib\nbackbone_atoms 3 N CA C\nimin 3\npotential go\nr_hardcore 1.0\nr_native 3.0\ngo-energy -1.5\npolfile h.pol\npotfile h.pot\n" > $d/h.in
+			( cd $d && $GRAPPINO h.in > g.log 2>&1 ) && \
+			par $d/run.par "nchains 1\nseed 3\nnstep 3000\nTemp 1.0\nflip 1\npivot 1\nsidechain 2\nbackrub 1\nmovebias 1\nnmul_local 5\necheck\nnprinttrj 100000\nnprinte 1000\nnprintlog 100000\n" && \
+			( cd $d && "$MG" h.pol h.pot run.par > o.log 2> e.log ) && grep -q "^Final" $d/e.log && ! grep -q ECHECK $d/e.log && \
+			if [ $kind = lib ]; then grep -q "pseudo-CB" $d/g.log; else ! grep -q "pseudo-CB" $d/g.log; fi
+			if [ $? -eq 0 ]; then pass "grappino rotamers with glycines ($kind)"; else fail "grappino rotamers with glycines ($kind)" "see $d"; fi
+		done
+
+		# splice written as given; CB of a CACB model of many chains taken from its own chain;
+		# only the first model of a multi-model pdb
+		d=$WORK/grappino_misc; mkdir -p $d
+		awk '/^ATOM/' $DATA/ttr_protofilament.pdb > $d/one.pdb
+		{ echo "MODEL        1"; cat $d/one.pdb; echo "ENDMDL"; echo "MODEL        2"; cat $d/one.pdb; echo "ENDMDL"; } > $d/two_models.pdb
+		printf "pdbfile two_models.pdb\nmodel CACB\nbackbone_atoms 2 CA CB\nnosidechain\natomtypes go\nimin 4\npotential go\nr_hardcore 3.0\nr_native 6.5\ngo-energy -1.0\nsplice 0.7 0.5\npolfile m.pol\npotfile m.pot\n" > $d/m.in
+		( cd $d && $GRAPPINO m.in > g.log 2>&1 )
+		cb_pdb=$(awk '/^ATOM/ && substr($0,13,4)==" CB " && substr($0,22,1)=="P" && substr($0,23,4)+0==2 {printf "%.3f %.3f %.3f", substr($0,31,8), substr($0,39,8), substr($0,47,8)}' $d/one.pdb)
+		cb_pol=$(awk '$1~/^[0-9]+$/ && NF==11 && $3=="CB" && $6==2 && $7==15 {printf "%.3f %.3f %.3f", $8, $9, $10}' $d/m.pol)
+		if grep -q "in 16 chains" $d/g.log && grep -q "^splice 0.700000 0.500000" $d/m.pot && [ -n "$cb_pdb" ] && [ "$cb_pdb" = "$cb_pol" ]
+		then pass "grappino splice, CACB of many chains, multi-model pdb"; else fail "grappino splice, CACB of many chains, multi-model pdb" "see $d (CB pdb '$cb_pdb', pol '$cb_pol')"; fi
 	fi
 	if [ -x $ROOT/bin/mgp2pdb ]; then
 		d=$WORK/mgp2pdb; mkdir -p $d

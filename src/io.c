@@ -831,6 +831,7 @@ struct s_mc_parms *ReadMcParms(char *fname)
 	chk=-1;
 	for (i=0;i<NMOVES;++i) if ( x->movetype[i] != -1 ) chk=1;
 	if (chk==-1) Error("No move type defined");
+	if (x->movetype[7] != -1 && x->nmul_local < 3) Error("movebias needs nmul_local (at least 3)");
 	#ifdef ACTIVE_MPI
 	if (x->ncheckpoint<=0) x->ncheckpoint = 100000;		// replicas must write their checkpoints at the same step
 	if (x->ntemp<1) Error("ntemp and temperatures must be defined");

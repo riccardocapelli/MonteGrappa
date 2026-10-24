@@ -61,7 +61,6 @@ splice 0.7 0.5
 # energy of global hohomopolymeric interaction e_homo = 0.000000	 and its radius r_homo = 0.000000
 # threshold to define a bonded interaction = 2.000000
 # native distance = 4.000000
-# hard core distance = 2.000000
 
 [ hydrogen_bonds ]
 4 d 1
@@ -94,3 +93,4 @@ splice 0.7 0.5
 68 a 67
 74 d 71
 73 a 72
+# hard core distance = 2.000000

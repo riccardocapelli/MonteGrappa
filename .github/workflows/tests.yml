@@ -28,8 +28,8 @@ jobs:
       - name: Tests with AddressSanitizer
         run: |
           sudo sysctl -w vm.mmap_rnd_bits=28     # ASan cannot map its shadow memory with the default ASLR entropy
-          make version=ASAN
-          MG_TEST_WORKDIR=$RUNNER_TEMP/mgtests_asan tests/run_tests.sh --asan errors regression echeck restart cells
+          make version=ASAN montegrappa grappino
+          MG_TEST_WORKDIR=$RUNNER_TEMP/mgtests_asan tests/run_tests.sh --asan errors regression echeck restart cells tools
       - name: Keep the outputs of failed ASan tests
         if: failure()
         uses: actions/upload-artifact@v4

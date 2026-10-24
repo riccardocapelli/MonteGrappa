@@ -79,7 +79,7 @@ void Go_Pairs(struct s_parms *parms, struct s_polymer *p, double **e, double **r
 				++k;
 			}
 
-			if (parms->go_noise==2)								// if you want to add non-go noise
+			else if (parms->go_noise==2)							// if you want to add non-go noise (to non-native pairs)
 			{
 				e[i][j] = gauss(0.,parms->go_noise_sigma);
 				e[j][i] = e[i][j];
@@ -112,7 +112,7 @@ double Ext_Pairs(struct s_parms *parms, struct s_polymer *p, double **e, double 
 {
 	int i,ii,j,k=0,iaa1,iaa2,itype1,itype2,lines=0;
 	double energy,r,mean=0,stdev=0,appoenergy;
-	char aux[500],aa1[3],aa2[3];
+	char aux[500],aa1[10],aa2[10];
 	FILE *fp, *contfp;
 	int naapairs=210;
 	struct s_pairscont cont[210]; //max contact map between aa types
@@ -124,11 +124,12 @@ double Ext_Pairs(struct s_parms *parms, struct s_polymer *p, double **e, double 
 		if (!contfp) Error("Cannot open pairs contact statistic file");
 		else fprintf(stderr,"Reading pairs contact statistics file....\n");
 		i=0;
-		while(fscanf(contfp,"%s %s %d",(cont[i].nameaa1),(cont[i].nameaa2),&(cont[i].max))==3)
+		while(i<210 && fscanf(contfp,"%4s %4s %d",(cont[i].nameaa1),(cont[i].nameaa2),&(cont[i].max))==3)
 	    {
 			++i;
 		}
 		fclose(contfp);
+		naapairs = i;
 	}
 	//calculate std deviation of contact energies
 	fprintf(stderr,"Reading coevolutionary contact file\n");
@@ -138,7 +139,7 @@ double Ext_Pairs(struct s_parms *parms, struct s_polymer *p, double **e, double 
 	// Mean calculation (first cycle)
 	while(fgets(aux,500,fp)!=NULL)
 	{
-		if((sscanf(aux,"%d %s %d %s %lf",&iaa1,aa1,&iaa2,aa2,&energy) == 5) && (lines>0))
+		if((sscanf(aux,"%d %9s %d %9s %lf",&iaa1,aa1,&iaa2,aa2,&energy) == 5) && (lines>0))
 		{
 			mean+=energy;
 		}	
@@ -156,7 +157,7 @@ double Ext_Pairs(struct s_parms *parms, struct s_polymer *p, double **e, double 
 	i=0;
 	while(fgets(aux,500,fp)!=NULL)
 	{
-		if((sscanf(aux,"%d %s %d %s %lf",&iaa1,aa1,&iaa2,aa2,&energy) == 5) && i!=0)
+		if((sscanf(aux,"%d %9s %d %9s %lf",&iaa1,aa1,&iaa2,aa2,&energy) == 5) && i!=0)
 		{
 			stdev+=(mean-energy)*(mean-energy);
 		}	
@@ -170,7 +171,7 @@ double Ext_Pairs(struct s_parms *parms, struct s_polymer *p, double **e, double 
 
 	while(fgets(aux,500,fp)!=NULL)
 	{
-		if ( sscanf(aux,"%d %s %d %s %lf",&iaa1,aa1,&iaa2,aa2,&energy) == 5)
+		if ( sscanf(aux,"%d %9s %d %9s %lf",&iaa1,aa1,&iaa2,aa2,&energy) == 5)
 		{
 			for(i=0;i<p->nback;++i)
 			{
@@ -196,9 +197,11 @@ double Ext_Pairs(struct s_parms *parms, struct s_polymer *p, double **e, double 
 						r02[itype2][itype1] = r02[itype1][itype2];
 						
 						// set the interaction energy (such that std deviation=1)
+						appoenergy = energy;
 						if(parms->coevo_allatom)
 						{
 							//normalize energy over max contacts
+							appoenergy = 0;
 							for(ii=0;ii<naapairs;++ii)
 							{
 								if((!strcmp(aa1,cont[ii].nameaa1) && !strcmp(aa2,cont[ii].nameaa2)) || (!strcmp(aa2,cont[ii].nameaa1) && !strcmp(aa1,cont[ii].nameaa2)))
@@ -466,9 +469,13 @@ int ReadTypes(struct s_polymer *p, int nchains, int nat, char *nfile)
 
 	while(fgets(aux,500,fp)!=NULL)
 	{
-		if ( sscanf(aux,"%d %s %s",&(type[it]),atom[it],aa[it]) == 3) ++it;
+		if ( sscanf(aux,"%d %4s %4s",&(type[it]),atom[it],aa[it]) == 3)
+		{
+			if (type[it]<0) Error("Negative atom type in ReadTypes");
+			if (type[it]+1>nt) nt=type[it]+1;		// the number of types is the largest type plus one
+			++it;
+		}
 		if (it>=NTYPEMAX) Error("NTYPEMAX too small in ReadTypes");
-		if (it>nt) nt=it;
 	}	
 
 	fprintf(stderr,"Read %d atomtypes\n",it);
@@ -543,7 +550,7 @@ void DisulphideBonds(struct s_parms *parms, struct s_polymer *p, double **e, dou
 													r2[it2][it1] = r2[it1][it2];
 													if (r02[it1][it2]<EPSILON)
 													{
-														r02[it1][it2] = parms->rhard;
+														r02[it1][it2] = parms->rhard * parms->rhard;
 														r02[it2][it1] = r02[it1][it2];
 													}
 													cnt++;
@@ -567,7 +574,7 @@ void HydrophobicInteraction(struct s_parms *parms, struct s_polymer *p, double *
 				r2[j][i] = r2[i][j];
 				if (r02[i][j]<EPSILON)
 				{
-					r02[i][j] = parms->rhard;
+					r02[i][j] = parms->rhard * parms->rhard;
 					r02[j][i] = r02[i][j];
 				}
 				cnt++;

@@ -121,7 +121,7 @@ check:
 
 check-asan:
 	$(MAKE) version=ASAN montegrappa grappino
-	tests/run_tests.sh --asan errors regression echeck restart cells tools
+	tests/run_tests.sh --asan errors regression echeck restart cells tools avbmc
 
 check-stat:
 	$(MAKE) montegrappa

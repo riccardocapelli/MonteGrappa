@@ -341,6 +341,8 @@ struct s_mc_parms
 	int stempering;		//1=do stempering
 	double dx_com;		//displacemente oc center of mass
 	double dx_clm;		//displacement of cluster
+	double avb_rin;		// aggregation-volume-bias move: radius of the bonded region around a chain
+	double avb_pin;		// ... and probability of moving a chain into it
 	double dtheta;
 	double r_cloose;	// constrains in the bond distance,
 	double a_cloose;	// angles

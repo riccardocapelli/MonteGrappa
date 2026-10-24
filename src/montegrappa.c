@@ -338,6 +338,7 @@ int main(int argc, char *argv[])
 
 	SetPairCutoff(u,ntypes);
 	if (u->boxtype=='p' && parms->shell) Error("shells cannot be used with a periodic box (the cell list does the same job)");
+	if (parms->movetype[13]!=-1 && (u->boxtype!='p' || 2*parms->avb_rin >= u->lbox)) Error("avbmc needs a periodic box of side larger than 2*avb_rin");
 	if (parms->hb && my_rank==0 && CheckHBReferences(startp,u,parms->npol,nat))
 		fprintf(stderr,"WARNING: the energy of these hydrogen bonds is not updated when only the reference atom moves\n");
 	SetSidechainExtents(startp,parms->npol,parms->nosidechains);

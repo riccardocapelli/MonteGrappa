@@ -163,6 +163,20 @@ New keywords of the parameter file:
                    only steps that lower chi2 are accepted, as before); the
                    best matrix found is returned
  - flag keywords accept an explicit 0 (e.g. "shell 0")
+ - avbmc N         aggregation-volume-bias move (Chen and Siepmann, J. Phys.
+                   Chem. B 105, 11275 (2001)), frequency as the other moves:
+                   a chain is moved, with a random orientation, into the
+                   bonded region of another chain (centre of mass within
+                   avb_rin of its centre of mass) or out of it, with the
+                   acceptance that keeps detailed balance. It helps chains in
+                   a dilute box find each other. Periodic box only, of side
+                   larger than 2*avb_rin.
+   avb_rin R       radius (A) of the bonded region (required)
+   avb_pin P       probability of a move into the bonded region (default 0.5)
+ - movebias without nmul_local is an error (it did nothing)
+
+Checkpoints written by earlier versions of this revision cannot be read
+(one more move type).
 
 Output:
  - With MPI, each replica writes its exchanges to exchange_proc<rank>.dat

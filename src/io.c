@@ -466,6 +466,8 @@ struct s_mc_parms *ReadMcParms(char *fname)
 	x->dw_mflip = 30.;
 	x->dx_com = 1.;
 	x->dx_clm = 1.;
+	x->avb_rin = 0.;
+	x->avb_pin = 0.5;
 	x->dtheta=1.;
 	x->randdw = 1;
 	x->nprinttrj = 1000;
@@ -546,6 +548,8 @@ struct s_mc_parms *ReadMcParms(char *fname)
 		ReadParF(aux,"dx_com",&(x->dx_com));
 		ReadParF(aux,"dtheta",&(x->dtheta));
 		ReadParF(aux,"dx_clm",&(x->dx_clm));
+		ReadParF(aux,"avb_rin",&(x->avb_rin));
+		ReadParF(aux,"avb_pin",&(x->avb_pin));
 		ReadParD(aux,"randdw",&(x->randdw));
 		ReadParD(aux,"nprinttrj",&(x->nprinttrj));
 		ReadParD(aux,"nprintlog",&(x->nprintlog));
@@ -579,6 +583,7 @@ struct s_mc_parms *ReadMcParms(char *fname)
 		ReadParD(aux,"rotcluster",&(x->movetype[10]));
 		ReadParD(aux,"backrub",&(x->movetype[11]));
                 ReadParD(aux,"backsiderub",&(x->movetype[12]));
+		ReadParD(aux,"avbmc",&(x->movetype[13]));
 		ReadParF(aux,"r_cloose",&(x->r_cloose));
 		ReadParF(aux,"a_cloose",&(x->a_cloose));
 		ReadParF(aux,"d_cloose",&(x->d_cloose));
@@ -832,6 +837,8 @@ struct s_mc_parms *ReadMcParms(char *fname)
 	for (i=0;i<NMOVES;++i) if ( x->movetype[i] != -1 ) chk=1;
 	if (chk==-1) Error("No move type defined");
 	if (x->movetype[7] != -1 && x->nmul_local < 3) Error("movebias needs nmul_local (at least 3)");
+	if (x->movetype[13] != -1 && (x->avb_rin <= 0 || x->avb_pin <= 0 || x->avb_pin >= 1))
+		Error("avbmc needs avb_rin > 0 and 0 < avb_pin < 1");
 	#ifdef ACTIVE_MPI
 	if (x->ncheckpoint<=0) x->ncheckpoint = 100000;		// replicas must write their checkpoints at the same step
 	if (x->ntemp<1) Error("ntemp and temperatures must be defined");

@@ -385,6 +385,14 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			mdone[10]++; if (parms->echeck) CheckEnergyDrift(p,oldp,pot,parms,10,istep,my_rank);
 		}
 
+		if (mcount[13] == parms->movetype[13])						// aggregation-volume-bias move
+		{
+			ok=MoveAVB(p,oldp,parms,pot,t);
+			if(ok>-1) mcount[13]=0;
+			if(ok==1) macc[13]++;
+			mdone[13]++; if (parms->echeck) CheckEnergyDrift(p,oldp,pot,parms,13,istep,my_rank);
+		}
+
 /************************************************\
  * 	print di varie ed eventuali		*
 \************************************************/
@@ -708,7 +716,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 	#endif
 	{
 		static const char *movename[NMOVES] = {"Flip","Pivot","MPivot","Sidechain","LPivot","MFlip","CoM shift",
-							"Local","Rotation","Cluster CoM","Cluster Rot","BackRub","BackSideRub"};
+							"Local","Rotation","Cluster CoM","Cluster Rot","BackRub","BackSideRub","AVB"};
 		for (i=0;i<NMOVES;++i)
 			if (parms->movetype[i]!=-1)
 				fprintf(stderr,"\t%s:\t%lld / %lld = %lf\n",movename[i],macc[i],mdone[i],mdone[i] ? (double)macc[i]/mdone[i] : 0.);
@@ -2089,4 +2097,122 @@ int MoveClusterRot(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms
                   unsigned long long istep, int npol,int debug, double t, FILE *fproc, int iproc)
 {
 	return MoveCluster(p,oldp,parms,pot,t,1);
+}
+
+
+/*****************************************************************************
+ Aggregation-volume-bias move (AVBMC, Chen & Siepmann, J. Phys. Chem. B 105,
+ 11275 (2001)): a target chain j is chosen; with probability avb_pin a chain
+ out of the bonded region of j (centre of mass farther than avb_rin) is put
+ at a random point of that region, otherwise a chain in the region is put at
+ a random point of the rest of the box. The moved chain keeps its internal
+ conformation and takes a random orientation. Periodic box only, so that the
+ volumes of the two regions are exact (V_in + V_out = L^3).
+ *****************************************************************************/
+static struct vector ChainCentre(struct s_polymer *p, int ic)
+{
+	struct vector c={0,0,0};
+	int i;
+
+	for (i=0;i<(p+ic)->nback;++i)
+	{
+		c.x += (((p+ic)->back)+i)->pos.x;
+		c.y += (((p+ic)->back)+i)->pos.y;
+		c.z += (((p+ic)->back)+i)->pos.z;
+	}
+	c.x /= (p+ic)->nback; c.y /= (p+ic)->nback; c.z /= (p+ic)->nback;
+	return c;
+}
+
+// rotate chain ic by the matrix R around its centre c, then put the centre at c2
+static void PlaceChain(struct s_polymer *p, int ic, double R[3][3], struct vector c, struct vector c2)
+{
+	int i,j;
+	double u,v,w;
+	struct vector *r;
+
+	for (i=0;i<(p+ic)->nback;++i)
+		for (j=-1;j<(((p+ic)->back)+i)->nside;++j)			// j=-1 is the backbone atom
+		{
+			r = (j<0) ? &((((p+ic)->back)+i)->pos) : &((((((p+ic)->back)+i)->side)+j)->pos);
+			u = r->x - c.x; v = r->y - c.y; w = r->z - c.z;
+			r->x = c2.x + R[0][0]*u + R[0][1]*v + R[0][2]*w;
+			r->y = c2.y + R[1][0]*u + R[1][1]*v + R[1][2]*w;
+			r->z = c2.z + R[2][0]*u + R[2][1]*v + R[2][2]*w;
+		}
+}
+
+// uniformly distributed rotation matrix (random unit quaternion, Shoemake)
+static void RandomRotation(double R[3][3])
+{
+	double u1=frand(),u2=2*PI*frand(),u3=2*PI*frand();
+	double a=sqrt(1-u1)*sin(u2),b=sqrt(1-u1)*cos(u2),c=sqrt(u1)*sin(u3),d=sqrt(u1)*cos(u3);	// q = d + a i + b j + c k
+
+	R[0][0] = 1-2*(b*b+c*c); R[0][1] = 2*(a*b-c*d);   R[0][2] = 2*(a*c+b*d);
+	R[1][0] = 2*(a*b+c*d);   R[1][1] = 1-2*(a*a+c*c); R[1][2] = 2*(b*c-a*d);
+	R[2][0] = 2*(a*c-b*d);   R[2][1] = 2*(b*c+a*d);   R[2][2] = 1-2*(a*a+b*b);
+}
+
+int MoveAVB(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot, double t)
+{
+	int npol=parms->npol,j,k,ip,in_move,nin=0,nout=0,cand[npol],ncand=0,ok;
+	double L=pot->lbox,rin=parms->avb_rin,r2,vin,vout,factor,deltaE,R[3][3];
+	struct vector cj,ci,c2,d;
+
+	j = irand(npol);
+	in_move = (frand() < parms->avb_pin);
+	cj = ChainCentre(p,j);
+
+	// chains in and out of the bonded region of j; the candidates to move
+	for (k=0;k<npol;++k)
+		if (k!=j)
+		{
+			ci = ChainCentre(p,k);
+			d.x = ci.x-cj.x; d.y = ci.y-cj.y; d.z = ci.z-cj.z;
+			d.x -= L*round(d.x/L); d.y -= L*round(d.y/L); d.z -= L*round(d.z/L);
+			if (d.x*d.x+d.y*d.y+d.z*d.z < rin*rin) { nin++; if (in_move==0) cand[ncand++] = k; }
+			else { nout++; if (in_move==1) cand[ncand++] = k; }
+		}
+
+	// the random numbers of the proposal are always drawn, also when nothing can be moved
+	ip = ncand ? cand[irand(ncand)] : -1;
+	RandomRotation(R);
+	do
+	{
+		d.x = (frand()-0.5)*L; d.y = (frand()-0.5)*L; d.z = (frand()-0.5)*L;
+		r2 = d.x*d.x+d.y*d.y+d.z*d.z;
+	}
+	while ( in_move ? (r2 >= rin*rin) : (r2 < rin*rin) );			// uniform in the sphere, or in the box out of it
+
+	if (ip<0) { parms->mov++; return 0; }
+
+	vin = 4./3.*PI*rin*rin*rin;
+	vout = L*L*L - vin;
+	if (in_move) factor = (1-parms->avb_pin)*vin*nout / (parms->avb_pin*vout*(nin+1));
+	else factor = parms->avb_pin*vout*nin / ((1-parms->avb_pin)*vin*(nout+1));
+
+	deltaE = - GetEnergyMonomerRange(p,0,(p+ip)->nback-1,ip);
+	if (!parms->nohfields) deltaE -= GetHFields(p,npol);
+
+	ci = ChainCentre(p,ip);
+	c2.x = cj.x+d.x; c2.y = cj.y+d.y; c2.z = cj.z+d.z;
+	PlaceChain(p,ip,R,ci,c2);
+
+	deltaE += EnergyMonomerRange(p,pot,0,(p+ip)->nback-1,ip,npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
+	if (!parms->nohfields) deltaE += EnergyHFieldsAll(p,pot,parms);
+
+	ok = Metropolis(deltaE - t*log(factor),t,p->tables);		// acceptance min[1, factor exp(-deltaE/T)]
+
+	if (ok == 0)
+		UpdateMonomerRange(oldp,p,0,(p+ip)->nback-1,ip,0);
+	else
+	{
+		UpdateMonomerRange(p,oldp,0,(p+ip)->nback-1,ip,0);
+		if(parms->shell==1) parms->ishell=1;
+		p->etot += deltaE;
+		parms->acc ++;
+	}
+	parms->mov ++;
+
+	return ok;
 }

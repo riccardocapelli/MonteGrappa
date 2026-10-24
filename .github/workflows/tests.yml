@@ -29,7 +29,7 @@ jobs:
         run: |
           sudo sysctl -w vm.mmap_rnd_bits=28     # ASan cannot map its shadow memory with the default ASLR entropy
           make version=ASAN montegrappa grappino
-          MG_TEST_WORKDIR=$RUNNER_TEMP/mgtests_asan tests/run_tests.sh --asan errors regression echeck restart cells tools
+          MG_TEST_WORKDIR=$RUNNER_TEMP/mgtests_asan tests/run_tests.sh --asan errors regression echeck restart cells tools avbmc
       - name: Keep the outputs of failed ASan tests
         if: failure()
         uses: actions/upload-artifact@v4

@@ -56,7 +56,7 @@
         #define FNAMEMAX	256		// maximum length of file names
         #define SHELL_SKIN	2.		// minimum distance (A) between shell radius and interaction range
         #define CELLS_AUTO_MIN	100		// cells=-1 considers a cell list from this number of residues (see cells.c)
-        #define NMOVES		13		// number of types of allowed moves
+        #define NMOVES		14		// number of types of allowed moves
         #define NDIHFMAX	361		// maximum number of bins in tabled dihedral potential
 
         #define NREPMAX		40
@@ -238,6 +238,7 @@ int MoveCoM(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms
 int MoveRotation(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot, unsigned long long istep, int debug, double t);
 
 int MoveClusterCoM(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,unsigned long long istep, int debug, double t, FILE *fproc, int iproc);
+int MoveAVB(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot, double t);
 int MoveClusterRot(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,unsigned long long istep,int npol, int debug, double t, FILE *fproc, int iproc);
 
 

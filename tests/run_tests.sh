@@ -16,11 +16,14 @@
 #   tools       grappino and mgp2pdb
 #   mpi         MPI executable run on a single rank (if it was built)
 #   observables observables of aggregation on sheets of known structure
+#   avbmc       aggregation-volume-bias move: input checks, echeck on periodic
+#               systems, and the exact distribution of non-interacting chains
 #   mpi_multi   parallel tempering with 4 ranks (only where mpirun works): run,
 #               exact restart, and the replica at the lowest temperature must
 #               sample the same mean energy as plain runs at that temperature
 #   stat        (slow, not in the default) detailed balance: the BGS local move
-#               must sample the same mean energy as pivot moves
+#               must sample the same mean energy as pivot moves, and so must
+#               interacting chains with and without the avbmc move
 #
 # options
 #   --asan              use bin/montegrappa_asan and fail on sanitizer reports
@@ -46,7 +49,7 @@ for a in "$@"; do
 		*) TGROUPS="$TGROUPS $a" ;;
 	esac
 done
-[ -z "$TGROUPS" ] && TGROUPS="errors regression echeck restart cells tools mpi observables mpi_multi"
+[ -z "$TGROUPS" ] && TGROUPS="errors regression echeck restart cells tools mpi observables avbmc mpi_multi"
 
 [ -x "$MG" ] || { echo "executable $MG not found: build it first"; exit 1; }
 
@@ -362,6 +365,73 @@ group_stat() {
 	cat $WORK/stat_summary | sed 's/^/        /'
 	if awk 'NR==1{m1=$2;s1=$3} NR==2{m2=$2;s2=$3} END{d=m1-m2; if(d<0)d=-d; exit !(d < 3*sqrt(s1*s1+s2*s2))}' $WORK/stat_summary
 	then pass "BGS vs pivot mean energy"; else fail "BGS vs pivot mean energy" "difference above 3 sigma"; fi
+
+	# three interacting rigid chains in a periodic box: whole-chain moves with and without avbmc
+	for setup in ref avb; do
+		for seed in 1 2 3 4; do
+			mv="movecom 1\ndx_com 8\nmoverot 1\ndtheta 3\n"; [ $setup = avb ] && mv="${mv}avbmc 1\navb_rin 8\n"
+			( mg stat_avb_${setup}_$seed three.pol homo_pbc.pot "nchains 3\nnosidechain\nnodihpot\nnoangpot\nTemp 1.5\nseed $seed\nnstep 1000000\n${mv}nprinttrj 100000000\nnprinte 100\nnprintlog 100000000\n" ) &
+		done
+	done
+	wait
+	for setup in ref avb; do
+		for seed in 1 2 3 4; do
+			awk '{n++; e[n]=$2} END{s=0; for(i=int(n/5)+1;i<=n;i++) s+=e[i]; print s/(n-int(n/5))}' $WORK/stat_avb_${setup}_$seed/energy.ene
+		done | awk -v s=$setup '{m+=$1; m2+=$1*$1; n++} END{mu=m/n; printf "%s %f %f\n", s, mu, sqrt((m2/n-mu*mu)/(n-1))}'
+	done > $WORK/stat_avb_summary
+	sed 's/^/        /' $WORK/stat_avb_summary
+	if awk 'NR==1{m1=$2;s1=$3} NR==2{m2=$2;s2=$3} END{d=m1-m2; if(d<0)d=-d; exit !(d < 3*sqrt(s1*s1+s2*s2))}' $WORK/stat_avb_summary
+	then pass "avbmc vs whole-chain moves mean energy"; else fail "avbmc vs whole-chain moves mean energy" "difference above 3 sigma"; fi
+}
+
+######################################################################
+# fraction of pairs of chains whose centres (minimum image in a box of side L)
+# are closer than R, over the frames of a pdb trajectory
+PAIRS_IN_AWK='
+function flush(   a,b,dx,dy,dz) { for (a=0;a<nc;a++) for (b=a+1;b<nc;b++) {
+	dx=x[a]/n[a]-x[b]/n[b]; dy=y[a]/n[a]-y[b]/n[b]; dz=z[a]/n[a]-z[b]/n[b];
+	dx-=L*int(dx/L+(dx>0?0.5:-0.5)); dy-=L*int(dy/L+(dy>0?0.5:-0.5)); dz-=L*int(dz/L+(dz>0?0.5:-0.5));
+	np++; if (dx*dx+dy*dy+dz*dz<R*R) nin++ }
+	split("",x); split("",y); split("",z); split("",n); nc=0 }
+/^TITLE/ { flush(); next }
+/^ATOM/ { i=index("ABCDEFGHIJKLMNOPQRSTUVWXYZ",substr($0,22,1))-1; if (i+1>nc) nc=i+1;
+	x[i]+=substr($0,31,8); y[i]+=substr($0,39,8); z[i]+=substr($0,47,8); n[i]++ }
+END { flush(); print nin/np }'
+
+group_avbmc() {
+	echo "avbmc (aggregation-volume-bias move)"
+	local sys c seed
+
+	mg avb_err_box three.pol homo.pot "nchains 3\nnosidechain\nnodihpot\nnoangpot\nTemp 1\nnstep 10\navbmc 1\navb_rin 5\n"
+	if [ $? -ne 0 ] && grep -q "periodic box" $WORK/avb_err_box/stderr.log; then pass "avbmc without periodic box refused"; else fail "avbmc without periodic box refused" "not refused"; fi
+	mg avb_err_rin three.pol homo_pbc.pot "nchains 3\nnosidechain\nnodihpot\nnoangpot\nTemp 1\nnstep 10\navbmc 1\n"
+	if [ $? -ne 0 ] && grep -q "avb_rin" $WORK/avb_err_rin/stderr.log; then pass "avbmc without avb_rin refused"; else fail "avbmc without avb_rin refused" "not refused"; fi
+
+	# energy, backup copy and cell list consistent after every move
+	for c in -1 1; do
+		for sys in "three|three.pol|homo_pbc.pot|nchains 3\nnosidechain\nnodihpot\nnoangpot\nTemp 1.5\n" \
+		           "two|two.pol|two_hf_pbc.pot|nchains 2\nTemp 2.0\nsidechain 3\n" \
+		           "many|many.pol|homo_pbc70.pot|nchains 40\nnosidechain\nnodihpot\nnoangpot\nTemp 1.0\n"; do
+			IFS="|" read -r name pol pot hdr <<< "$sys"
+			mg avb_ec_${name}_$c $pol $pot "${hdr}seed 7\nnstep 3000\ncells $c\necheck\navbmc 1\navb_rin 8\nflip 2\nnprinttrj 100000\nnprinte 100000\nnprintlog 100000\n"
+			if [ $? -eq 0 ] && ! grep -q ECHECK $WORK/avb_ec_${name}_$c/stderr.log && sanitizer_ok $WORK/avb_ec_${name}_$c
+			then pass "avbmc echeck $name cells=$c"; else fail "avbmc echeck $name cells=$c" "see $WORK/avb_ec_${name}_$c"; fi
+		done
+	done
+
+	# non-interacting chains: the centres are independent and uniform in the box, so a pair
+	# is in the bonded region with probability V_in/V (0.03351 for R=6, L=30); a missing
+	# or wrong bias factor gives several times that
+	[ $ASAN = 1 ] && { echo "  SKIP  distribution test not with --asan"; return; }
+	for seed in 1 2 3 4; do
+		( mg avb_free_$seed three.pol free_pbc.pot "nchains 3\nnosidechain\nnodihpot\nnoangpot\nTemp 1.0\nseed $seed\nnstep 1000000\navbmc 1\navb_rin 6\navb_pin 0.3\nnprinttrj 100\nnprinte 1000000\nnprintlog 1000000\n" ) &
+	done
+	wait
+	for seed in 1 2 3 4; do awk -v L=30 -v R=6 "$PAIRS_IN_AWK" $WORK/avb_free_$seed/traj.pdb; done | \
+		awk '{m+=$1; m2+=$1*$1; n++} END{mu=m/n; printf "%f %f\n", mu, sqrt((m2/n-mu*mu)/(n-1))}' > $WORK/avb_free_summary
+	sed 's/^/        pairs in the bonded region (exact 0.033510): /' $WORK/avb_free_summary
+	if awk '{d=$1-0.033510; if(d<0)d=-d; exit !(d < 4*$2+0.002)}' $WORK/avb_free_summary
+	then pass "avbmc distribution of non-interacting chains"; else fail "avbmc distribution of non-interacting chains" "$(cat $WORK/avb_free_summary)"; fi
 }
 
 ######################################################################
@@ -444,7 +514,7 @@ echo "MonteGrappa tests with $MG"
 echo "working directory $WORK"
 for g in $TGROUPS; do
 	case $g in
-		errors|regression|echeck|restart|cells|tools|mpi|observables|mpi_multi|stat) group_$g ;;
+		errors|regression|echeck|restart|cells|tools|mpi|observables|avbmc|mpi_multi|stat) group_$g ;;
 		*) echo "unknown group $g"; NFAIL=$((NFAIL+1)) ;;
 	esac
 done

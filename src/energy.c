@@ -275,7 +275,8 @@ void Ram_Dihedrals(struct s_parms *p, struct s_potential *u)
 
 /*****************************************************************************
  Contact map between atoms sticking out of different backbone atoms
- (nat x nat)
+ (nat x nat): the largest distance below r_native between atoms of each
+ pair of types (0 if none)
  *****************************************************************************/
 double **ContactMap(struct s_parms *parms, struct s_polymer *p, int nchains, int nat,int debug)
 {
@@ -297,8 +298,8 @@ double **ContactMap(struct s_parms *parms, struct s_polymer *p, int nchains, int
 						d = Dist( (((p+c1)->back)+ib1)->pos, (((p+c2)->back)+ib2)->pos );
 						if ( d < parms->rnat )
 						{
-							cm[(((p+c1)->back)+ib1)->itype][(((p+c2)->back)+ib2)->itype] = d;
-							cm[(((p+c2)->back)+ib2)->itype][(((p+c1)->back)+ib1)->itype] = d;
+							if (d > cm[(((p+c1)->back)+ib1)->itype][(((p+c2)->back)+ib2)->itype])			// the largest native distance of the pair of types
+								cm[(((p+c1)->back)+ib1)->itype][(((p+c2)->back)+ib2)->itype] = cm[(((p+c2)->back)+ib2)->itype][(((p+c1)->back)+ib1)->itype] = d;
 							if (debug>2) fprintf(stderr,"\t%d%s (%d%s) - %d%s (%d%s)\td=%lf\n",(((p+c1)->back)+ib1)->ia,(((p+c1)->back)+ib1)->type,
 									(((p+c1)->back)+ib1)->iaa,(((p+c1)->back)+ib1)->aa,(((p+c2)->back)+ib2)->ia,(((p+c2)->back)+ib2)->type,
 									(((p+c2)->back)+ib2)->iaa,(((p+c2)->back)+ib2)->aa,d);
@@ -310,8 +311,8 @@ double **ContactMap(struct s_parms *parms, struct s_polymer *p, int nchains, int
 							d = Dist( (((((p+c1)->back)+ib1)->side)+is1)->pos, (((p+c2)->back)+ib2)->pos );
 							if ( d < parms->rnat )
 							{
-								cm[(((((p+c1)->back)+ib1)->side)+is1)->itype][(((p+c2)->back)+ib2)->itype] = d;
-								cm[(((p+c2)->back)+ib2)->itype][(((((p+c1)->back)+ib1)->side)+is1)->itype] = d;
+								if (d > cm[(((((p+c1)->back)+ib1)->side)+is1)->itype][(((p+c2)->back)+ib2)->itype])			// the largest native distance of the pair of types
+									cm[(((((p+c1)->back)+ib1)->side)+is1)->itype][(((p+c2)->back)+ib2)->itype] = cm[(((p+c2)->back)+ib2)->itype][(((((p+c1)->back)+ib1)->side)+is1)->itype] = d;
 								if (debug>2) fprintf(stderr,"\t%d%s (%d%s) - %d%s (%d%s)\td=%lf\n",(((((p+c1)->back)+ib1)->side)+is1)->ia,(((((p+c1)->back)+ib1)->side)+is1)->type,
 									(((p+c1)->back)+ib1)->iaa,(((p+c1)->back)+ib1)->aa,(((p+c2)->back)+ib2)->ia,(((p+c2)->back)+ib2)->type,
 									(((p+c2)->back)+ib2)->iaa,(((p+c2)->back)+ib2)->aa,d);
@@ -323,8 +324,8 @@ double **ContactMap(struct s_parms *parms, struct s_polymer *p, int nchains, int
 							d = Dist( (((((p+c2)->back)+ib2)->side)+is2)->pos, (((p+c1)->back)+ib1)->pos );
 							if ( d < parms->rnat )
 							{
-								cm[(((((p+c2)->back)+ib2)->side)+is2)->itype][(((p+c1)->back)+ib1)->itype] = d;
-								cm[(((p+c1)->back)+ib1)->itype][(((((p+c2)->back)+ib2)->side)+is2)->itype] = d;
+								if (d > cm[(((((p+c2)->back)+ib2)->side)+is2)->itype][(((p+c1)->back)+ib1)->itype])			// the largest native distance of the pair of types
+									cm[(((((p+c2)->back)+ib2)->side)+is2)->itype][(((p+c1)->back)+ib1)->itype] = cm[(((p+c1)->back)+ib1)->itype][(((((p+c2)->back)+ib2)->side)+is2)->itype] = d;
 								if (debug>2) fprintf(stderr,"\t%d%s (%d%s) - %d%s (%d%s)\td=%lf\n",(((p+c1)->back)+ib1)->ia,(((p+c1)->back)+ib1)->type,
 									(((p+c1)->back)+ib1)->iaa,(((p+c1)->back)+ib1)->aa,(((((p+c2)->back)+ib2)->side)+is2)->ia,(((((p+c2)->back)+ib2)->side)+is2)->type,
 									(((p+c2)->back)+ib2)->iaa,(((p+c2)->back)+ib2)->aa,d);
@@ -339,8 +340,8 @@ double **ContactMap(struct s_parms *parms, struct s_polymer *p, int nchains, int
 								d = Dist( (((((p+c1)->back)+ib1)->side)+is1)->pos, (((((p+c2)->back)+ib2)->side)+is2)->pos );
 								if ( d < parms->rnat )
 								{
-									cm[(((((p+c1)->back)+ib1)->side)+is1)->itype][(((((p+c2)->back)+ib2)->side)+is2)->itype] = d;
-									cm[(((((p+c2)->back)+ib2)->side)+is2)->itype][(((((p+c1)->back)+ib1)->side)+is1)->itype] = d;
+									if (d > cm[(((((p+c1)->back)+ib1)->side)+is1)->itype][(((((p+c2)->back)+ib2)->side)+is2)->itype])			// the largest native distance of the pair of types
+										cm[(((((p+c1)->back)+ib1)->side)+is1)->itype][(((((p+c2)->back)+ib2)->side)+is2)->itype] = cm[(((((p+c2)->back)+ib2)->side)+is2)->itype][(((((p+c1)->back)+ib1)->side)+is1)->itype] = d;
 									if (debug>2) fprintf(stderr,"\t%d%s (%d%s) - %d%s (%d%s)\td=%lf\n",(((((p+c1)->back)+ib1)->side)+is1)->ia,(((((p+c1)->back)+ib1)->side)+is1)->type,
 										(((p+c1)->back)+ib1)->iaa,(((p+c1)->back)+ib1)->aa,(((((p+c2)->back)+ib2)->side)+is2)->ia,(((((p+c2)->back)+ib2)->side)+is2)->type,
 										(((p+c2)->back)+ib2)->iaa,(((p+c2)->back)+ib2)->aa,d);

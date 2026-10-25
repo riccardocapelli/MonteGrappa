@@ -768,6 +768,7 @@ struct s_mc_parms *ReadMcParms(char *fname)
 		 ReadParF(aux,"op_step",&(x->op_step));
 		 ReadParF(aux,"op_stop",&(x->op_stop));
 		 ReadParF(aux,"op_tchi2",&(x->op_tchi2));
+		 ReadParF(aux,"op_neff",&(x->op_neff));
 		 ReadParF(aux,"op_T",&(x->op_T));
 		 ReadParF(aux,"op_emin",&(x->op_emin));
 		 ReadParF(aux,"op_emax",&(x->op_emax));
@@ -827,6 +828,7 @@ struct s_mc_parms *ReadMcParms(char *fname)
 	if(x->nrun>1 && !strcmp(x->op_minim,"none")) fprintf(stderr,"WARNING: nrun > 1 without optimization parameters\n");
 	if(strcmp(x->op_minim,"none") && strcmp(x->op_minim,"sample")) Error("op_minim must be none or sample");
 	if(x->op_tchi2<0) Error("op_tchi2 must not be negative");
+	if(x->op_neff<0 || x->op_neff>=1) Error("op_neff must be in [0,1)");
 
 	#ifndef STEMPERING
 	if(x->stempering) Error("Please compile with version=STEMPERING if you want to enable simulated tempering!!!\n");	

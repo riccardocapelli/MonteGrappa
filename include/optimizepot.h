@@ -48,6 +48,8 @@ struct s_optimizepot_input *ReadOPRestrains(struct s_mc_parms *parms);
 void OP_GetRestrain(int it, struct s_polymer *p, int ipol, struct s_optimizepot_input *op_input);
 void OP_AddEnergy(struct s_polymer *p, int a1, int a2, double mul);
 double Chi2(double *x, double *xexp, double *sigma, int n);
+double Chi2Validation(double *x, struct s_optimizepot_input *in);
+int NFitted(struct s_optimizepot_input *in);
 double OP_function(double **e, struct s_optimizepot *x, struct s_optimizepot_input *in, struct s_mc_parms *parms);
 void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntypes, double **emat, int irun, double **ematold);
 double OP_functionDiff(int iw, double deltae, struct s_optimizepot *x, struct s_optimizepot_input *in, struct s_mc_parms *parms);

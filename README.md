@@ -164,6 +164,19 @@ New keywords of the parameter file:
                    potential optimization, on the reduced chi2 (default 0:
                    only steps that lower chi2 are accepted, as before); the
                    best matrix found is returned
+ - op_neff F       smallest effective fraction of frames, (sum w)^2/sum w^2
+                   divided by the number of frames, allowed in the
+                   reweighting of the potential optimization (0 <= F < 1,
+                   default 0 = no limit): steps that make the sample less
+                   representative are rejected
+ - restraints with a negative sigma in the op_file are not fitted: their
+   reduced chi2 (with |sigma|) is a validation, written as third column of
+   chi2.dat and reweighted at the end of each optimization
+ - record_native   now works (it was read and ignored): the starting
+                   structure is the first frame of the reweighting; with
+                   always_restart it is the native one at every iteration
+ - grappino use_nativedist: the native distance of a pair of types is the
+   largest one below r_native (it was the last one found)
  - flag keywords accept an explicit 0 (e.g. "shell 0")
  - avbmc N         aggregation-volume-bias move (Chen and Siepmann, J. Phys.
                    Chem. B 105, 11275 (2001)), frequency as the other moves:

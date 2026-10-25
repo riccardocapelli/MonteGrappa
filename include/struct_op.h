@@ -46,6 +46,7 @@ struct s_optimizepot
 	double *rest_av;	// the calculated thermal average of restrains
 	double *enew;		// new energies
 	double *t;		// the temperature of the ith snapshot
+	double neff;		// effective fraction of frames of the last reweighting, (sum w)^2/(sum w^2)/nframes
 
 	int nframes;		// number of recorded conformations
 	int nframesmax;		// size of the allocated structure

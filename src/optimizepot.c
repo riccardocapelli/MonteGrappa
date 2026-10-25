@@ -173,7 +173,19 @@ free(x);
 /***************************************************
  Read list of restrains from file.
  Format:  i1  i2  i3  i4  type  value  sigma 
+ A negative sigma marks a validation restraint: its
+ average is reported (chi2 with |sigma|), but it is
+ not fitted
  ***************************************************/
+
+int NFitted(struct s_optimizepot_input *in)
+{
+	int i,n=0;
+
+	for (i=0;i<in->ndata;++i)
+		if (in->sigma[i]>0) n++;
+	return n;
+}
 
 struct s_optimizepot_input *ReadOPRestrains(struct s_mc_parms *parms)
 {
@@ -218,7 +230,10 @@ struct s_optimizepot_input *ReadOPRestrains(struct s_mc_parms *parms)
 			}
 		}
 		else if ( x->datatype[i] != 3) Error("If it reads i3 and i4 in restrain file, datatype must be 3");
+		if ( x->sigma[i] == 0 ) Error("sigma of a restraint cannot be 0 (negative: validation restraint)");
 	}
+	if ( NFitted(x) == 0 ) Error("No restraint to fit (all sigma are negative)");
+	if ( NFitted(x) < x->ndata ) fprintf(stderr," %d restraints are for validation only\n",x->ndata-NFitted(x));
 
 	fprintf(stderr," %d restrains read\n",x->ndata);
 	fclose(fp);
@@ -356,8 +371,8 @@ void OP_AddEnergy(struct s_polymer *p, int a1, int a2, double mul)
  ***************************************************/
 void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntypes, double **u, int irun, double **ematold)
 {
-	int istep,irunstart,iacc=0,a1,a2,iw,ifr,i,j,n=0,nstep=0,ntry,accept;
-	double chi2,chi2old,chi2best,deltae,eav=0,eav2=0,de2=0,ndata;
+	int istep,irunstart,iacc=0,a1,a2,iw,ifr,i,j,n=0,nstep=0,ntry,accept,nneff=0;
+	double chi2,chi2old,chi2best,deltae,eav=0,eav2=0,de2=0,ndata,neff0,chi2val0;
 	double **ebest;
 	char aux[500];
 	FILE *fp, *fc;
@@ -371,9 +386,11 @@ void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntype
 	CopyDoubleMatrix(u,ematold,ntypes,ntypes);
 
 
-	// initial chi2
+	// initial chi2 (reduced with the number of fitted restraints)
 	chi2old = OP_function(u,p->op,parms->op_input,parms);
-	ndata = parms->op_input->ndata;
+	ndata = NFitted(parms->op_input);
+	neff0 = p->op->neff;
+	chi2val0 = Chi2Validation(p->op->rest_av,parms->op_input);
 
 	// with op_tchi2>0 the search can go uphill: keep the best matrix found
 	chi2best = chi2old;
@@ -381,7 +398,8 @@ void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntype
 	CopyDoubleMatrix(u,ebest,ntypes,ntypes);
 	
 //	fprintf(stderr,"Potential Optimization \n> Initial value of Chi2 = %lf | Reduced = %lf\n",chi2old,chi2old/(parms->op_input->ndata));
-	fprintf(stderr,"Potential Optimization \n> Initial value of Chi2 %lf\n",chi2old/(parms->op_input->ndata));
+	fprintf(stderr,"Potential Optimization \n> Initial value of Chi2 %lf\n",chi2old/ndata);
+	if (ndata < parms->op_input->ndata) fprintf(stderr,"> Initial value of Chi2 of validation restraints %lf\n",chi2val0);
 
 	fprintf(stderr,"> History\t\t\tChi2");
 	//print chi2
@@ -389,7 +407,10 @@ void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntype
 	{
 		sprintf(aux,"chi2.dat");
 		fc = fopen(aux,"a");
-		fprintf(fc,"%d\t%lf\n",irun+irunstart, chi2old/(parms->op_input->ndata));
+		if (ndata < parms->op_input->ndata)			// run, chi2 of the fitted and of the validation restraints
+			fprintf(fc,"%d\t%lf\t%lf\n",irun+irunstart, chi2old/ndata, chi2val0);
+		else
+			fprintf(fc,"%d\t%lf\n",irun+irunstart, chi2old/ndata);
 		fclose(fc);
 	}
 	
@@ -416,6 +437,8 @@ void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntype
 		if (chi2 < chi2old) accept = 1;
 		else if (parms->op_tchi2 > 0) accept = ( frand() < exp( -(chi2-chi2old)/ndata/parms->op_tchi2 ) );
 		else accept = 0;
+		// the reweighted averages are reliable only while enough frames keep a weight
+		if (accept && p->op->neff < parms->op_neff) { accept = 0; nneff++; }
 
 		// accept
 		if (accept)
@@ -443,7 +466,7 @@ void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntype
 
 		// print something
 	//	if (!(istep%parms->op_print)) fprintf(stderr,"   %5d\t\t%lf\t%lf\n",istep,chi2old, chi2old/(parms->op_input->ndata));
-		if (!(istep%parms->op_print)) fprintf(stderr,"   %5d\t\t%lf\n",istep,chi2old/(parms->op_input->ndata));
+		if (!(istep%parms->op_print)) fprintf(stderr,"   %5d\t\t%lf\n",istep,chi2old/ndata);
 		// exit condition
 		if (chi2old<parms->op_stop) break;
 	}
@@ -464,8 +487,11 @@ void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntype
 		}
 
 
-	fprintf(stderr,"> Result of the sampling: Chi2=%lf\n",chi2old/parms->op_input->ndata);
+	fprintf(stderr,"> Result of the sampling: Chi2=%lf\n",chi2old/ndata);
+	if (ndata < parms->op_input->ndata) fprintf(stderr,"> Chi2 of validation restraints (reweighted) = %lf\n",Chi2Validation(p->op->rest_av,parms->op_input));
+	fprintf(stderr,"> effective fraction of frames = %lf (at the start %lf)\n",p->op->neff,neff0);
 	fprintf(stderr,"> accepted changes = %lf\n",(double)iacc/nstep);
+	if (parms->op_neff>0) fprintf(stderr,"> changes rejected for op_neff = %lf\n",(double)nneff/nstep);
 	fprintf(stderr,"> average E = %lf +/- %lf\n",eav/n,sqrt(eav2/n-eav*eav/n/n));
 	fprintf(stderr,"> rms difference = %lf\n\n",sqrt(de2/n));
 	
@@ -527,7 +553,7 @@ void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntype
  ***************************************************/
 double OP_function(double **e, struct s_optimizepot *x, struct s_optimizepot_input *in, struct s_mc_parms *parms)
 {
-	double chi2,enew,eold,mul,emax=-9E19,z=0.,boltz;
+	double chi2,enew,eold,mul,emax=-9E19,z=0.,z2=0.,boltz;
 	int ifr,icont,it1,it2,ir;
 
 	for (ir=0;ir<in->ndata;++ir) x->rest_av[ir]=0.;
@@ -562,10 +588,12 @@ double OP_function(double **e, struct s_optimizepot *x, struct s_optimizepot_inp
 			x->rest_av[ir] +=  x->restrain[ifr][ir] * boltz;
                                                                                                                             
 		z += boltz;
+		z2 += boltz*boltz;
 	}
 
 
 	for (ir=0;ir<in->ndata;++ir) x->rest_av[ir] /= z;
+	x->neff = z*z/z2/x->nframes;
 	
 	chi2 = Chi2(x->rest_av,in->expdata,in->sigma,in->ndata);
 
@@ -581,9 +609,28 @@ double Chi2(double *x, double *xexp, double *sigma, int n)
 	double chi2=0.;
 
 	for (i=0;i<n;++i)
-		chi2 += (x[i] - xexp[i])*(x[i] - xexp[i]) / ( sigma[i] * sigma[i] );
+		if (sigma[i]>0)						// validation restraints have sigma<0
+			chi2 += (x[i] - xexp[i])*(x[i] - xexp[i]) / ( sigma[i] * sigma[i] );
 
 	return chi2;
+}
+
+/***************************************************
+ Reduced chi2 of the validation restraints (sigma<0)
+ ***************************************************/
+double Chi2Validation(double *x, struct s_optimizepot_input *in)
+{
+	int i,n=0;
+	double chi2=0.;
+
+	for (i=0;i<in->ndata;++i)
+		if (in->sigma[i]<0)
+		{
+			chi2 += (x[i] - in->expdata[i])*(x[i] - in->expdata[i]) / ( in->sigma[i] * in->sigma[i] );
+			n++;
+		}
+
+	return n ? chi2/n : 0.;
 }
 
 /***************************************************
@@ -593,7 +640,7 @@ double Chi2(double *x, double *xexp, double *sigma, int n)
  ***************************************************/
 double OP_functionDiff(int iw, double deltae, struct s_optimizepot *x, struct s_optimizepot_input *in, struct s_mc_parms *parms)
 {
-	double chi2,enew,eold,emax=-9E19,z=0.,boltz;
+	double chi2,enew,eold,emax=-9E19,z=0.,z2=0.,boltz;
 	int ifr,ir;
 
 	for (ir=0;ir<in->ndata;++ir) x->rest_av[ir]=0.;
@@ -622,9 +669,11 @@ double OP_functionDiff(int iw, double deltae, struct s_optimizepot *x, struct s_
 		for (ir=0;ir<in->ndata;++ir)
 			x->rest_av[ir] += x->restrain[ifr][ir] * boltz;
 		z += boltz;
+		z2 += boltz*boltz;
 	}
 
 	for (ir=0;ir<in->ndata;++ir) x->rest_av[ir] /= z;
+	x->neff = z*z/z2/x->nframes;
 	
 	chi2 = Chi2(x->rest_av,in->expdata,in->sigma,in->ndata);
 

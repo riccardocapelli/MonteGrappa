@@ -101,7 +101,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 	
 	#ifdef OPTIMIZEPOT
 	struct s_optimizepot *op = p->op;
-	op->icount=0;
+	op->icount = (parms->record_native && !chk->restart) ? parms->op_deltat : 0;	// record_native: the starting structure is the first frame
 	op->nframes = 0;
 	op->ncontacts = 0;
 	op->record = 0;

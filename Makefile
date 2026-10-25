@@ -5,7 +5,7 @@
 #   make version=STEMPERING    serial montegrappa + stempering -> bin/montegrappa (needs GSL)
 #   make version=MPI           parallel tempering              -> bin/montegrappa_mpi
 #   make version=ASAN          serial, AddressSanitizer+UBSan  -> bin/montegrappa_asan
-#   make grappino | mgp2pdb | mhistogram
+#   make grappino | mgp2pdb | dcd2pdb | mhistogram
 #   make version=ASAN grappino                                 -> bin/grappino_asan
 #   make all                   everything above except ASAN
 #
@@ -39,7 +39,7 @@ CPPFLAGS += -Iinclude
 
 version ?= SERIAL
 
-MC_SRC = geometry io mc local_move memory misc potential optimizepot checkpoint cells observables montegrappa
+MC_SRC = geometry io mc local_move memory misc potential optimizepot checkpoint cells observables trajectory montegrappa
 
 ifeq ($(version),MPI)
   CCV       = $(MPICC)
@@ -78,7 +78,7 @@ GRAPPINO_OBJ = $(GRAPPINO_SRC:%=$(GRAPPINO_DIR)/%.o)
 MGP2PDB_SRC  = mgp2pdb io memory geometry misc
 MGP2PDB_OBJ  = $(MGP2PDB_SRC:%=obj/TOOLS/%.o)
 
-.PHONY: montegrappa grappino mgp2pdb mhistogram all clean cleanobj check check-asan check-stat FORCE
+.PHONY: montegrappa grappino mgp2pdb dcd2pdb mhistogram all clean cleanobj check check-asan check-stat FORCE
 
 montegrappa: $(MC_BIN)
 
@@ -93,12 +93,16 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
 
 grappino: $(GRAPPINO_BIN)
 mgp2pdb:  $(BINDIR)/mgp2pdb
+dcd2pdb:  $(BINDIR)/dcd2pdb
 
 $(GRAPPINO_BIN): $(GRAPPINO_OBJ) | $(BINDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
 $(BINDIR)/mgp2pdb: $(MGP2PDB_OBJ) | $(BINDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
+
+$(BINDIR)/dcd2pdb: obj/TOOLS/dcd2pdb.o | $(BINDIR)
+	$(CC) $(CFLAGS) $^ -o $@
 
 obj/TOOLS/%.o: $(SRCDIR)/%.c | obj/TOOLS
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
@@ -112,11 +116,11 @@ $(BINDIR) $(OBJDIR) obj/TOOLS:
 all:
 	$(MAKE) version=STEMPERING
 	$(MAKE) version=MPI
-	$(MAKE) grappino mgp2pdb mhistogram
+	$(MAKE) grappino mgp2pdb dcd2pdb mhistogram
 
 # tests (see tests/run_tests.sh)
 check:
-	$(MAKE) montegrappa grappino mgp2pdb
+	$(MAKE) montegrappa grappino mgp2pdb dcd2pdb
 	tests/run_tests.sh
 
 check-asan:
@@ -133,6 +137,6 @@ cleanobj:
 
 clean: cleanobj
 	rm -f $(BINDIR)/montegrappa $(BINDIR)/montegrappa_mpi $(BINDIR)/montegrappa_asan \
-	      $(BINDIR)/grappino $(BINDIR)/grappino_asan $(BINDIR)/mgp2pdb $(BINDIR)/mhistogram
+	      $(BINDIR)/grappino $(BINDIR)/grappino_asan $(BINDIR)/mgp2pdb $(BINDIR)/dcd2pdb $(BINDIR)/mhistogram
 
 -include $(wildcard obj/*/*.d)

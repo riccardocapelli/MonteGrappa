@@ -16,7 +16,7 @@ jobs:
           make version=STEMPERING      # compile check only: it also writes bin/montegrappa
           make                         # serial executable used by the tests
           make version=MPI
-          make grappino mgp2pdb mhistogram
+          make grappino mgp2pdb dcd2pdb mhistogram
       - name: Tests
         run: MG_TEST_WORKDIR=$RUNNER_TEMP/mgtests tests/run_tests.sh
       - name: Keep the outputs of failed tests
@@ -49,7 +49,7 @@ jobs:
         run: |
           make version=STEMPERING
           make
-          make grappino mgp2pdb mhistogram
+          make grappino mgp2pdb dcd2pdb mhistogram
       - name: Tests
         run: MG_TEST_WORKDIR=$RUNNER_TEMP/mgtests tests/run_tests.sh
       - name: Keep the outputs of failed tests

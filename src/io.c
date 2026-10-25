@@ -366,12 +366,12 @@ void PrintPDBStream(struct s_polymer *p, int npol, FILE *fp)
 			  if (npol<24) cc = ch+65;
 			  else cc=' ';
 
-	          fprintf(fp,"ATOM  %5d  %-4s%3s %c%4d   %8.3lf%8.3lf%8.3lf\n",(((p+ch)->back)+i)->ia,(((p+ch)->back)+i)->type,
+	          fprintf(fp,"ATOM  %5d  %-4s%3s %c%4d    %8.3lf%8.3lf%8.3lf\n",(((p+ch)->back)+i)->ia,(((p+ch)->back)+i)->type,
 	        		  (((p+ch)->back)+i)->aa,cc,(((p+ch)->back)+i)->iaa,((((p+ch)->back)+i)->pos).x,((((p+ch)->back)+i)->pos).y,
 	        		  ((((p+ch)->back)+i)->pos).z );
 
 	          for (j=0;j<(((p+ch)->back)+i)->nside;++j)
-	        	  fprintf(fp,"ATOM  %5d  %-4s%3s %c%4d   %8.3lf%8.3lf%8.3lf\n", (((((p+ch)->back)+i)->side)+j)->ia,
+	        	  fprintf(fp,"ATOM  %5d  %-4s%3s %c%4d    %8.3lf%8.3lf%8.3lf\n", (((((p+ch)->back)+i)->side)+j)->ia,
 	        			  (((((p+ch)->back)+i)->side)+j)->type, (((p+ch)->back)+i)->aa,cc,(((p+ch)->back)+i)->iaa,
 	        			  ((((((p+ch)->back)+i)->side)+j)->pos).x,((((((p+ch)->back)+i)->side)+j)->pos).y,
 	        			  ((((((p+ch)->back)+i)->side)+j)->pos).z);
@@ -392,7 +392,7 @@ struct s_mc_parms *ReadMcParms(char *fname)
 {
 	int i,chk;
 	struct s_mc_parms *x;
-	char aux[1000],nlog[1000];
+	char aux[1000],nlog[1000],trjformat[20]="pdb";
 	FILE *fp;
 	
 	x = calloc(1,sizeof(struct s_mc_parms));
@@ -557,6 +557,7 @@ struct s_mc_parms *ReadMcParms(char *fname)
 		ReadParD(aux,"ncheckpoint",&(x->ncheckpoint));
 		ReadParD(aux,"tcheckpoint",&(x->tcheckpoint));
 		ReadParS(aux,"traj",x->fntrj);
+		ReadParS(aux,"trjformat",trjformat);
 		ReadParS(aux,"logfile",nlog);
 		ReadParS(aux,"lastp",x->flastp);
 		ReadParS(aux,"efile",x->fne);
@@ -839,6 +840,8 @@ struct s_mc_parms *ReadMcParms(char *fname)
 	if (x->movetype[7] != -1 && x->nmul_local < 3) Error("movebias needs nmul_local (at least 3)");
 	if (x->movetype[13] != -1 && (x->avb_rin <= 0 || x->avb_pin <= 0 || x->avb_pin >= 1))
 		Error("avbmc needs avb_rin > 0 and 0 < avb_pin < 1");
+	if (!strcmp(trjformat,"dcd")) x->trjdcd = 1;
+	else if (strcmp(trjformat,"pdb")) Error("trjformat must be pdb or dcd");
 	#ifdef ACTIVE_MPI
 	if (x->ncheckpoint<=0) x->ncheckpoint = 100000;		// replicas must write their checkpoints at the same step
 	if (x->ntemp<1) Error("ntemp and temperatures must be defined");

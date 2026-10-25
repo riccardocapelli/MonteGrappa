@@ -426,7 +426,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			//fprintf(stderr,"DEBUG: ok=%d\tTotal Energy %lf\n",ok,TotalEnergy(p,pot,parms,parms->npol,0,parms->nosidechains,parms->debug,my_rank));
 			//fpirintf(stderr,"DEBUG: \t\t\tetot=%lf\n",p->etot);
 			sprintf(p->title,"step %llu\tE=%lf",istep,p->etot);
-			PrintPDBStream(p,parms->npol,ftrj);
+			PrintTrajectory(ftrj,p,parms,pot);
 			fflush(ftrj);
 			iprinttrj = 0;
 			
@@ -724,7 +724,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 
 	fprintf(stderr,"\n");
 	sprintf(p->title,"final");
-	PrintPDBStream(p,parms->npol,ftrj);
+	PrintTrajectory(ftrj,p,parms,pot);
 
 
 }

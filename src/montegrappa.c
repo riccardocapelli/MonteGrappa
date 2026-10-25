@@ -452,25 +452,25 @@ int main(int argc, char *argv[])
 
 		#endif
 		
-		// open trajectory file
+		// open trajectory file (name without the extension, which depends on trjformat)
 		#ifdef ACTIVE_MPI
 		if (parms->nrun>1)
-			snprintf(fname,sizeof(fname),"%s_run%d_proc%d.pdb",parms->fntrj,irun,my_rank);
+			snprintf(fname,sizeof(fname),"%s_run%d_proc%d",parms->fntrj,irun,my_rank);
 		else
-			snprintf(fname,sizeof(fname),"%s_proc%d.pdb",parms->fntrj,my_rank);
+			snprintf(fname,sizeof(fname),"%s_proc%d",parms->fntrj,my_rank);
 		#else
 		if (parms->nrun>1)
-			snprintf(fname,sizeof(fname),"%s_run%d.pdb",parms->fntrj,irun);
+			snprintf(fname,sizeof(fname),"%s_run%d",parms->fntrj,irun);
 		else
-			snprintf(fname,sizeof(fname),"%s.pdb",parms->fntrj);
+			snprintf(fname,sizeof(fname),"%s",parms->fntrj);
 		#endif
-		ftrj = fopen(fname,ckp.restart ? "a" : "w");			// a restart continues the files of the run
+		ftrj = OpenTrajectory(fname,polymer,parms,u,ckp.restart);	// a restart continues the files of the run
 		if (!ftrj)
 			Error("Cannot open trajectory file for writing");
 		if (!ckp.restart)
 		{
 			snprintf(polymer->title,sizeof(polymer->title),"initial\tE=%lf",polymer->etot);
-			PrintPDBStream(polymer,parms->npol,ftrj);
+			PrintTrajectory(ftrj,polymer,parms,u);
 		}
 
 		// open energy file

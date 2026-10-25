@@ -300,6 +300,8 @@ struct s_mc_parms
 	double dw_lpivot;	// maximum angle allowed in a flip
 	double dw_mflip;	// maximum angle allowed in a multiple flip
 	char fntrj[FNAMEMAX];		// name of trajectory file
+	int trjdcd;		// trajectory format: 0=pdb, 1=dcd (see trajectory.c)
+	int trj_natoms,trj_nframes,trj_cell;	// atoms, frames and unit cell of the dcd trajectory being written
 	char fne[FNAMEMAX];		// name of energy file
 	char flastp[FNAMEMAX];	// name of last conformation;
 	char fnproc[FNAMEMAX];	// name of the log file

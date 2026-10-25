@@ -233,11 +233,19 @@ restart_case() {
 	rm -rf $b; cp -r $a $b
 	awk '$1<3000' $a/energy.ene > $b/energy.ene
 	awk '/^#/ || $1<3000' $a/obs.dat > $b/obs.dat
-	awk '{print} /^ENDMDL/{n++; if(n==3) exit}' $a/traj.pdb > $b/traj.pdb
+	local trj=traj.pdb
+	if [ -f $a/traj.dcd ]; then
+		# 3 frames and part of the 4th, cut by the interruption (header of 276 bytes, frames of equal size)
+		trj=traj.dcd
+		local size=$(wc -c < $a/traj.dcd) nset=$(od -A n -t d4 -j 8 -N 4 $a/traj.dcd | tr -d ' ')
+		head -c $(( 276 + 3*(size-276)/nset + 100 )) $a/traj.dcd > $b/traj.dcd
+	else
+		awk '{print} /^ENDMDL/{n++; if(n==3) exit}' $a/traj.pdb > $b/traj.pdb
+	fi
 	rm -f $b/last.pol
 	( cd $b && "$MG" checkpoint $pot run.par > stdout.log 2> stderr.log )
 	local res=ok f
-	for f in energy.ene traj.pdb last.pol obs.dat; do cmp -s $a/$f $b/$f || res="$f differs"; done
+	for f in energy.ene $trj last.pol obs.dat; do cmp -s $a/$f $b/$f || res="$f differs"; done
 	sanitizer_ok $b || res="sanitizer report"
 	if [ "$res" = ok ]; then pass "restart $name"; else fail "restart $name" "$res"; fi
 }
@@ -248,6 +256,7 @@ group_restart() {
 	restart_case three three.pol homo.pot "nchains 3\nnosidechain\nnodihpot\nnoangpot\nTemp 1.0\nflip 1\npivot 5\ncomcluster 5\nrotcluster 5\nmovecom 7\nmoverot 7\n"
 	restart_case two two.pol two_hf.pot "nchains 2\nTemp 2.0\nflip 1\npivot 5\nmovecom 5\nmoverot 5\nsidechain 3\nbackrub 5\nmflip 7\nlpivot 7\nmovebias 4\nnmul_local 5\n"
 	restart_case three_pbc three.pol homo_pbc.pot "nchains 3\nnosidechain\nnodihpot\nnoangpot\nTemp 1.0\nflip 1\npivot 5\ncomcluster 5\nrotcluster 5\nmovecom 7\nmoverot 7\n"
+	restart_case two_dcd two.pol two_hf_pbc.pot "nchains 2\nTemp 2.0\nflip 1\npivot 5\nmovecom 5\nmoverot 5\nsidechain 3\nbackrub 5\ntrjformat dcd\n"
 }
 
 ######################################################################
@@ -344,6 +353,23 @@ group_tools() {
 		if [ "$(grep -c '^ATOM' $d/two.pdb 2>/dev/null)" = 150 ]; then pass "mgp2pdb (two chains)"; else fail "mgp2pdb (two chains)" "wrong number of atoms"; fi
 	else
 		echo "  SKIP  mgp2pdb not built"
+	fi
+	# the same run with trjformat pdb and dcd (periodic box): dcd2pdb gives back the frames of the pdb trajectory
+	if [ -x $ROOT/bin/dcd2pdb ]; then
+		local f
+		for f in pdb dcd; do
+			mg trj_$f two.pol two_hf_pbc.pot "nchains 2\nTemp 2.0\nseed 4\nnstep 3000\nflip 1\npivot 5\nmovecom 5\nsidechain 3\nnprinttrj 500\nnprinte 500\nnprintlog 100000\ntrjformat $f\n"
+		done
+		d=$WORK/trj_dcd
+		$ROOT/bin/dcd2pdb $d/traj_top.pdb $d/traj.dcd > $d/conv.pdb 2> $d/conv.log
+		maxd=$(paste <(grep '^ATOM' $WORK/trj_pdb/traj.pdb | cut -c31-54) <(grep '^ATOM' $d/conv.pdb | cut -c31-54) | \
+			awk 'NF!=6 {print "mismatch"; exit} {for(k=1;k<=3;k++){x=$k-$(k+3); if(x<0)x=-x; if(x>m)m=x}} END{if(NR==0) print "mismatch"; else print m+0}')
+		if [ "$(grep -c '^ENDMDL' $WORK/trj_pdb/traj.pdb)" = 7 ] && [ "$(grep -c '^MODEL' $d/conv.pdb)" = 7 ] && [ "$(grep -c '^CRYST1' $d/conv.pdb)" = 7 ] && \
+		   [ "$(grep -c '^ATOM' $d/conv.pdb)" = "$(grep -c '^ATOM' $WORK/trj_pdb/traj.pdb)" ] && awk -v m="$maxd" 'BEGIN{exit !(m!="mismatch" && m<=0.0015)}' && \
+		   cmp -s $WORK/trj_pdb/energy.ene $d/energy.ene && sanitizer_ok $d
+		then pass "dcd trajectory = pdb trajectory (dcd2pdb)"; else fail "dcd trajectory = pdb trajectory (dcd2pdb)" "see $d (max difference $maxd)"; fi
+	else
+		echo "  SKIP  dcd2pdb not built"
 	fi
 }
 

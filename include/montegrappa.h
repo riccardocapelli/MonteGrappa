@@ -352,6 +352,8 @@ int CellsCandidates(struct s_polymer *p, int ic, int i);
 int CellsCheck(struct s_polymer *p);
 int FindClusters(struct s_polymer *p, int npol, int *member, int *start, int *cluster_of);
 void PrintObservablesHeader(FILE *fp);
+FILE *OpenTrajectory(char *base, struct s_polymer *p, struct s_mc_parms *parms, struct s_potential *u, int restart);
+void PrintTrajectory(FILE *fp, struct s_polymer *p, struct s_mc_parms *parms, struct s_potential *u);
 void PrintObservables(FILE *fp, struct s_polymer *p, int npol, unsigned long long istep);
 void SetSidechainExtents(struct s_polymer *p, int npol, int nosidechains);
 double EnergyHFieldsAll(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms);

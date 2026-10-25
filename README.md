@@ -20,6 +20,7 @@ The package contains three programs:
 	- "grappino", a tool to create the input files for montegrappa.
 	- "mhistogram", a data analysis tool
 	- "mgp2pdb", a simple converter from .pol files to .pdb
+	- "dcd2pdb", a converter of dcd trajectories (trjformat dcd) to .pdb
 
 The code needs GSL libraries and the MPI environment to be correctly 
 installed on your machine. This is a requirement to enable STEMPERING
@@ -97,6 +98,7 @@ The tools can be compiled alone, with the commands
 	$ make grappino
 	$ make mhistogram
 	$ make mgp2pdb
+	$ make dcd2pdb
 
 
 (6) Tests
@@ -173,11 +175,20 @@ New keywords of the parameter file:
                    larger than 2*avb_rin.
    avb_rin R       radius (A) of the bonded region (required)
    avb_pin P       probability of a move into the bonded region (default 0.5)
+ - trjformat F     format of the trajectory: pdb (default) or dcd. The dcd
+                   file <traj>.dcd is binary, single precision, with the unit
+                   cell in a periodic box (read by VMD, MDAnalysis, mdtraj);
+                   the names of its atoms are in <traj>_top.pdb, the initial
+                   structure in the same order. "dcd2pdb traj_top.pdb traj.dcd
+                   [first [last [stride]]]" converts it to pdb. A restart
+                   continues the dcd file as it does the pdb one.
  - movebias without nmul_local is an error (it did nothing)
 
 Checkpoints written by earlier versions of this revision cannot be read
 (one more move type).
 
 Output:
+ - The coordinates in the pdb trajectories are in columns 31-54, as in the
+   pdb format (they were one column to the left).
  - With MPI, each replica writes its exchanges to exchange_proc<rank>.dat
    and the acceptance of exchanges is printed at the end.

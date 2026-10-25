@@ -673,3 +673,76 @@ int SimplifyPDB(struct atom_s *x, int n, char *model)
 	return m;
 }
 
+
+/****************************************************************************
+ Amide hydrogens: for each residue (but the first of a chain and prolines)
+ add an H to the backbone N, on the bisector of the C(i-1)-N-CA angle at
+ distance hb_dist, as a sidechain atom of N built on CA(i), C(i-1), N(i).
+ The new atoms take ids from nat on. Returns the new number of atoms.
+ *****************************************************************************/
+int AddAmideHydrogens(struct s_polymer *p, int nchains, struct s_parms *parms, int nat)
+{
+	int ic,k,out,nh=0;
+	struct s_back *bn,*bca,*bc;
+	struct s_side *h;
+	struct vector u1,u2,x;
+	double n1,n2,n;
+
+	for (ic=0;ic<nchains;++ic)
+		for (k=1;k<(p+ic)->nback-1;++k)
+		{
+			bn = ((p+ic)->back)+k; bc = bn-1; bca = bn+1;
+			if (strcmp(bn->type,"N") || strcmp(bca->type,"CA") || strcmp(bc->type,"C")) continue;
+			if (!strcmp(bn->aa,"PRO")) continue;
+			if (bn->nside >= NSIDEMAX) Error("NSIDEMAX too small in AddAmideHydrogens");
+
+			u1.x = bn->pos.x-bc->pos.x;  u1.y = bn->pos.y-bc->pos.y;  u1.z = bn->pos.z-bc->pos.z;
+			u2.x = bn->pos.x-bca->pos.x; u2.y = bn->pos.y-bca->pos.y; u2.z = bn->pos.z-bca->pos.z;
+			n1 = sqrt(u1.x*u1.x+u1.y*u1.y+u1.z*u1.z); n2 = sqrt(u2.x*u2.x+u2.y*u2.y+u2.z*u2.z);
+			x.x = u1.x/n1+u2.x/n2; x.y = u1.y/n1+u2.y/n2; x.z = u1.z/n1+u2.z/n2;
+			n = sqrt(x.x*x.x+x.y*x.y+x.z*x.z);
+			x.x = bn->pos.x + parms->hb_dist*x.x/n; x.y = bn->pos.y + parms->hb_dist*x.y/n; x.z = bn->pos.z + parms->hb_dist*x.z/n;
+
+			h = (bn->side)+bn->nside;
+			h->ia = nat;
+			h->pos = x;
+			strcpy(h->type,"H");
+			*(((p+ic)->vback)+nat) = &(h->pos);
+			(h->rot)->b1 = bca->ia;
+			(h->rot)->b2 = bc->ia;
+			(h->rot)->b3 = bn->ia;
+			(h->rot)->ang = Cartesian2Spherical(bca->pos,bc->pos,bn->pos,x,(p+ic)->tables,&out);
+			if (out==0) Error("Cannot get spherical coordinates of the amide H");
+			bn->nside ++;
+			if (bn->nrot < 1) bn->nrot = 1;
+			nat ++; nh ++;
+		}
+	fprintf(stderr,"Added %d amide hydrogens\n",nh);
+	return nat;
+}
+
+/****************************************************************************
+ Backbone hydrogen bonds: the amide H are donors (reference atom N), the O
+ bound to C are acceptors (reference atom C). Returns the number of donors
+ plus acceptors.
+ *****************************************************************************/
+int SetBackboneHBonds(struct s_polymer *p, int nchains, struct s_potential *u)
+{
+	int ic,k,is,nd=0,na=0;
+	struct s_back *b;
+	struct s_side *s;
+
+	for (ic=0;ic<nchains;++ic)
+		for (k=0;k<(p+ic)->nback;++k)
+		{
+			b = ((p+ic)->back)+k;
+			for (is=0;is<b->nside;++is)
+			{
+				s = (b->side)+is;
+				if (!strcmp(b->type,"N") && !strcmp(s->type,"H")) { u->hb[s->ia] = 1; u->hb_iam[s->ia] = b->ia; nd++; }
+				if (!strcmp(b->type,"C") && !strcmp(s->type,"O")) { u->hb[s->ia] = 2; u->hb_iam[s->ia] = b->ia; na++; }
+			}
+		}
+	fprintf(stderr,"Backbone hydrogen bonds: %d donors, %d acceptors\n",nd,na);
+	return nd+na;
+}

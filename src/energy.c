@@ -770,3 +770,84 @@ void PrintOpGoFile(char *nfile, double **cm, struct s_polymer *p, int nchains, c
 	
     
 }
+
+/*****************************************************************************
+ Pair potential between atom types read from a file (e.g. made by
+ tools/potential/derive_potential.py), with lines "type1 type2 e r_well
+ r_hardcore" (distances in A, # starts a comment); r_well=0 means only the
+ hard core. Returns the number of pairs read.
+ *****************************************************************************/
+int File_Pairs(char *fname, double **e, double **r2, double **r02, int ntypes)
+{
+	FILE *fp;
+	char aux[500];
+	int i,j,n=0;
+	double ee,rw,r0;
+
+	fp = fopen(fname,"r");
+	if (!fp) Error("Cannot open pairsfile");
+	while (fgets(aux,500,fp)!=NULL)
+	{
+		if (aux[0]=='#') continue;
+		if (sscanf(aux,"%d %d %lf %lf %lf",&i,&j,&ee,&rw,&r0)!=5) continue;
+		if (i<0 || j<0 || i>=ntypes || j>=ntypes) { fprintf(stderr,"types %d %d\n",i,j); Error("Type in pairsfile not defined by atomtypes"); }
+		if (rw>0 && rw<=r0) Error("r_well must be larger than r_hardcore in pairsfile");
+		e[i][j] = e[j][i] = (rw>0) ? ee : 0.;
+		r2[i][j] = r2[j][i] = rw*rw;
+		r02[i][j] = r02[j][i] = r0*r0;
+		n++;
+	}
+	fclose(fp);
+	fprintf(stderr,"Read %d pairs of types from %s\n",n,fname);
+	return n;
+}
+
+/*****************************************************************************
+ Statistical potential of the backbone dihedrals (tools/potential/torsion_stats.py):
+ lines "i phi_a phi_b psi_a psi_b", bin i covering [-180+i*bin,-180+(i+1)*bin),
+ with one more line for 180 itself. Phi is on CA, psi on C; table a is used
+ for all residues but glycine, b for glycine; prolines have no phi term
+ (their ring fixes it). Needs backbone_atoms N CA C.
+ *****************************************************************************/
+int Tabled_Dihedrals(char *fname, double e, struct s_polymer *p, int nchains, struct s_potential *u)
+{
+	FILE *fp;
+	char aux[500];
+	int i,n=0,ic,iw,ia,gly,nw=0;
+	double fa,fb,sa,sb;
+
+	fp = fopen(fname,"r");
+	if (!fp) Error("Cannot open dihfile");
+	while (fgets(aux,500,fp)!=NULL)
+	{
+		if (aux[0]=='#') continue;
+		if (sscanf(aux,"%d %lf %lf %lf %lf",&i,&fa,&fb,&sa,&sb)!=5) continue;
+		if (i!=n) Error("Lines of dihfile must be numbered from 0 in order");
+		if (n>=NDIHFMAX) Error("NDIHFMAX too small for dihfile");
+		u->dih_f_phi_a[n] = fa; u->dih_f_phi_b[n] = fb;
+		u->dih_f_psi_a[n] = sa; u->dih_f_psi_b[n] = sb;
+		n++;
+	}
+	fclose(fp);
+	if (n<3) Error("Too few lines in dihfile");
+	u->g_dihbin = 360./(n-1);
+	u->g_dihe = e;
+	u->dih_tabled = 1;
+
+	for (ic=0;ic<nchains;++ic)
+		for (iw=0;iw<(p+ic)->nback;++iw)
+		{
+			ia = (((p+ic)->back)+iw)->ia;
+			gly = !strcmp((((p+ic)->back)+iw)->aa,"GLY");
+			if (!strcmp((((p+ic)->back)+iw)->type,"CA") && strcmp((((p+ic)->back)+iw)->aa,"PRO"))
+				{ u->dih_which[ia] = 0; nw++; }
+			else if (!strcmp((((p+ic)->back)+iw)->type,"C"))
+				{ u->dih_which[ia] = 1; nw++; }
+			else continue;
+			u->dih_pa[ia] = gly ? 0. : 1.;
+			u->dih_pb[ia] = gly ? 1. : 0.;
+		}
+	if (nw==0) Error("dihfile needs CA and C backbone atoms");
+	fprintf(stderr,"Read %d bins of dihedral tables from %s (bin %.2lf degrees), %d phi/psi\n",n,fname,u->g_dihbin,nw);
+	return nw;
+}

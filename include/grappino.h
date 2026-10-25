@@ -25,6 +25,9 @@ struct s_parms
 	char eoutfile[FNAMEMAX];
 	char cntfile[FNAMEMAX];
 	char coevofile[FNAMEMAX];
+	char pairsfile[FNAMEMAX];		// pair potential between types (potential pairs)
+	char dihfile[FNAMEMAX];			// tables of the statistical potential of phi and psi
+	double e_dihtab;			// its scale
 	char ab_propensityfile[FNAMEMAX];
 	char h_fieldsfile[FNAMEMAX];
 	char maxcontfile[FNAMEMAX];
@@ -87,6 +90,9 @@ struct s_parms
 	int psi_0_b;
 	double dih_ka,dih_kb; //weight of alpha-beta dihedrals
 	
+
+	int hb_backbone;			// add the amide H and the backbone hydrogen bonds (H donor, O acceptor)
+	double hb_dist;				// N-H bond length of the amide H
 
 	int h_fields;				//H fields for CoCaInE-derived potentials
 	double hfs_alpha;			// alpha parameter
@@ -179,10 +185,14 @@ double DumbRMSD2(struct vector *a, struct vector *b, int n);
 void SetRotamersSimilarToPDB(int nc, struct s_polymer *p, struct atom_s *a, int napdb);
 void CopyPDB(struct atom_s *from, struct atom_s *to, int n);
 int SimplifyPDB(struct atom_s *x, int n, char *model);
+int AddAmideHydrogens(struct s_polymer *p, int nchains, struct s_parms *parms, int nat);
+int SetBackboneHBonds(struct s_polymer *p, int nchains, struct s_potential *u);
 
 // energy.c
 double **ContactMap(struct s_parms *parms, struct s_polymer *p, int nchains, int nat, int debug);
 void Go_Pairs(struct s_parms *parms, struct s_polymer *p, double **e, double **r, double **r0, int nchains, int natoms, double **cm);
+int File_Pairs(char *fname, double **e, double **r2, double **r02, int ntypes);
+int Tabled_Dihedrals(char *fname, double e, struct s_polymer *p, int nchains, struct s_potential *u);
 double Ext_Pairs(struct s_parms *parms, struct s_polymer *p, double **e, double **r2, double **r02);
 void Go_Dihedrals(struct s_parms *parms, struct s_polymer *p, int nc, double *dih01, double *dih03, struct s_potential *u);
 void Go_Angles(struct s_parms *parms, struct s_polymer *p, int nc, double *ang, struct s_potential *u);

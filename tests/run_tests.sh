@@ -114,6 +114,14 @@ group_errors() {
 	mg err_nmul polyala.pol polyala.pot "nchains 1\nTemp 1\nnstep 10\nmovebias 1\n"
 	if [ $? -ne 0 ] && grep -q "nmul_local" $WORK/err_nmul/stderr.log; then pass "movebias without nmul_local"; else fail "movebias without nmul_local" "not refused"; fi
 
+	# hydrogen bonds of atoms that are not in the polymer; hydrogen bonds in the pot file without hb
+	d=$WORK/err_hbatom; rm -rf $d; mkdir -p $d; cp $DATA/polyala.pol $d/; { cat $DATA/polyala_hb.pot; printf "9999 \ta\t1\n"; } > $d/p.pot
+	par $d/run.par "nchains 1\nTemp 1\nnstep 10\nhb\npivot 1\n"
+	( cd $d && "$MG" polyala.pol p.pot run.par > stdout.log 2> stderr.log )
+	if [ $? -ne 0 ] && grep -q "hydrogen bond of atoms 9999" $d/stderr.log && sanitizer_ok $d; then pass "hydrogen bond of a missing atom"; else fail "hydrogen bond of a missing atom" "not refused"; fi
+	mg err_nohb polyala.pol polyala_hb.pot "nchains 1\nTemp 1\nnstep 10\npivot 1\n"
+	if [ $? -eq 0 ] && grep -q "hb is not in the par file" $WORK/err_nohb/stderr.log && sanitizer_ok $WORK/err_nohb; then pass "hydrogen bonds without hb ignored"; else fail "hydrogen bonds without hb ignored" "see $WORK/err_nohb"; fi
+
 	local long=$(printf 'x%.0s' $(seq 1 300))
 	( cd $WORK && "$MG" "$long.pol" polyala.pot run.par > /dev/null 2> long.log )
 	if [ $? -ne 0 ] && grep -q "too long" $WORK/long.log; then pass "file name too long"; else fail "file name too long" "not refused"; fi
@@ -303,6 +311,20 @@ group_tools() {
 			if [ $kind = lib ]; then grep -q "pseudo-CB" $d/g.log; else ! grep -q "pseudo-CB" $d/g.log; fi
 			if [ $? -eq 0 ]; then pass "grappino rotamers with glycines ($kind)"; else fail "grappino rotamers with glycines ($kind)" "see $d"; fi
 		done
+
+		# backbone hydrogen bonds (amide H built on N) with the reduced types and a pair potential from a
+		# file, statistical dihedrals from tables (phi on CA but not of proline, psi on C: 21 per chain);
+		# montegrappa with hb and the dihedral tables on it is consistent
+		d=$WORK/grappino_hb; mkdir -p $d; cp $DATA/ttr_protofilament.pdb $DATA/pairs_small.dat $DATA/dihedrals_small.dat $d/
+		printf "pdbfile ttr_protofilament.pdb\nrotamers\nrotfile $ROOT/lib/rotamers.lib\npdb_rot\natomtypes $ROOT/lib/atomtypes.reduced.lib\nbackbone_atoms 3 N CA C\nlocked_atoms N\nimin 6\nr_hardcore 1.5\npotential pairs\npairsfile pairs_small.dat\nhb_backbone\ndihfile dihedrals_small.dat\npolfile h.pol\npotfile h.pot\n" > $d/h.in
+		( cd $d && $GRAPPINO h.in > g.log 2>&1 )
+		par $d/run.par "nchains 16\nseed 2\nnstep 300\nTemp 0.5\nhb\nflip 2\npivot 1\nsidechain 1\nbackrub 2\necheck\nnprinttrj 1000\nnprinte 1000\nnprintlog 1000\n"
+		( cd $d && "$MG" h.pol h.pot run.par > o.log 2> e.log )
+		if [ $? -eq 0 ] && grep -q "Added 144 amide hydrogens" $d/g.log && grep -q "144 donors, 176 acceptors" $d/g.log && \
+		   [ "$(awk '/hydrogen_bonds/{f=1;next} /^\[/{f=0} f && NF==3' $d/h.pot | wc -l)" -eq 320 ] && ! grep -q ECHECK $d/e.log && ! grep -q "WARNING: overlap" $d/e.log && \
+		   grep -q "Read 13 bins of dihedral tables" $d/g.log && [ "$(awk '/dihedral_weight/{f=1;next} /^\[/{f=0} f && NF==4' $d/h.pot | wc -l)" -eq 336 ] && \
+		   awk 'NR==1 && $5>1 {ok=1} END{exit !ok}' $d/energy.ene
+		then pass "grappino backbone hydrogen bonds, reduced types, pairs and dihedrals from files"; else fail "grappino backbone hydrogen bonds, reduced types, pairs and dihedrals from files" "see $d"; fi
 
 		# splice written as given; CB of a CACB model of many chains taken from its own chain;
 		# only the first model of a multi-model pdb

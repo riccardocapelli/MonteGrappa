@@ -68,12 +68,19 @@ int main(int argc, char *argv[])
 	// sidechains built from scratch get atom ids after those of the pdb
 	natalloc = npdb;
 	if (p->sidescratch && !p->nosidechain) natalloc += nbackmax*(ROT_ATMAX+1);
+	if (p->hb_backbone) natalloc += nbackmax;					// amide hydrogens
 	polymer = AlloPolymer(nchain,nbackmax,NSIDEMAX,NROTMAX,natalloc,0,0,stderr);
 	polymer->tables = InitTables(stderr);
 	for (i=1;i<nchain;++i) (polymer+i)->tables = polymer->tables;			// tables of all polymers point to same address
 
 	// transfer pdb to polymer structure
 	nat = Pdb2Polymer(pdb,nchain,npdb,polymer,p,rotamers,nrot_kinds);		// nat is the total number of atoms
+	if (p->hb_backbone)
+	{
+		if (p->hydrogens) Error("hb_backbone builds the amide hydrogens: do not read them from the pdb (hydrogens)");
+		if (p->nosidechain) Error("hb_backbone needs sidechains (the H is a sidechain atom of N, the O of C)");
+		nat = AddAmideHydrogens(polymer,nchain,p,nat);
+	}
 
 	/////////////////
 	// POTENTIAL FILE
@@ -88,7 +95,8 @@ int main(int argc, char *argv[])
 	
 	cm = ContactMap(p,polymer,nchain,ntypes,p->debug);
 	
-	u = AlloPotential(nat,ntypes,0,0,0,0);
+	u = AlloPotential(nat,ntypes,0,0,p->hb_backbone,0);
+	if (p->hb_backbone) SetBackboneHBonds(polymer,nchain,u);
 	u->splice=0;
 	u->g_imin = p->imin;
 	fprintf(stderr,"imin = %d\n",u->g_imin);
@@ -103,7 +111,13 @@ int main(int argc, char *argv[])
 		stdev = Ext_Pairs(p,polymer,u->e,u->r_2,u->r0_2);
 		u->g_r0hard = p->rhard;
 	}
-	else Error("potential must be go or coevo");
+	else if (!strcmp(p->potential,"pairs"))
+	{
+		if (!strcmp(p->pairsfile,"")) Error("potential pairs needs pairsfile");
+		File_Pairs(p->pairsfile,u->e,u->r_2,u->r0_2,ntypes);
+		u->g_r0hard = p->rhard;
+	}
+	else Error("potential must be go, coevo or pairs");
 
 	if (p->splice) {
 		u->splice=1;
@@ -128,6 +142,13 @@ int main(int argc, char *argv[])
 	if (p->go_ang)
         Go_Angles(p,polymer,nchain,u->ang0,u);
     
+    // statistical dihedrals (tables of phi and psi)
+    if (strcmp(p->dihfile,""))
+	{
+		if (p->go_dih || p->dih_ram) Error("dihfile cannot be used together with go_dihedrals or dih_ram");
+		Tabled_Dihedrals(p->dihfile,p->e_dihtab,polymer,nchain,u);
+	}
+
     // ramachandran dihedrals
     if (p->dih_ram)
 	{
@@ -147,10 +168,10 @@ int main(int argc, char *argv[])
 		// Read and rescale the hfields file
 		ReadHFields(p->h_fieldsfile,p->maxcontfile,u,polymer,nchain,p->hfs_alpha,stdev);
 		// Print the potential file
-		PrintPotential(u,p->eoutfile,nat,ntypes,0,0,0,0);
+		PrintPotential(u,p->eoutfile,nat,ntypes,0,0,p->hb_backbone,0);
 		}
 	else
-		PrintPotential(u,p->eoutfile,nat,ntypes,0,0,0,1);	// to avoid the h_fields printing
+		PrintPotential(u,p->eoutfile,nat,ntypes,0,0,p->hb_backbone,1);	// to avoid the h_fields printing
 	AppendPotentialComments(p, p->eoutfile);
 
 	// print polymer
@@ -183,6 +204,9 @@ void Parse(FILE *fp, struct s_parms *p)
 	strcpy(p->eoutfile,"potential.pot");
 	strcpy(p->cntfile,"");
 	strcpy(p->coevofile,"");
+	strcpy(p->pairsfile,"");
+	strcpy(p->dihfile,"");
+	p->e_dihtab = 1.;
 	p->n_back_a = 3;
 	strcpy(p->back_a[0],"N");
     strcpy(p->back_a[1],"CA");
@@ -216,6 +240,8 @@ void Parse(FILE *fp, struct s_parms *p)
 	p->dih_ka = 1.;
 	p->dih_kb = 1.;
 	
+	p->hb_backbone = 0;
+	p->hb_dist = 1.01;
 	p->h_fields = 0;
 	p->hfs_alpha = 0.15;		// Original value in Contini, Tiana JCP (2015)
 	
@@ -227,6 +253,9 @@ void Parse(FILE *fp, struct s_parms *p)
 		ReadParS(aux,"potfile",p->eoutfile);
 		ReadParS(aux,"contactfile",p->cntfile);
 		ReadParS(aux,"coevofile",p->coevofile);
+		ReadParS(aux,"pairsfile",p->pairsfile);
+		ReadParS(aux,"dihfile",p->dihfile);
+		ReadParF(aux,"e_dihtab",&(p->e_dihtab));
     		ReadParS(aux,"propensityfile",p->ab_propensityfile);
 		ReadParS(aux,"h_fieldsfile",p->h_fieldsfile);
 		ReadParS(aux,"maxcontfile",p->maxcontfile);
@@ -279,6 +308,8 @@ void Parse(FILE *fp, struct s_parms *p)
 		ReadParF(aux,"dih_ka",&(p->dih_ka));
 		ReadParF(aux,"dih_kb",&(p->dih_kb));
 		
+		ReadParN(aux,"hb_backbone",&(p->hb_backbone));
+		ReadParF(aux,"hb_dist",&(p->hb_dist));
 		ReadParN(aux,"h_fields",&(p->h_fields));
 		ReadParF(aux,"hfs_alpha",&(p->hfs_alpha));
 

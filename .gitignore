@@ -29,3 +29,6 @@ bin/
 
 # simulation outputs of the examples
 examples/*/runs/
+
+# python caches
+__pycache__/

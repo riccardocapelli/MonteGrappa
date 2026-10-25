@@ -17,7 +17,7 @@ directory, whose path is printed.
 | `echeck` | every move type on five systems with the keyword `echeck`, with the automatic and the forced cell list: the incremental energy, the backup copy `oldp` and the cell list must agree with a full recalculation after every move |
 | `restart` | a run restarted from its checkpoint gives the same energy file, observables, trajectory and final structure, bit by bit |
 | `cells` | cell list on and off give identical trajectories |
-| `tools` | `grappino` reproduces the CA model of tutorial 1, builds the shared-type (`go_homo`) Go model of the TTR(105-115) protofilament, handles glycines with the three rotamer modes, splice, CACB models of many chains and multi-model pdbs; `mgp2pdb` converts a two-chain system |
+| `tools` | `grappino` reproduces the CA model of tutorial 1, builds the shared-type (`go_homo`) Go model of the TTR(105-115) protofilament, handles glycines with the three rotamer modes, splice, CACB models of many chains and multi-model pdbs, backbone hydrogen bonds with reduced types, pairs and dihedral tables from files; `mgp2pdb` converts a two-chain system |
 | `mpi` | `montegrappa_mpi` on one rank: run and exact restart |
 | `mpi_multi` | parallel tempering on 4 ranks (only where `mpirun` works, e.g. the Linux CI): run, accepted exchanges, exact restart, and the lowest-temperature replica samples the same mean energy as plain runs at that temperature |
 | `observables` | `obs.dat` of three 4-chain sheets of known structure: parallel in register, antiparallel in register, parallel shifted by two residues |
@@ -51,4 +51,6 @@ library differs between platforms; a different trajectory still fails.
 | `homo_pbc.pot`, `homo_pbc70.pot`, `two_hf_pbc.pot` | the same potentials in a periodic box of side 40 or 70 A |
 | `free_pbc.pot` | no interactions, periodic box of side 30 A (exact distribution test of `avbmc`) |
 | `ttr_protofilament.pdb` | TTR(105-115) protofilament, PDB 2M5N model 1 (16 chains) |
+| `pairs_small.dat` | a few wells between the reduced types of `lib/atomtypes.reduced.lib` (grappino `pairsfile`) |
+| `dihedrals_small.dat` | tables of phi and psi in bins of 30 degrees (grappino `dihfile`) |
 | `obs_*.pol`, `obs.pot` | sheets of 4 chains of 20 beads, all pairs attractive |

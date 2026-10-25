@@ -1508,7 +1508,7 @@ void ReadParN(char *s, char key[20], int *par)
  ********************************************************************/
 int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, int na, int ntype)
 {
-	int i,j,k=0,chapt=0,ab,dihtype,iaa,dih0,idtype;
+	int i,j,k=0,nskip=0,chapt=0,ab,dihtype,iaa,dih0,idtype;
 	double e,r,r0,k0,d1,d3,d01,d03,kr_splice,pa,pb,sigma,h_value;//r0vec[ntype];
 	char aux[500],keyword[100],ccc,c_ab,c_dihtype;
 	FILE *fp;
@@ -1571,7 +1571,15 @@ int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, 
 				chapt=0; 
 			}
 		}
-	    if ( FindKeyword(aux,keyword)==1 && !strcmp(keyword,"hydrogen_bonds") ) chapt = 8;
+	    if ( FindKeyword(aux,keyword)==1 && !strcmp(keyword,"hydrogen_bonds") )
+		{
+			chapt = 8;
+			if (!parms->hb)
+			{
+				fprintf(stderr,"WARNING: the pot file contains hydrogen bonds, but hb is not in the par file (ignoring them)\n");
+				chapt = 0;
+			}
+		}
  	    if ( FindKeyword(aux,keyword)==1 && !strcmp(keyword,"Ramachandran_Dihedrals") )
 	    	{ 
 			chapt = 9;
@@ -1609,8 +1617,8 @@ int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, 
 	    {
 	    	if (sscanf(aux,"%d %d %lf %lf %lf",&i,&j,&e,&r,&r0)==5)
 	    	{
-				if (i>ntype-1) { fprintf(stderr,"* ERROR: found atomtype %d in ReadPotential where ntype=%d\n",i,ntype); exit(1); }
-                                if (j>ntype-1) { fprintf(stderr,"* ERROR: found atomtype %d in ReadPotential where ntype=%d\n",j,ntype); exit(1); }
+				if (i<0 || j<0) { fprintf(stderr,"* ERROR: found atomtype %d in ReadPotential\n",i<0?i:j); exit(1); }
+				if (i>ntype-1 || j>ntype-1) { ++nskip; continue; }	// a type that no atom of the polymer has (e.g. a general potential)
 				(u->e)[i][j] = e;
 				(u->r_2)[i][j] = r*r;
 				(u->r0_2)[i][j] = r0*r0;
@@ -1805,6 +1813,7 @@ int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, 
 	    {
 	    	if (sscanf(aux,"%d %c %d",&i,&ccc,&j)==3)
 	    	{
+				if (i<0 || i>na-1 || j<0 || j>na-1) { fprintf(stderr,"* ERROR: found hydrogen bond of atoms %d %d in ReadPotential where natom=%d\n",i,j,na); exit(1); }
 	    		if (ccc=='d') { (u->hb)[i]=1; }
 	    		if (ccc=='a') { (u->hb)[i]=2; }
 	    		u->hb_iam[i] = j;
@@ -1879,6 +1888,7 @@ int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, 
 
 	if (k==0) fprintf(parms->flog,"WARNING: no pair interaction read in potential file.\n");
 	else fprintf(parms->flog,"Read %d pair interaction in potential file\n",k);
+	if (nskip) fprintf(parms->flog,"Ignored %d pair interactions of atom types that are not in the polymer (ntype=%d)\n",nskip,ntype);
 
 	return k;
 }
@@ -2062,7 +2072,7 @@ void PrintPotential(struct s_potential *u, char *eoutfile, int nat, int ntypes, 
 	else fout = stdout;
 
 	// print globals
-	if (u->g_r0hard>0 || u->g_rhomo>0 || u->g_anglek || u->g_dihk1 || u->g_dihk3 || (u->splice>0) || u->g_imin || u->dih_ram)
+	if (u->g_r0hard>0 || u->g_rhomo>0 || u->g_anglek || u->g_dihk1 || u->g_dihk3 || (u->splice>0) || u->g_imin || u->dih_ram || u->dih_tabled)
 	{
 		fprintf(fout,"[ global ]\n");
 		if (u->g_r0hard>0) fprintf(fout,"hardcore %lf\n",u->g_r0hard);
@@ -2100,7 +2110,8 @@ void PrintPotential(struct s_potential *u, char *eoutfile, int nat, int ntypes, 
 
 	for (i=0;i<ntypes;++i)
 		for (j=i;j<ntypes;++j)
-			if (u->e[i][j]<-EPSILON || u->e[i][j]>EPSILON)
+			if (u->e[i][j]<-EPSILON || u->e[i][j]>EPSILON || 	// also pairs with only their own hard core
+				(u->r0_2[i][j]>0 && fabs(u->r0_2[i][j]-u->g_r0hard*u->g_r0hard)>EPSILON))
 			{
 				fprintf(fout,"%3d\t%3d\t\t%lf\t%lf\t%lf\n",i,j,u->e[i][j],sqrt(u->r_2[i][j]),sqrt(u->r0_2[i][j]));
 			}
@@ -2123,6 +2134,17 @@ void PrintPotential(struct s_potential *u, char *eoutfile, int nat, int ntypes, 
 			if (u->e_dih1[i]<-EPSILON || u->e_dih1[i]>EPSILON || u->e_dih3[i]<-EPSILON || u->e_dih3[i]>EPSILON)
 				fprintf(fout,"%d %lf %lf %lf %lf\n",i,u->e_dih1[i],u->dih01[i],u->e_dih3[i],u->dih03[i]);
 	
+		if (u->dih_tabled)
+		{
+			fprintf(fout,"[ dihedral_weight ]\n");		// atom, weight of table a, of table b, 0=phi 1=psi
+			for (i=0;i<nat;++i)
+				if (u->dih_pa[i]>EPSILON || u->dih_pb[i]>EPSILON)
+					fprintf(fout,"%d\t%lf\t%lf\t%d\n",i,u->dih_pa[i],u->dih_pb[i],u->dih_which[i]);
+			fprintf(fout,"[ dihedral_table ]\n");		// bin, phi a, phi b, psi a, psi b
+			for (i=0;i<=(int)(360./u->g_dihbin+0.5);++i)
+				fprintf(fout,"%d\t%lf\t%lf\t%lf\t%lf\n",i,u->dih_f_phi_a[i],u->dih_f_phi_b[i],u->dih_f_psi_a[i],u->dih_f_psi_b[i]);
+		}
+
 		if(u->dih_ram!=0)
 		{
 			fprintf(fout,"[ Ramachandran_Dihedrals ]\n");

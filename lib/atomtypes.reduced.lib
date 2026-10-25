@@ -1,0 +1,82 @@
+# reduced atom types for the statistical potential (tools/potential)
+# the last matching line wins, so the general lines come first
+#  0 N    backbone N
+#  1 CA   backbone CA
+#  2 C    backbone carbonyl C
+#  3 O    backbone O
+#  4 H    amide H (built by grappino with hb_backbone)
+#  5 Cal  aliphatic carbon
+#  6 Car  aromatic carbon
+#  7 Cpo  carbon bound to a polar N or O (not backbone)
+#  8 Opo  hydroxyl and amide O
+#  9 Npo  amide and aromatic N
+# 10 Oneg carboxylate O
+# 11 Npos amine and guanidinium N
+# 12 S    sulphur
+0	N	*
+1	CA	*
+2	C	*
+3	O	*
+3	OXT	*
+4	H	*
+5	CB	*
+5	CG	*
+5	CD	*
+5	CE	*
+5	CG1	*
+5	CG2	*
+5	CD1	*
+5	CD2	*
+7	CB	SER
+7	CB	THR
+7	CG	ASP
+7	CG	ASN
+7	CD	GLU
+7	CD	GLN
+7	CE	LYS
+7	CD	ARG
+7	CZ	ARG
+7	CD	PRO
+6	CG	PHE
+6	CD1	PHE
+6	CD2	PHE
+6	CE1	PHE
+6	CE2	PHE
+6	CZ	PHE
+6	CG	TYR
+6	CD1	TYR
+6	CD2	TYR
+6	CE1	TYR
+6	CE2	TYR
+6	CZ	TYR
+6	CG	TRP
+6	CD1	TRP
+6	CD2	TRP
+6	CE2	TRP
+6	CE3	TRP
+6	CZ2	TRP
+6	CZ3	TRP
+6	CH2	TRP
+6	CG	HIS
+6	CD2	HIS
+6	CE1	HIS
+8	OG	SER
+8	OG1	THR
+8	OH	TYR
+8	OD1	ASN
+8	OE1	GLN
+9	ND2	ASN
+9	NE2	GLN
+9	ND1	HIS
+9	NE2	HIS
+9	NE1	TRP
+10	OD1	ASP
+10	OD2	ASP
+10	OE1	GLU
+10	OE2	GLU
+11	NZ	LYS
+11	NE	ARG
+11	NH1	ARG
+11	NH2	ARG
+12	SG	CYS
+12	SD	MET

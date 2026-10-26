@@ -769,6 +769,7 @@ struct s_mc_parms *ReadMcParms(char *fname)
 		 ReadParF(aux,"op_stop",&(x->op_stop));
 		 ReadParF(aux,"op_tchi2",&(x->op_tchi2));
 		 ReadParF(aux,"op_neff",&(x->op_neff));
+		 ReadParN(aux,"op_allreplicas",&(x->op_allreplicas));
 		 ReadParF(aux,"op_T",&(x->op_T));
 		 ReadParF(aux,"op_emin",&(x->op_emin));
 		 ReadParF(aux,"op_emax",&(x->op_emax));

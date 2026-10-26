@@ -361,7 +361,8 @@ struct s_mc_parms
 	 int op_deltat;		// = nstep/op_nframes
 	 double op_stop;	// stop condition
 	 double op_tchi2;	// fictitious temperature of the Metropolis search on the reduced chi2 (0 = only downhill)
-	 double op_neff;	// smallest fraction of effective frames allowed in the reweighting (0 = no limit)
+	 double op_neff;	// smallest effective fraction of frames allowed in the reweighting, relative to the start (0 = no limit)
+	 int op_allreplicas;	// 1 = all the replicas of parallel tempering record frames, reweighted together with MBAR
 	 int op_print;		// print log every * step
 	 double op_emin;	// matrix elements cannot go below this limit
 	 double op_emax;	// matrix elements cannot go below this limit

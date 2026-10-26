@@ -553,6 +553,7 @@ int main(int argc, char *argv[])
 		{
 			#ifdef ACTIVE_MPI
             			
+			if (parms->op_allreplicas) OP_GatherFrames(polymer->op,parms,my_rank,nprocs);
 			if(my_rank==0)
 			OP_SamplePotential(polymer,parms,ntypes,u->e,irun,ematold);
 			u = send_pot(nat,ntypes,parms->noangpot,parms->nodihpot,parms->nohfields,parms->hb, my_rank, nprocs, mpiparms->Pot_mpi, u, astatus);

@@ -102,8 +102,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 	#ifdef OPTIMIZEPOT
 	struct s_optimizepot *op = p->op;
 	op->icount = (parms->record_native && !chk->restart) ? parms->op_deltat : 0;	// record_native: the starting structure is the first frame
-	op->nframes = 0;
-	op->ncontacts = 0;
+	OP_Reset(op);
 	op->record = 0;
 	#endif
 
@@ -186,7 +185,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 
  
 	#ifdef OPTIMIZEPOT
-	if(my_rank==0)
+	if(my_rank==0 || parms->op_allreplicas)				// op_allreplicas: every replica records its frames
 	{
 		if (strcmp(parms->op_minim,"none")  && ok>-1)
 		{
@@ -195,25 +194,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			{
 				if ((parms->p)->st_ttarget_harvest==1 && st_iprint>=(parms->p)->st_printpdb && t <= (parms->p)->st_ttarget + EPSILON && (parms->p)->st_nm==1)
 				{
-					op->record = 1;         // fill it,it2,mul
-					TotalEnergy(p,pot,parms,parms->npol,0,parms->nosidechains,parms->debug,my_rank);      // record energy
-					#ifdef OP_DEBUG
-					FILE *fp;
-					fp = fopen("op_log","a");
-					for (i=0;i<p->op->ncontacts;++i)
-						fprintf(fp,"contacts: snap=%5d  %d-%d\tm=%lf\n",op->nframes,
-					p->op->it1[i],p->op->it2[i],p->op->mul[op->nframes][i]);
-					fclose(fp);
-					#endif
-					op->record = 0;
-					OP_GetRestrain(op->nframes,p,0,parms->op_input);            // record restrains
-					#ifdef ACTIVE_MPI
-					op->t[op->nframes] = parms->T[my_rank];
-					#else
-					op->t[op->nframes] = parms->T;
-					#endif
-                    // record temperature
-					op->nframes ++;
+					OP_RecordFrame(p,pot,parms,my_rank);
 					st_iprint = 0;
 				}
 			if ((parms->p)->st_ttarget_harvest>0 && ok>-1 && t <= (parms->p)->st_ttarget + EPSILON )
@@ -227,31 +208,13 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			#endif
 			{
 				#ifdef ACTIVE_MPI
-				fprintf(stderr,"> recording polymer %d/%llu\tE=%lf\tT=%lf\n",op->nframes,
+				if (my_rank==0) fprintf(stderr,"> recording polymer %d/%llu\tE=%lf\tT=%lf\n",op->nframes,
 						(parms->nstep-parms->op_wait)/parms->op_deltat,p->etot,parms->T[my_rank]);
 				#else
 				fprintf(stderr,"> recording polymer %d/%llu\tE=%lf\tT=%lf\n",op->nframes,
 						(parms->nstep-parms->op_wait)/parms->op_deltat,p->etot,parms->T);
 				#endif
-				op->record = 1;         // fill it,it2,mul
-				TotalEnergy(p,pot,parms,parms->npol,0,parms->nosidechains,parms->debug,my_rank);      // record energy
-				#ifdef OP_DEBUG
-				FILE *fp;
-				fp = fopen("op_log","a");
-				for (i=0;i<p->op->ncontacts;++i)
-					fprintf(fp,"contacts: snap=%5d  %d-%d\tm=%lf\n",op->nframes,
-							p->op->it1[i],p->op->it2[i],p->op->mul[op->nframes][i]);
-				fclose(fp);
-				#endif
-				op->record = 0;
-				OP_GetRestrain(op->nframes,p,0,parms->op_input);            // record restrains
-				#ifdef ACTIVE_MPI
-				op->t[op->nframes] = parms->T[my_rank];
-				#else
-				op->t[op->nframes] = parms->T;
-				#endif
-				// record temperature
-				op->nframes ++;
+				OP_RecordFrame(p,pot,parms,my_rank);
 				op->icount=0;
 			}
 			if (istep >= parms->op_wait)
@@ -504,7 +467,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 
 
 		#ifdef OPTIMIZEPOT
-        if(my_rank==0)
+        if(my_rank==0 || parms->op_allreplicas)				// op_allreplicas: every replica records its frames
 		{
 			if (strcmp(parms->op_minim,"none")  && ok>-1)
 			{
@@ -525,26 +488,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
                                         //#endif
                                         
 
-                                        op->record = 1;         // fill it,it2,mul
-                                        TotalEnergy(p,pot,parms,parms->npol,0,parms->nosidechains,parms->debug,my_rank);      // record energy
-                                        #ifdef OP_DEBUG
-                                        FILE *fp;
-                                        fp = fopen("op_log","a");
-                                        for (i=0;i<p->op->ncontacts;++i)
-                                                fprintf(fp,"contacts: snap=%5d  %d-%d\tm=%lf\n",op->nframes,
-                                        p->op->it1[i],p->op->it2[i],p->op->mul[op->nframes][i]);
-                                        fclose(fp);
-                                        #endif
-                                        op->record = 0;
-                                        OP_GetRestrain(op->nframes,p,0,parms->op_input);            // record restrains
-                                        #ifdef ACTIVE_MPI       
-                                        op->t[op->nframes] = parms->T[my_rank];
-                                        #else
-                                        op->t[op->nframes] = parms->T;
-                                        #endif
-
-                         // record temperature
-                            		op->nframes ++;
+                                        OP_RecordFrame(p,pot,parms,my_rank);
 
 					 st_iprint = 0;
 
@@ -568,7 +512,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
                                 {        
                                         #ifdef ACTIVE_MPI
                                         
-                                        fprintf(stderr,"> recording polymer %d/%llu\tE=%lf\tT=%lf\n",op->nframes,
+                                        if (my_rank==0) fprintf(stderr,"> recording polymer %d/%llu\tE=%lf\tT=%lf\n",op->nframes,
                                                (parms->nstep-parms->op_wait)/parms->op_deltat,p->etot,parms->T[my_rank]);
                                         #else
                                         fprintf(stderr,"> recording polymer %d/%llu\tE=%lf\tT=%lf\n",op->nframes,
@@ -576,26 +520,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
                                         #endif
                                         
 
-                                        op->record = 1;         // fill it,it2,mul
-                                        TotalEnergy(p,pot,parms,parms->npol,0,parms->nosidechains,parms->debug,my_rank);      // record energy
-                                        #ifdef OP_DEBUG
-                                        FILE *fp;
-                                        fp = fopen("op_log","a");
-                                        for (i=0;i<p->op->ncontacts;++i)
-                                                fprintf(fp,"contacts: snap=%5d  %d-%d\tm=%lf\n",op->nframes,
-                                        p->op->it1[i],p->op->it2[i],p->op->mul[op->nframes][i]);
-                                        fclose(fp);
-                                        #endif
-                                        op->record = 0;
-                                        OP_GetRestrain(op->nframes,p,0,parms->op_input);            // record restrains
-                                        #ifdef ACTIVE_MPI       
-                                        op->t[op->nframes] = parms->T[my_rank];
-                                        #else
-                                        op->t[op->nframes] = parms->T;
-                                        #endif
-
-                         // record temperature
-                            op->nframes ++;
+                                        OP_RecordFrame(p,pot,parms,my_rank);
                                         op->icount=0;
                                 }
                                 if (istep >= parms->op_wait)

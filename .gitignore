@@ -32,3 +32,6 @@ examples/*/runs/
 
 # python caches
 __pycache__/
+
+# objects of the mhistogram tool (built in its source directory)
+src/mhistogram/*.o

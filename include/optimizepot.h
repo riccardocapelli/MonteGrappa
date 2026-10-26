@@ -43,7 +43,10 @@
 //#define OP_DEBUG
 
 struct s_optimizepot *InitializeOptimizePot(struct s_mc_parms *parms, int ntypes, struct s_potential *u, FILE *fproc, int iproc, FILE *fp, int *nrestr);
-struct s_optimizepot *AlloOptimizePot(struct s_mc_parms *parms, int ntypes, int nrestr, FILE *fproc);
+struct s_optimizepot *AlloOptimizePot(struct s_mc_parms *parms, int ntypes, int nrestr, int nframes, FILE *fproc);
+void OP_Reset(struct s_optimizepot *x);
+void OP_RecordFrame(struct s_polymer *p, struct s_potential *pot, struct s_mc_parms *parms, int my_rank);
+void OP_GatherFrames(struct s_optimizepot *x, struct s_mc_parms *parms, int my_rank, int nprocs);
 struct s_optimizepot_input *ReadOPRestrains(struct s_mc_parms *parms);
 void OP_GetRestrain(int it, struct s_polymer *p, int ipol, struct s_optimizepot_input *op_input);
 void OP_AddEnergy(struct s_polymer *p, int a1, int a2, double mul);

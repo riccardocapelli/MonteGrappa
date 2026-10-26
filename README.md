@@ -166,9 +166,26 @@ New keywords of the parameter file:
                    best matrix found is returned
  - op_neff F       smallest effective fraction of frames, (sum w)^2/sum w^2
                    divided by the number of frames, allowed in the
-                   reweighting of the potential optimization (0 <= F < 1,
-                   default 0 = no limit): steps that make the sample less
+                   reweighting of the potential optimization, relative to
+                   its value with the original matrix (0 <= F < 1, default
+                   0 = no limit): steps that make the sample less
                    representative are rejected
+ - op_allreplicas  with parallel tempering, every replica records frames
+                   (not only rank 0) and rank 0 reweights all of them to
+                   op_T with MBAR (Shirts and Chodera, J. Chem. Phys. 129,
+                   124105 (2008)): the weight of a frame is
+                   exp(-Enew/op_T) / sum_k N_k exp(f_k - Eold/T_k), with the
+                   free energies f_k of the temperatures solved
+                   self-consistently (printed in the log). The hot replicas
+                   bring states that the replica at op_T does not visit,
+                   e.g. the unfolded ones when it stays native.
+                   The contacts of the frames are now stored sparse (about
+                   1200 pairs of types per frame for 1PGB instead of all
+                   those met): 12 bytes per pair and frame, held on rank 0
+                   for all the replicas, twice while they are reordered by
+                   pair of types for the reweighting. For 1PGB, 8 replicas
+                   and 50000 frames each: about 9 GB on rank 0, 13 GB in
+                   all, and 36 ms per step of op_itermax
  - restraints with a negative sigma in the op_file are not fitted: their
    reduced chi2 (with |sigma|) is a validation, written as third column of
    chi2.dat and reweighted at the end of each optimization

@@ -122,6 +122,11 @@ group_errors() {
 	mg err_nohb polyala.pol polyala_hb.pot "nchains 1\nTemp 1\nnstep 10\npivot 1\n"
 	if [ $? -eq 0 ] && grep -q "hb is not in the par file" $WORK/err_nohb/stderr.log && sanitizer_ok $WORK/err_nohb; then pass "hydrogen bonds without hb ignored"; else fail "hydrogen bonds without hb ignored" "see $WORK/err_nohb"; fi
 
+	d=$WORK/err_allrep; rm -rf $d; mkdir -p $d; cp $DATA/fragment.pol $DATA/fragment.pot $DATA/fragment.op $d/
+	par $d/run.par "nchains 1\nTemp 1\nnstep 10\npivot 1\nop_file fragment.op\nop_minim sample\nop_allreplicas\n"
+	( cd $d && "$MG" fragment.pol fragment.pot run.par > stdout.log 2> stderr.log )
+	if [ $? -ne 0 ] && grep -q "op_allreplicas needs parallel tempering" $d/stderr.log && sanitizer_ok $d; then pass "op_allreplicas without MPI"; else fail "op_allreplicas without MPI" "not refused"; fi
+
 	local long=$(printf 'x%.0s' $(seq 1 300))
 	( cd $WORK && "$MG" "$long.pol" polyala.pot run.par > /dev/null 2> long.log )
 	if [ $? -ne 0 ] && grep -q "too long" $WORK/long.log; then pass "file name too long"; else fail "file name too long" "not refused"; fi
@@ -555,6 +560,33 @@ group_mpi_multi() {
 	sed 's/^/        /' $WORK/pt_summary
 	if awk 'NR==1{m1=$2;s1=$3} NR==2{m2=$2;s2=$3} END{d=m1-m2; if(d<0)d=-d; exit !(NR==2 && d < 3*sqrt(s1*s1+s2*s2))}' $WORK/pt_summary
 	then pass "pt lowest replica vs plain run"; else fail "pt lowest replica vs plain run" "difference above 3 sigma"; fi
+
+	# op_allreplicas: the frames of all the replicas, reweighted with MBAR to the temperature of rank 0 (the
+	# hottest, temperatures in decreasing order), give the averages of the frames of rank 0 alone in the same
+	# trajectory (the plain -E/T weights would pull them towards the colder replicas, rms about 0.4 A)
+	for seed in 3 4 5 6; do
+		for k in one all; do
+			d=$WORK/pt_mbar_${k}_$seed; mkdir -p $d; cp $DATA/fragment.pol $DATA/fragment.pot $DATA/fragment.op $d/
+			par $d/run.par "nchains 1\nnprinttrj 100000000\nnprintlog 100000000\npivot 1\nmpivot 1\nntemp 4\ntemperatures\n1.5\n1.4\n1.3\n1.2\nstep_exchange 1000\nseed $seed\nnstep 2000000\nnprinte 100000\nop_file fragment.op\nop_minim sample\nop_itermax 0\nop_T 1.5\nop_deltat 100\nop_wait 1000000\n"
+			[ $k = all ] && echo "op_allreplicas" >> $d/run.par
+		done
+		( cd $WORK/pt_mbar_one_$seed && mpirun4 $MPI fragment.pol fragment.pot run.par > stdout.log 2> stderr.log ) &
+		( cd $WORK/pt_mbar_all_$seed && mpirun4 $MPI fragment.pol fragment.pot run.par > stdout.log 2> stderr.log ) &
+		wait
+	done
+	ok=1
+	for seed in 3 4 5 6; do
+		d=$WORK/pt_mbar_all_$seed
+		grep -q "MBAR on 4 temperatures" $d/stderr.log && grep -q "^> 39996 frames" $d/stderr.log || ok=0
+		awk '/largest \|Enew-Eold\|/ { if ($NF+0 > 1e-6) bad=1; n++ } END { exit (bad || n!=1) }' $d/stderr.log || ok=0
+	done
+	if [ $ok = 1 ]; then pass "op_allreplicas gathers the frames of all ranks"; else fail "op_allreplicas gathers the frames of all ranks" "see $WORK/pt_mbar_all_*"; fi
+	for seed in 3 4 5 6; do
+		paste $WORK/pt_mbar_one_$seed/restraints_0.dat $WORK/pt_mbar_all_$seed/restraints_0.dat | awk '{d=$6-$2; s+=d*d; n++} END{print sqrt(s/n)}'
+	done > $WORK/pt_mbar_summary
+	sed 's/^/        rms MBAR - rank 0 /' $WORK/pt_mbar_summary
+	if awk '{s+=$1; n++} END{exit !(n==4 && s/n < 0.2)}' $WORK/pt_mbar_summary
+	then pass "op_allreplicas MBAR at a sampled temperature"; else fail "op_allreplicas MBAR at a sampled temperature" "mean rms above 0.2 A"; fi
 }
 
 ######################################################################

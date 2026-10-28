@@ -566,6 +566,7 @@ int main(int argc, char *argv[])
                   		
 			OP_SamplePotential(polymer,parms,ntypes,u->e,irun,ematold);
             #endif
+			SetPairParameters(u,ntypes);				// the matrix changed
 			if(my_rank==0)
 			{
 				snprintf(fname,sizeof(fname),"newpot_%d.pot",irun);

@@ -37,6 +37,45 @@
 
 #include "montegrappa.h"
 
+unsigned long long contacts_stamp = 1;	// stamp of the current move for the contact lists it changes
+
+// residues (chain, index) whose contact list changed since the last ContactsNewMove, each once
+static int *touched_c=NULL,*touched_i=NULL,ntouched=0,touchedmax=0;
+
+static inline void Touch(struct s_back *b, int c, int i)
+{
+	if (b->touched == contacts_stamp) return;
+	b->touched = contacts_stamp;
+	if (ntouched >= touchedmax)
+	{
+		touchedmax = 2*touchedmax + 1024;
+		touched_c = (int *) realloc(touched_c,touchedmax*sizeof(int));
+		touched_i = (int *) realloc(touched_i,touchedmax*sizeof(int));
+		if (!touched_c || !touched_i) Error("Cannot allocate the list of changed contacts");
+	}
+	touched_c[ntouched] = c;
+	touched_i[ntouched] = i;
+	ntouched ++;
+}
+
+/********************************************************************
+ Residues whose contact list changed in the current move (AddContact,
+ ResetContactsMonomer and TotalEnergy record them): the moves copy
+ only these between p and oldp (UpdateChainRanges)
+ ********************************************************************/
+int ContactsTouched(int **c, int **i)
+{
+	*c = touched_c;
+	*i = touched_i;
+	return ntouched;
+}
+
+void ContactsNewMove(void)
+{
+	ntouched = 0;
+	contacts_stamp ++;
+}
+
 /********************************************************************
  Largest distance at which two atoms interact (well or hard core):
  EnergyPair skips pairs of residues farther than this plus the
@@ -54,6 +93,32 @@ void SetPairCutoff(struct s_potential *u, int ntypes)
 			if ((u->r0_2)[i][j] > r2max) r2max = (u->r0_2)[i][j];
 		}
 	u->rcut = sqrt(r2max);
+	SetPairParameters(u,ntypes);
+}
+
+/********************************************************************
+ Copy of r0_2, r_2 and e of each pair of types in a single array, read
+ by the pair energy of atoms: to be called again whenever the matrices
+ change (optimization of the potential)
+ ********************************************************************/
+void SetPairParameters(struct s_potential *u, int ntypes)
+{
+	int i,j;
+
+	if (!u->pp || u->npptypes != ntypes)
+	{
+		free(u->pp);
+		u->pp = (struct s_pairpar *) malloc((size_t)ntypes*ntypes*sizeof(struct s_pairpar));
+		if (!u->pp) Error("Cannot allocate the parameters of the pairs");
+		u->npptypes = ntypes;
+	}
+	for (i=0;i<ntypes;++i)
+		for (j=0;j<ntypes;++j)
+		{
+			u->pp[i*ntypes+j].r02 = (u->r0_2)[i][j];
+			u->pp[i*ntypes+j].rw2 = (u->r_2)[i][j];
+			u->pp[i*ntypes+j].e = (u->e)[i][j];
+		}
 }
 
 /********************************************************************
@@ -186,6 +251,9 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
                         for (j=0;j<(((p+ci)->back)+i)->ncontacts;++j)  ((((p+ci)->back)+i)->e)[j] = 0;
                         (((p+ci)->back)+i)->ncontacts = 0;
                   }
+	if (update)								// (not in the parallel loop: the list is shared)
+		for (ci=0;ci<npol;++ci)
+			for (i=0;i<(p+ci)->nback;++i) Touch(((p+ci)->back)+i,ci,i);
 
 	if (p->cells && p->cells->active && TotalPairEnergyCells(p,u,parms,npol,update,nosidechains,&etot))
 		;							// pairs from the cell list
@@ -297,17 +365,18 @@ static inline int AtomPairEnergy(struct s_polymer *p, struct s_potential *u, int
 		int record, double *etot, double *econt, int *incontact)
 {
 	double e,mul,rw2;
+	const struct s_pairpar *q = u->pp + a1*u->npptypes + a2;
 
-	if ( r2 < (tooclose ? u->g_r0hard * u->g_r0hard : (u->r0_2)[a1][a2]) )
+	if ( r2 < (tooclose ? u->g_r0hard * u->g_r0hard : q->r02) )
 	{
 		if (!disentangle) return 1;
 		else *etot += LARGE;
 	}
 	if (tooclose) return 0;
-	rw2 = (u->r_2)[a1][a2];
+	rw2 = q->rw2;
 	if ( r2 < rw2 )							// close in space but not in sequence: the element is defined (rw2>0)
 	{
-		e = (u->e)[a1][a2];
+		e = q->e;
 		mul = 1.;
 		if (u->splice==1)
 			if (rw2 * u->kr2_splice < r2) mul = u->ke_splice;
@@ -749,6 +818,9 @@ void AddContact(struct s_polymer *p, int i, int j, int ci, int cj, double e)
 	struct s_back *bi = ((p+ci)->back)+i;
 	struct s_back *bj = ((p+cj)->back)+j;
 
+	Touch(bi,ci,i);
+	Touch(bj,cj,j);
+
 	// each residue pair is evaluated once after the contacts of the moved residues
 	// have been reset (ResetContactsMonomer, TotalEnergy), so it is not in the lists yet
 	#ifdef DEBUG
@@ -827,6 +899,7 @@ void ResetContactsMonomer(struct s_polymer *p, int i, int ci)
 
 
 				(((p+cn)->back)+neigh)->ncontacts --;
+				Touch(((p+cn)->back)+neigh,cn,neigh);
                                 //fprintf(stderr,"ncontacts = %d\n",(((p+cn)->back)+neigh)->ncontacts);
 
 				l--;
@@ -835,6 +908,7 @@ void ResetContactsMonomer(struct s_polymer *p, int i, int ci)
 		(((p+ci)->back)+i)->e[k] = 0;
 	}
 	// reset the neighbour list of i
+	if ((((p+ci)->back)+i)->ncontacts) Touch(((p+ci)->back)+i,ci,i);
 	(((p+ci)->back)+i)->ncontacts = 0;
 }
 
@@ -867,10 +941,12 @@ void ResetContactsMonomerOutside(struct s_polymer *p, int i, int ci, const char 
 				bn->contacts_p[l] = bn->contacts_p[bn->ncontacts-1];
 				bn->e[l] = bn->e[bn->ncontacts-1];
 				bn->ncontacts --;
+				Touch(bn,cn,neigh);
 				l--;
 			}
 	}
 	for (k=nk;k<bi->ncontacts;++k) bi->e[k] = 0;
+	if (nk < bi->ncontacts) Touch(bi,ci,i);
 	bi->ncontacts = nk;
 }
 

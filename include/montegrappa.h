@@ -319,6 +319,9 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
 double EnergyMonomer(struct s_polymer *p, struct s_potential *u, int i, int ci, int npol, int update, int shell, int sidechains, int disentangle, int hb);
 void AddContact(struct s_polymer *p, int i, int j, int ci, int cj, double e);
 void AddShell(struct s_polymer *p, int i, int j, int ci, int cj);
+extern unsigned long long contacts_stamp;
+int ContactsTouched(int **c, int **i);
+void ContactsNewMove(void);
 void ResetContactsMonomer(struct s_polymer *p, int i, int ci);
 void ResetContactsMonomerOutside(struct s_polymer *p, int i, int ci, const char *rig);
 double GetEnergyMonomer(struct s_polymer *p, int ip, int iw);
@@ -348,6 +351,7 @@ int EnergyBoxPolymer(struct s_polymer *p, struct s_potential *u, int ic);
 double EnergyHFields(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms, int iw, int ic, int update);
 double GetHFields(struct s_polymer *p, int npol);
 void SetPairCutoff(struct s_potential *u, int ntypes);
+void SetPairParameters(struct s_potential *u, int ntypes);
 int CheckHBReferences(struct s_polymer *p, struct s_potential *u, int npol, int nat);
 void CellsAlloc(struct s_polymer *p, struct s_polymer *topo, int npol, int forced, int allowed);
 void CellsFree(struct s_polymer *p);

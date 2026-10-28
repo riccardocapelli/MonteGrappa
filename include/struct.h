@@ -83,6 +83,7 @@ struct s_back
 	int nrot;			// total number of rotamers
 
 	struct s_side *side;		// sidechain atoms
+	unsigned long long touched;	// contact list changed in the move with this stamp (contacts_stamp, see ContactsTouched)
 
 	int ncontacts;			// number of backbone atoms whose atom (including sidechain) are in contact with this
 	int *contacts;			// list of atoms in contact
@@ -121,11 +122,15 @@ struct s_rotamers
 	struct angles ang;				// the spherical coordinate of the sidechain atom
 };
 
+struct s_pairpar { double r02,rw2,e; };	// hard core and square well of a pair of types, contiguous (see SetPairParameters)
+
 struct s_potential
 {
 	double **e;					// energy of the square well
 	double **r_2;					// square width of the square well
 	double **r0_2;					// square width of hard core repulsion
+	struct s_pairpar *pp;				// r0_2, r_2 and e of each pair of types in one array (rebuilt when they change)
+	int npptypes;					// number of types of pp
 
 	double *e_ang;					// energy constant of angular potential
 	double *ang0;					// equilibrium angle

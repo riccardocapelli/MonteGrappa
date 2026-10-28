@@ -326,6 +326,8 @@ void FreePotential(struct s_potential *x, int ntypes, int noangpot, int nodihpot
 
 	int i;
 
+	free(x->pp);
+
 	if (hb)
 	{
 		free(x->hb);

@@ -149,6 +149,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 	}
 	
 	CopyAllPolymers(p,oldp,parms->npol,parms->nosidechains,parms->nosidechains);
+	if (pot->pp) SetPairParameters(pot,pot->npptypes);		// the matrix of the pairs may have changed since SetPairCutoff
 	parms->acc = 0;
 	parms->mov = 0;
 	
@@ -783,7 +784,17 @@ int MoveBackboneFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
  Copy an element of a polymer structure
  Watch the copy of the pointer to the rotamers --> do not free.
  *****************************************************************************/
+static void CopyResidue(struct s_back *from, struct s_back *to, int contacts);
+
 void CopyResiduePositions(struct s_back *from, struct s_back *to)
+{
+	CopyResidue(from,to,1);
+}
+
+/*****************************************************************************
+ The same, with its contacts only if contacts=1
+ *****************************************************************************/
+static void CopyResidue(struct s_back *from, struct s_back *to, int contacts)
 {
 	int k;
 
@@ -805,13 +816,16 @@ void CopyResiduePositions(struct s_back *from, struct s_back *to)
 	}
 
 	// contacts
-	for (k=0;k<from->ncontacts;++k)
+	if (contacts)
 	{
-		(to->contacts)[k] = (from->contacts)[k];
-		(to->contacts_p)[k] = (from->contacts_p)[k];
-		(to->e)[k] = (from->e)[k];
+		for (k=0;k<from->ncontacts;++k)
+		{
+			(to->contacts)[k] = (from->contacts)[k];
+			(to->contacts_p)[k] = (from->contacts_p)[k];
+			(to->e)[k] = (from->e)[k];
+		}
+		to->ncontacts = from->ncontacts;
 	}
-	to->ncontacts = from->ncontacts;
 
 	//shell
 	for (k=0;k<from->nshell;++k)
@@ -1250,90 +1264,25 @@ void UpdateMonomerRange(struct s_polymer *from, struct s_polymer *to, int wfrom,
 	UpdateChainRanges(from,to,1,&p,&wfrom,&wto);
 }
 
+// residue i of chain c is in one of the ranges of UpdateChainRanges
+static inline int InRanges(int c, int i, int nr, int *ch, int *wfrom, int *wto)
+{
+	int r;
+
+	for (r=0;r<nr;++r)
+		if (ch[r]==c && i>=wfrom[r] && i<=wto[r]) return 1;
+	return 0;
+}
+
 /*****************************************************************************
  Copy residues [wfrom[r],wto[r]] of chains ch[r] (r=0..nr-1), and the contact
- lists of all residues which are or were in contact with them, from "from"
- to "to". All the partners are collected before anything is copied: copying
- one chain at a time would overwrite the contact lists needed to find the
- partners of the next one.
+ lists that the move changed (in p: see ContactsTouched), from "from" to
+ "to". The lists it did not change are the same in both.
  *****************************************************************************/
 void UpdateChainRanges(struct s_polymer *from, struct s_polymer *to, int nr, int *ch, int *wfrom, int *wto)
 {
-	// work arrays, grown as needed: partners found (l,lp) and marks per (chain,residue)
-	static int *l=NULL,*lp=NULL,lsize=0,nchainmark=0;
-	static unsigned int *mark=NULL,stamp=0;
-	int r,i,w,j,ntm,p,wf,wt,c;
-	struct s_back *b;
-
-	if (++stamp == 0)						// stamp wrapped around: clear marks
-	{
-		if (mark) memset(mark,0,(size_t)nchainmark*NRESMAX*sizeof(unsigned int));
-		stamp = 1;
-	}
-
-	// Find all residues that are or were in contact with moved monomers (each one only once)
-	ntm=0;
-	for (r=0;r<nr;++r)
-	{
-		p = ch[r];
-		wf = (wfrom[r]<0) ? 0 : wfrom[r];
-		wt = (wto[r]>(from+p)->nback-1) ? (from+p)->nback-1 : wto[r];
-		for (w=wf;w<=wt;++w)
-		{
-			b = ((from+p)->back)+w;
-			for (i=0;i<b->ncontacts;++i)
-			{
-				c = (b->contacts_p)[i];
-				if (c >= nchainmark)					// a chain not seen yet: enlarge the marks
-				{
-					mark = (unsigned int *) realloc(mark,(size_t)(c+1)*NRESMAX*sizeof(unsigned int));
-					if (!mark) Error("Cannot allocate in UpdateChainRanges");
-					memset(mark+(size_t)nchainmark*NRESMAX,0,(size_t)(c+1-nchainmark)*NRESMAX*sizeof(unsigned int));
-					nchainmark = c+1;
-				}
-				if (mark[(size_t)c*NRESMAX+(b->contacts)[i]] != stamp)
-				{
-					mark[(size_t)c*NRESMAX+(b->contacts)[i]] = stamp;
-					if (ntm >= lsize)
-					{
-						lsize = 2*lsize + 1024;
-						l = (int *) realloc(l,lsize*sizeof(int));
-						lp = (int *) realloc(lp,lsize*sizeof(int));
-						if (!l || !lp) Error("Cannot allocate in UpdateChainRanges");
-					}
-					l[ntm] = (b->contacts)[i];
-					lp[ntm] = c;
-					++ntm;
-				}
-			}
-			b = ((to+p)->back)+w;
-			for (i=0;i<b->ncontacts;++i)
-			{
-				c = (b->contacts_p)[i];
-				if (c >= nchainmark)					// a chain not seen yet: enlarge the marks
-				{
-					mark = (unsigned int *) realloc(mark,(size_t)(c+1)*NRESMAX*sizeof(unsigned int));
-					if (!mark) Error("Cannot allocate in UpdateChainRanges");
-					memset(mark+(size_t)nchainmark*NRESMAX,0,(size_t)(c+1-nchainmark)*NRESMAX*sizeof(unsigned int));
-					nchainmark = c+1;
-				}
-				if (mark[(size_t)c*NRESMAX+(b->contacts)[i]] != stamp)
-				{
-					mark[(size_t)c*NRESMAX+(b->contacts)[i]] = stamp;
-					if (ntm >= lsize)
-					{
-						lsize = 2*lsize + 1024;
-						l = (int *) realloc(l,lsize*sizeof(int));
-						lp = (int *) realloc(lp,lsize*sizeof(int));
-						if (!l || !lp) Error("Cannot allocate in UpdateChainRanges");
-					}
-					l[ntm] = (b->contacts)[i];
-					lp[ntm] = c;
-					++ntm;
-				}
-			}
-		}
-	}
+	int r,i,w,j,p,wf,wt,nt,*tc,*ti;
+	struct s_back *bf,*bt;
 
 	for (r=0;r<nr;++r)
 	{
@@ -1358,16 +1307,20 @@ void UpdateChainRanges(struct s_polymer *from, struct s_polymer *to, int nr, int
 		}
 	}
 
-	// Copy those contacts
-	for (i=0;i<ntm;++i)
+	// Copy the contacts changed by the move (the moved residues are copied below)
+	nt = ContactsTouched(&tc,&ti);
+	for (i=0;i<nt;++i)
 	{
-		(((to+lp[i])->back)+l[i])->e_hfs = (((from+lp[i])->back)+l[i])->e_hfs;		// H fields depend on the number of contacts
-		(((to+lp[i])->back)+l[i])->ncontacts = (((from+lp[i])->back)+l[i])->ncontacts;
-		for (j=0;j<(((from+lp[i])->back)+l[i])->ncontacts;++j)
+		if (InRanges(tc[i],ti[i],nr,ch,wfrom,wto)) continue;
+		bf = ((from+tc[i])->back)+ti[i];
+		bt = ((to+tc[i])->back)+ti[i];
+		bt->e_hfs = bf->e_hfs;							// H fields depend on the number of contacts
+		bt->ncontacts = bf->ncontacts;
+		for (j=0;j<bf->ncontacts;++j)
 		{
-			((((to+lp[i])->back)+l[i])->contacts)[j] = ((((from+lp[i])->back)+l[i])->contacts)[j];
-			((((to+lp[i])->back)+l[i])->contacts_p)[j] = ((((from+lp[i])->back)+l[i])->contacts_p)[j];
-			((((to+lp[i])->back)+l[i])->e)[j] = ((((from+lp[i])->back)+l[i])->e)[j];
+			bt->contacts[j] = bf->contacts[j];
+			bt->contacts_p[j] = bf->contacts_p[j];
+			bt->e[j] = bf->e[j];
 		}
 	}
 
@@ -1378,9 +1331,13 @@ void UpdateChainRanges(struct s_polymer *from, struct s_polymer *to, int nr, int
 		wf = (wfrom[r]<0) ? 0 : wfrom[r];
 		wt = (wto[r]>(from+p)->nback-1) ? (from+p)->nback-1 : wto[r];
 		for (w=wf;w<=wt;++w)
-			CopyResiduePositions( ((from+p)->back)+w, ((to+p)->back)+w) ;
+			CopyResidue( ((from+p)->back)+w, ((to+p)->back)+w,
+				(((from+p)->back)+w)->touched == contacts_stamp || (((to+p)->back)+w)->touched == contacts_stamp );
 		if (to->cells) CellsUpdateRange(to,p,wf,wt);
 	}
+
+	// the next move starts a new stamp
+	ContactsNewMove();
 }
 
 

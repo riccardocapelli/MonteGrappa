@@ -144,6 +144,11 @@ Speed:
    range: most of the pairs that passed the old test, on the backbone atoms
    plus the extents of the sidechains, had no atom in range. 1PGB: 20%
    faster again, same trajectory.
+ - After a move only the contact lists that it changed are copied between
+   the trial and the backup copy of the system (they are recorded as they
+   change), and the parameters of the pairs of types are kept in one array:
+   another 6%. In all, the Monte Carlo of 1PGB is 1.8 times faster than at
+   the start of these changes.
 
 Restart:
  - A checkpoint is written by default every 10 minutes (keyword

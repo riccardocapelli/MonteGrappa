@@ -135,6 +135,10 @@ Speed:
    A residue is taken as rigid only if its sidechain atoms, and the atoms
    its hydrogen bonds refer to, are checked to have followed the rigid
    motion; the trajectories are the same as before (up to rounding).
+ - The energy of a pair of residues reads the parameters of each pair of
+   atoms once and shifts the atoms of a residue to the periodic image once,
+   with the same arithmetic: in all 1PGB is 30% faster than before these
+   changes, with the same trajectory.
 
 Restart:
  - A checkpoint is written by default every 10 minutes (keyword

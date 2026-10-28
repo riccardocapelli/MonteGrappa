@@ -282,192 +282,151 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
 
 
 /********************************************************************
+ Hard core and square well of two atoms of types a1, a2 at square
+ distance r2 (a hydrogen bond multiplies the well by hbmul, -1 if none).
+ Returns 1 if the hard core is hit without disentangle (the pair
+ energy is then LARGE).
+ ********************************************************************/
+static inline int AtomPairEnergy(struct s_polymer *p, struct s_potential *u, int a1, int a2, double r2, int tooclose, int disentangle,
+		int record, double *etot, double *econt, int *incontact)
+{
+	double e,mul,rw2;
+
+	if ( r2 < (tooclose ? u->g_r0hard * u->g_r0hard : (u->r0_2)[a1][a2]) )
+	{
+		if (!disentangle) return 1;
+		else *etot += LARGE;
+	}
+	if (tooclose) return 0;
+	rw2 = (u->r_2)[a1][a2];
+	if ( r2 < rw2 )							// close in space but not in sequence: the element is defined (rw2>0)
+	{
+		e = (u->e)[a1][a2];
+		mul = 1.;
+		if (u->splice==1)
+			if (rw2 * u->kr2_splice < r2) mul = u->ke_splice;
+
+		#ifdef OPTIMIZEPOT
+		if (record && mul>0) OP_AddEnergy(p,a1,a2,mul);
+		#endif
+
+		e *= mul;
+		*etot += e;
+		*econt += e;
+		*incontact = 1;
+	}
+	return 0;
+}
+
+/********************************************************************
  Calculate the energy of a pair of residues,
  updating contact lists and partial energies if update==1.
  ********************************************************************/
 static double EnergyPairAtoms(struct s_polymer *p, struct s_potential *u, int i, int j, int ci, int cj, int nosidechains, int disentangle, int tooclose, int hb, double *econt, int *incontact)
 {
-	int is,js,a1,a2,ia1,ia2,out;
+	int is,js,a1,a2,ia1,ia2,out,record=0;
 	double r2,etot=0,e,r02,cos1,cos2,mul,rmax,r2bb;
-	struct vector sh = {0.,0.,0.},v2,v2m;			// periodic box: shift of the atoms of j to the image nearest to i
-	
+	struct vector sh = {0.,0.,0.},v2,v2m,pj,psj;			// periodic box: shift of the atoms of j to the image nearest to i
+	struct s_back *bi = ((p+ci)->back)+i, *bj = ((p+cj)->back)+j;
+	struct s_side *si,*sj;
+
 	// within same aa do not interact
-	if (ci==cj && (((p+ci)->back)+i)->iaa == (((p+cj)->back)+j)->iaa) return 0;
+	if (ci==cj && bi->iaa == bj->iaa) return 0;
 
 	// no atom of the two residues can be within the interaction range
-	if (u->boxtype=='p') sh = ImageShift( (((p+ci)->back)+i)->pos, (((p+cj)->back)+j)->pos, u->lbox );
-	r2bb = Dist2S( (((p+ci)->back)+i)->pos, (((p+cj)->back)+j)->pos, sh );
-	rmax = u->rcut + (((p+ci)->back)+i)->ext + (((p+cj)->back)+j)->ext;
+	if (u->boxtype=='p') sh = ImageShift( bi->pos, bj->pos, u->lbox );
+	r2bb = Dist2S( bi->pos, bj->pos, sh );
+	rmax = u->rcut + bi->ext + bj->ext;
 	if (r2bb > rmax*rmax) return 0;
+
+	#ifdef OPTIMIZEPOT
+	record = p->op->record;
+	#endif
+	// the atoms of j in the image of i (as in Dist2S: b+s-a)
+	pj.x = bj->pos.x + sh.x; pj.y = bj->pos.y + sh.y; pj.z = bj->pos.z + sh.z;
 
 	// interaction backbone-backbone (i-j)
 	if ( ci!=cj || (i!=(j+1) && i!=(j-1)) )						// if not consecutive (i.e., no covalent interaction)
-	{
-		a1 = (((p+ci)->back)+i)->itype;
-		a2 = (((p+cj)->back)+j)->itype;
-
-		r2 = r2bb;
-
-		if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
-		else r02 = (u->r0_2)[a1][a2];
-
-		if ( r2 < r02 )
-		{
-			if (!disentangle) return LARGE;
-			else etot += LARGE;
-		}
-		if ( r2 < (u->r_2)[a1][a2] && !tooclose)					// if they are close in space but not in sequence
-		{
-			if ((u->e)[a1][a2]<-EPSILON || 0<(u->r_2)[a1][a2])			// and their interaction element is defined
-			{
-				e = (u->e)[a1][a2];
-				mul=1.;
-				if (u->splice==1)
-					if ((u->r_2)[a1][a2] * u->kr2_splice < r2 ) mul = u->ke_splice;
-
-				#ifdef OPTIMIZEPOT
-				if (p->op->record && mul>0) OP_AddEnergy(p,a1,a2,mul);
-				#endif
-				
-				e *= mul;
-				etot += e;
-				{ *econt += e; *incontact = 1; }
-
-			}
-		}
-	}
+		if (AtomPairEnergy(p,u,bi->itype,bj->itype,r2bb,tooclose,disentangle,record,&etot,econt,incontact)) return LARGE;
 
   	if (nosidechains == 1) return etot;
 
-
-
-	for (js=0;js< (((p+cj)->back)+j)->nside;++js)
+	for (js=0;js<bj->nside;++js)
 	{
+		sj = bj->side+js;
+		psj.x = sj->pos.x + sh.x; psj.y = sj->pos.y + sh.y; psj.z = sj->pos.z + sh.z;
+		a2 = sj->itype;
+
 		// interaction backbone-sidechain (i-js)
-		a1 = (((p+ci)->back)+i)->itype;
-		a2 = (((((p+cj)->back)+j)->side)+js)->itype;
-		r2 = Dist2S( (((p+ci)->back)+i)->pos, (((((p+cj)->back)+j)->side)+js)->pos, sh );
+		r2 = (psj.x-bi->pos.x)*(psj.x-bi->pos.x) + (psj.y-bi->pos.y)*(psj.y-bi->pos.y) + (psj.z-bi->pos.z)*(psj.z-bi->pos.z);
+		if (AtomPairEnergy(p,u,bi->itype,a2,r2,tooclose,disentangle,record,&etot,econt,incontact)) return LARGE;
 
-		if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
-		else r02 = (u->r0_2)[a1][a2];
-
-		if ( r2 < r02 )
-		{
-			if (!disentangle) return LARGE;
-			else etot += LARGE;
-		}
-		if ( r2 < (u->r_2)[a1][a2] && !tooclose)				// if they are close in space and not in sequence
-			if ((u->e)[a1][a2]<-EPSILON || (u->r_2)[a1][a2]>0)		// and their interaction element is defined
-			{
-				e = (u->e)[a1][a2];
-				mul = 1.;
-				if (u->splice==1)
-					if ((u->r_2)[a1][a2] * u->kr2_splice < r2) mul = u->ke_splice;
-				
-				#ifdef OPTIMIZEPOT
-				if (p->op->record && 0 < mul) OP_AddEnergy(p,a1,a2,mul);
-				#endif
-				
-				e *= mul;
-				etot += e;
-				{ *econt += e; *incontact = 1; }
-			}
-
-		for (is=0;is< (((p+ci)->back)+i)->nside;++is)
+		for (is=0;is<bi->nside;++is)
 		{
 			// interaction sidechain-sidechain (is-js)
-			a1 = (((((p+ci)->back)+i)->side)+is)->itype;
-			a2 = (((((p+cj)->back)+j)->side)+js)->itype;
+			si = bi->side+is;
+			a1 = si->itype;
+			r2 = (psj.x-si->pos.x)*(psj.x-si->pos.x) + (psj.y-si->pos.y)*(psj.y-si->pos.y) + (psj.z-si->pos.z)*(psj.z-si->pos.z);
 
-			r2 = Dist2S( (((((p+ci)->back)+i)->side)+is)->pos, (((((p+cj)->back)+j)->side)+js)->pos, sh );
-			
+			if (!hb)
+			{
+				if (AtomPairEnergy(p,u,a1,a2,r2,tooclose,disentangle,record,&etot,econt,incontact)) return LARGE;
+				continue;
+			}
+
 			if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
 			else r02 = (u->r0_2)[a1][a2];
 
 			if ( r2 < r02 )
 			{
-				//fprintf(stderr,"side %d of %d - side %d of %d : r2<r02\n",is,i,js,j);
 				if (!disentangle) return LARGE;
 				else etot += LARGE;
 			}
-			if ( r2 < (u->r_2)[a1][a2] && !tooclose)				// if they are close in space anbd not in sequence
-			{
-				if ((u->e)[a1][a2]<-EPSILON || (u->r_2)[a1][a2]>0)		// and their interaction element is defined
-				{
-					e = (u->e)[a1][a2];
-					mul = 1;
-					if (u->splice==1)
-						if ((u->r_2)[a1][a2] * u->kr2_splice < r2) mul =  u->ke_splice;
-
-					// calculate hydrogen bond (if any)
-					if (hb)
-					{
-						ia1 = (((((p+ci)->back)+i)->side)+is)->ia;
-						ia2 = (((((p+cj)->back)+j)->side)+js)->ia;
-						if ((u->hb)[ia1]*(u->hb)[ia2]==2)		// donor-acceptor pair
-						{
-						 // a hydrogen bond acts only in the first half of splice (other pairs keep ke_splice)
-						 if (u->splice==1 && (u->r_2)[a1][a2] * u->kr2_splice < r2) mul = 0;
-						 else
-						 {
-							v2 = *(*(((p+cj)->vback)+ia2));
-							v2.x += sh.x; v2.y += sh.y; v2.z += sh.z;
-							v2m = *(*(((p+cj)->vback)+(u->hb_iam)[ia2]));
-							v2m.x += sh.x; v2m.y += sh.y; v2m.z += sh.z;
-							cos1 = CosAngle( (*(*(((p+ci)->vback)+(u->hb_iam)[ia1]))), (*(*(((p+ci)->vback)+ia1))), 
-									v2, p->tables, &out );
-							if (out==0) return LARGE;
-							cos2 = CosAngle( (*(*(((p+ci)->vback)+ia1))), v2, v2m, p->tables , &out);
-							if (out==0) return LARGE;
-							mul = FastSqrt( DAbs(cos1*cos2),p->tables);
-						 }
-						}
-					}
-
-					#ifdef OPTIMIZEPOT
-					if (p->op->record && mul>0) OP_AddEnergy(p,a1,a2,mul);
-					#endif
-					e *= mul;
-					etot += e;
-					{ *econt += e; *incontact = 1; }
-				}
-			}
-		}
-	}
-
-	// interaction backbone-sidechain (is-j)
-	for (is=0;is< (((p+ci)->back)+i)->nside;++is)
-	{
-		a1 = (((p+cj)->back)+j)->itype;
-		a2 = (((((p+ci)->back)+i)->side)+is)->itype;
-		r2 = Dist2S( (((((p+ci)->back)+i)->side)+is)->pos, (((p+cj)->back)+j)->pos, sh );
-
-		if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
-		else r02 = (u->r0_2)[a1][a2];
-
-		if ( r2 < r02 )
-		{
-			if (!disentangle) return LARGE;
-			else etot += LARGE;
-		}
-		if ( r2 < (u->r_2)[a1][a2] && !tooclose)				// if they are close in space and not in sequence
-		{
-			if ((u->e)[a1][a2]<-EPSILON || 0<(u->r_2)[a1][a2])		// and their interaction element is defined
+			if ( r2 < (u->r_2)[a1][a2] && !tooclose)				// if they are close in space anbd not in sequence (the element is defined)
 			{
 				e = (u->e)[a1][a2];
 				mul = 1;
 				if (u->splice==1)
-					if (r2 > (u->r_2)[a1][a2] * u->kr2_splice) mul =  u->ke_splice;
-				
+					if ((u->r_2)[a1][a2] * u->kr2_splice < r2) mul =  u->ke_splice;
+
+				// calculate hydrogen bond (if any)
+				ia1 = si->ia;
+				ia2 = sj->ia;
+				if ((u->hb)[ia1]*(u->hb)[ia2]==2)		// donor-acceptor pair
+				{
+				 // a hydrogen bond acts only in the first half of splice (other pairs keep ke_splice)
+				 if (u->splice==1 && (u->r_2)[a1][a2] * u->kr2_splice < r2) mul = 0;
+				 else
+				 {
+					v2 = *(*(((p+cj)->vback)+ia2));
+					v2.x += sh.x; v2.y += sh.y; v2.z += sh.z;
+					v2m = *(*(((p+cj)->vback)+(u->hb_iam)[ia2]));
+					v2m.x += sh.x; v2m.y += sh.y; v2m.z += sh.z;
+					cos1 = CosAngle( (*(*(((p+ci)->vback)+(u->hb_iam)[ia1]))), (*(*(((p+ci)->vback)+ia1))), 
+							v2, p->tables, &out );
+					if (out==0) return LARGE;
+					cos2 = CosAngle( (*(*(((p+ci)->vback)+ia1))), v2, v2m, p->tables , &out);
+					if (out==0) return LARGE;
+					mul = FastSqrt( DAbs(cos1*cos2),p->tables);
+				 }
+				}
+
 				#ifdef OPTIMIZEPOT
-				if (p->op->record && 0 < mul) OP_AddEnergy(p,a1,a2,mul);
+				if (record && mul>0) OP_AddEnergy(p,a1,a2,mul);
 				#endif
-				
 				e *= mul;
 				etot += e;
 				{ *econt += e; *incontact = 1; }
 			}
 		}
+	}
+
+	// interaction backbone-sidechain (is-j)
+	for (is=0;is<bi->nside;++is)
+	{
+		si = bi->side+is;
+		r2 = (pj.x-si->pos.x)*(pj.x-si->pos.x) + (pj.y-si->pos.y)*(pj.y-si->pos.y) + (pj.z-si->pos.z)*(pj.z-si->pos.z);
+		if (AtomPairEnergy(p,u,bj->itype,si->itype,r2,tooclose,disentangle,record,&etot,econt,incontact)) return LARGE;
 	}
 	return etot;
 }
@@ -556,6 +515,40 @@ double EnergyMonomer(struct s_polymer *p, struct s_potential *u, int i, int ci, 
 	}
 
 	return etot;
+}
+
+/********************************************************************
+ Residues g0..g1-1 of the compact copy of the positions that pass the
+ test at the beginning of EnergyPair with the residue at (xi,yi,zi),
+ of reach ri: appended to c->cand from position nhit (branchless, in
+ their order). Returns the new number of candidates.
+ ********************************************************************/
+static inline int CandidatesRange(struct s_cells *c, int g0, int g1, double xi, double yi, double zi, double ri, struct s_potential *u, int nhit)
+{
+	double dx,dy,dz,rmax;
+	int g;
+
+	if (u->boxtype=='p')
+	{
+		double box=u->lbox;
+		for (g=g0;g<g1;++g)
+		{
+			dx = c->x[g]-xi; dy = c->y[g]-yi; dz = c->z[g]-zi;
+			dx -= box*round(dx/box); dy -= box*round(dy/box); dz -= box*round(dz/box);
+			rmax = ri + c->ext[g];
+			c->cand[nhit] = g;
+			nhit += ( dx*dx + dy*dy + dz*dz <= rmax*rmax );
+		}
+	}
+	else
+		for (g=g0;g<g1;++g)
+		{
+			dx = c->x[g]-xi; dy = c->y[g]-yi; dz = c->z[g]-zi;
+			rmax = ri + c->ext[g];
+			c->cand[nhit] = g;
+			nhit += ( dx*dx + dy*dy + dz*dz <= rmax*rmax );
+		}
+	return nhit;
 }
 
 /********************************************************************
@@ -648,8 +641,12 @@ double EnergyMonomerRangeRigid(struct s_polymer *p, struct s_potential *u, int f
 	else if (shell == 0 && p->cells)
 	{
 		struct s_cells *c = p->cells;
-		double xi,yi,zi,ri,dx,dy,dz,rmax;
-		int nhit,k,g,gi;
+		double xi,yi,zi,ri;
+		int nhit,k,g,gi,r0=to+1,r1=from-1;
+
+		if (rig)							// first and last rigid residue
+			for (i=from;i<=to;++i)
+				if (rig[i]) { if (i<r0) r0 = i; r1 = i; }
 
 		for (i=from;i<=to;++i)
 		{
@@ -657,27 +654,15 @@ double EnergyMonomerRangeRigid(struct s_polymer *p, struct s_potential *u, int f
 			xi = c->x[gi]; yi = c->y[gi]; zi = c->z[gi]; ri = u->rcut + c->ext[gi];
 
 			// same test as at the beginning of EnergyPair; branchless, the hits keep their order
-			nhit = 0;
-			if (u->boxtype=='p')
+			// (a rigid residue skips the rigid ones, whose pairs are kept)
+			if (rig && rig[i])
 			{
-				double box=u->lbox;
-				for (g=0;g<c->nres;++g)
-				{
-					dx = c->x[g]-xi; dy = c->y[g]-yi; dz = c->z[g]-zi;
-					dx -= box*round(dx/box); dy -= box*round(dy/box); dz -= box*round(dz/box);
-					rmax = ri + c->ext[g];
-					c->cand[nhit] = g;
-					nhit += ( dx*dx + dy*dy + dz*dz <= rmax*rmax );
-				}
+				nhit = CandidatesRange(c,0,c->offset[ip]+r0,xi,yi,zi,ri,u,0);
+				for (g=c->offset[ip]+r0;g<=c->offset[ip]+r1;++g)
+					if (!rig[g-c->offset[ip]]) nhit = CandidatesRange(c,g,g+1,xi,yi,zi,ri,u,nhit);
+				nhit = CandidatesRange(c,c->offset[ip]+r1+1,c->nres,xi,yi,zi,ri,u,nhit);
 			}
-			else
-				for (g=0;g<c->nres;++g)
-				{
-					dx = c->x[g]-xi; dy = c->y[g]-yi; dz = c->z[g]-zi;
-					rmax = ri + c->ext[g];
-					c->cand[nhit] = g;
-					nhit += ( dx*dx + dy*dy + dz*dz <= rmax*rmax );
-				}
+			else nhit = CandidatesRange(c,0,c->nres,xi,yi,zi,ri,u,0);
 
 			for (k=0;k<nhit;++k)
 			{

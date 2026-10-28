@@ -649,7 +649,7 @@ int main(int argc, char *argv[])
 
 	free(parms);
 	
-	fprintf(stderr,"\n\n\"Monte Grappa, tu sei la mia patria,\nsovra te il nostro sole risplende\"\n\n");
+	if (my_rank==0) fprintf(stderr,"\n\n\"Monte Grappa, tu sei la mia patria,\nsovra te il nostro sole risplende\"\n\n");
 
 	
 	#ifdef ACTIVE_MPI

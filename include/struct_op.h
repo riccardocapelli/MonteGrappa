@@ -64,6 +64,14 @@ struct s_optimizepot
 	int *cfr;		// ...of the frames cfr (ascending)...
 	double *cmc;		// ...with geometric factor cmc
 	double neff;		// effective fraction of frames of the last reweighting, (sum w)^2/(sum w^2)/nframes
+				// weights kept between the steps of the reweighting, so that a step updates only the frames it changes:
+	double *w;		// weight of each frame, exp(-enew/op_T - lnden - eshift)
+	double *sw;		// sum of w*restrain over the frames, by restraint
+	double z,z2;		// sum of w and of w^2
+	double eshift;		// largest exponent when the weights were last computed from scratch
+	double *wold,*swold,zold,z2old;	// the same before the last OP_functionDiff, to undo it
+	int ndiff;		// steps since the weights were last computed from scratch
+	int fullold;		// the last OP_functionDiff computed them from scratch (undo does the same)
 
 	int nframes;		// number of recorded conformations
 	int nframesmax;		// size of the allocated structure

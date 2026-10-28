@@ -143,6 +143,10 @@ struct s_optimizepot *AlloOptimizePot(struct s_mc_parms *parms, int ntypes, int 
 	x->lnden = AlloDouble(nframes);
 	x->restrain = AlloDoubleMatrix(nframes,nrestr);
 	x->rest_av = AlloDouble(nrestr);
+	x->w = AlloDouble(nframes);
+	x->wold = AlloDouble(nframes);
+	x->sw = AlloDouble(nrestr);
+	x->swold = AlloDouble(nrestr);
 
 	fprintf(fproc,"Allocate OP structures for %d frames, %lf MB (the contacts of the frames grow as needed)\n",nframes,
 		((double)ntypes*ntypes*sizeof(int)+7.*nframes*sizeof(double)+nframes*nrestr*sizeof(double))/1024/1024);
@@ -202,6 +206,10 @@ void FreeOpt(struct s_optimizepot *x,struct s_mc_parms *parms,int nrestr){
 	free(x->cfr);
 	free(x->cmc);
 	free(x->rest_av);
+	free(x->w);
+	free(x->wold);
+	free(x->sw);
+	free(x->swold);
 	if (x->restrain) FreeDoubleMatrix((x->restrain),x->nframesmax);
 	free(x);
 }
@@ -695,7 +703,6 @@ static void OP_Denominators(struct s_optimizepot *x, struct s_mc_parms *parms)
 void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntypes, double **u, int irun, double **ematold)
 {
 	int istep,irunstart,iacc=0,a1,a2,iw,ifr,i,j,n=0,nstep=0,ntry,accept,nneff=0;
-	long long k;
 	double chi2,chi2old,chi2best,deltae,eav=0,eav2=0,de2=0,ndata,neff0,chi2val0;
 	double **ebest;
 	char aux[500];
@@ -793,11 +800,7 @@ void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntype
 			}
 		}
 		// reject
-		else
-		{	
-			for (k=p->op->cstart[iw];k<p->op->cstart[iw+1];++k)	// return to previous value
-				p->op->enew[p->op->cfr[k]] -= deltae * p->op->cmc[k];
-		}
+		else OP_UndoDiff(iw,deltae,p->op,parms->op_input,parms);	// return to previous value
 
 		nstep ++;
 
@@ -857,17 +860,64 @@ void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntype
 
 
 /***************************************************
+ Weights of all the frames from their energies enew,
+ with the sums over the frames for the averages
+ ***************************************************/
+static void OP_Weights(struct s_optimizepot *x, struct s_optimizepot_input *in, struct s_mc_parms *parms)
+{
+	double emax=-9E19,boltz;
+	int ifr,ir;
+
+	for (ir=0;ir<in->ndata;++ir) x->sw[ir]=0.;
+	x->z = x->z2 = 0.;
+
+	for (ifr=0;ifr<x->nframes;++ifr)
+	{
+		// calculate emax to avoid overflow in the exp
+		if (-x->enew[ifr]/parms->op_T - x->lnden[ifr] > emax) 
+						emax = -x->enew[ifr]/parms->op_T - x->lnden[ifr];
+	}
+	x->eshift = emax;
+
+	// calculate thermal averages
+	for (ifr=0;ifr<x->nframes;++ifr)
+	{
+		boltz = exp(-x->enew[ifr]/parms->op_T - x->lnden[ifr] - emax);
+		x->w[ifr] = boltz;
+
+		// make the average
+		for (ir=0;ir<in->ndata;++ir) 
+			x->sw[ir] +=  x->restrain[ifr][ir] * boltz;
+                                                                                                                            
+		x->z += boltz;
+		x->z2 += boltz*boltz;
+	}
+}
+
+/***************************************************
+ Averages of the restraints, effective fraction of
+ frames and chi2 from the sums of the weights
+ ***************************************************/
+static double OP_Averages(struct s_optimizepot *x, struct s_optimizepot_input *in)
+{
+	int ir;
+
+	for (ir=0;ir<in->ndata;++ir) x->rest_av[ir] = x->sw[ir] / x->z;
+	x->neff = x->z*x->z/x->z2/x->nframes;
+
+	return Chi2(x->rest_av,in->expdata,in->sigma,in->ndata);
+}
+
+/***************************************************
  Calculate the chi2 with experimental data, updating
  the vector rest_av and e_new
  ***************************************************/
 double OP_function(double **e, struct s_optimizepot *x, struct s_optimizepot_input *in, struct s_mc_parms *parms)
 {
-	double chi2,enew,mul,emax=-9E19,z=0.,z2=0.,boltz;
-	int ifr,icont,it1,it2,ir;
+	double mul;
+	int ifr,icont,it1,it2;
 	long long k;
 
-	for (ir=0;ir<in->ndata;++ir) x->rest_av[ir]=0.;
-                             
 	// calculate energies
 	for (ifr=0;ifr<x->nframes;++ifr)
 		x->enew[ifr] = x->efix[ifr];			// one-body energy
@@ -881,34 +931,10 @@ double OP_function(double **e, struct s_optimizepot *x, struct s_optimizepot_inp
 			x->enew[x->cfr[k]] += e[it1][it2] * mul;
 		}
 	}
-	for (ifr=0;ifr<x->nframes;++ifr)
-	{
-		// calculate emax to avoid overflow in the exp
-		if (-x->enew[ifr]/parms->op_T - x->lnden[ifr] > emax) 
-						emax = -x->enew[ifr]/parms->op_T - x->lnden[ifr];
-	}
-                           
-	// calculate thermal averages
-	for (ifr=0;ifr<x->nframes;++ifr)
-	{
-		enew = x->enew[ifr];
-		boltz = exp(-enew/parms->op_T - x->lnden[ifr] - emax);
+	x->ndiff = 0;
+	OP_Weights(x,in,parms);
 
-		// make the average
-		for (ir=0;ir<in->ndata;++ir) 
-			x->rest_av[ir] +=  x->restrain[ifr][ir] * boltz;
-                                                                                                                            
-		z += boltz;
-		z2 += boltz*boltz;
-	}
-
-
-	for (ir=0;ir<in->ndata;++ir) x->rest_av[ir] /= z;
-	x->neff = z*z/z2/x->nframes;
-	
-	chi2 = Chi2(x->rest_av,in->expdata,in->sigma,in->ndata);
-
-	return chi2;
+	return OP_Averages(x,in);
 }
 
 /***************************************************
@@ -948,58 +974,97 @@ double Chi2Validation(double *x, struct s_optimizepot_input *in)
  Calculate the chi2 with experimental data, given
  the energy difference in the contact iw
  it needs x->enew and changes x->enew[ifr]
+ Only the frames that contain iw change their weight:
+ the sums over the frames are updated with them.
+ They are computed again from scratch every
+ OP_NDIFFMAX steps (the rounding errors of the
+ updates do not pile up) and when a weight would
+ leave the range of the doubles.
  ***************************************************/
 double OP_functionDiff(int iw, double deltae, struct s_optimizepot *x, struct s_optimizepot_input *in, struct s_mc_parms *parms)
 {
-	double chi2,enew,emax=-9E19,z=0.,z2=0.,boltz;
-	int ifr,ir;
-	long long k;
+	double boltz,dw,a,*r;
+	int f,ir,full;
+	long long k,m;
 
-	for (ir=0;ir<in->ndata;++ir) x->rest_av[ir]=0.;
+	full = ( ++x->ndiff >= OP_NDIFFMAX );
+	for (k=x->cstart[iw];k<x->cstart[iw+1] && !full;++k)
+	{
+		f = x->cfr[k];
+		a = -(x->enew[f] + deltae * x->cmc[k])/parms->op_T - x->lnden[f] - x->eshift;
+		if (a > OP_EXPMAX) full = 1;
+	}
+
+	x->fullold = full;
+	if (full)
+	{
+		for (k=x->cstart[iw];k<x->cstart[iw+1];++k)
+			x->enew[x->cfr[k]] += deltae * x->cmc[k];
+		x->ndiff = 0;
+		OP_Weights(x,in,parms);
+		return OP_Averages(x,in);
+	}
+
+	// keep the sums to undo the step
+	x->zold = x->z;
+	x->z2old = x->z2;
+	for (ir=0;ir<in->ndata;++ir) x->swold[ir] = x->sw[ir];
 
 	// the frames that contain the iw contact change their energy
-	for (k=x->cstart[iw];k<x->cstart[iw+1];++k)
-		x->enew[x->cfr[k]] += deltae * x->cmc[k];
-
-	for (ifr=0;ifr<x->nframes;++ifr)
+	for (k=x->cstart[iw],m=0;k<x->cstart[iw+1];++k,++m)
 	{
-		// calculate emax to avoid overflow in the exp
-		if (-x->enew[ifr]/parms->op_T - x->lnden[ifr] > emax) 
-						emax = -x->enew[ifr]/parms->op_T - x->lnden[ifr];
+		f = x->cfr[k];
+		x->enew[f] += deltae * x->cmc[k];
+		boltz = exp(-x->enew[f]/parms->op_T - x->lnden[f] - x->eshift);
+		x->wold[m] = x->w[f];
+		dw = boltz - x->w[f];
+		x->w[f] = boltz;
+		x->z += dw;
+		x->z2 += boltz*boltz - x->wold[m]*x->wold[m];
+		r = x->restrain[f];
+		for (ir=0;ir<in->ndata;++ir) x->sw[ir] += dw * r[ir];
 	}
 
-	// calculate thermal averages
-	for (ifr=0;ifr<x->nframes;++ifr)
+	// all the weights became too small to be summed with precision
+	if (x->z < OP_ZMIN)
 	{
-		enew = x->enew[ifr];
-		boltz = exp(-enew/parms->op_T - x->lnden[ifr] - emax);
-
-		// make the average
-		for (ir=0;ir<in->ndata;++ir)
-			x->rest_av[ir] += x->restrain[ifr][ir] * boltz;
-		z += boltz;
-		z2 += boltz*boltz;
+		x->ndiff = 0;
+		x->fullold = 1;
+		OP_Weights(x,in,parms);
 	}
-
-	for (ir=0;ir<in->ndata;++ir) x->rest_av[ir] /= z;
-	x->neff = z*z/z2/x->nframes;
-	
-	chi2 = Chi2(x->rest_av,in->expdata,in->sigma,in->ndata);
 
 	#ifdef OP_DEBUG
 	 FILE *fp;
 	 fp = fopen("op_log","a");
 	 fprintf(fp,"minim:  iw=%d deltae=%lf\n",iw,deltae);
- 	 for (ifr=0;ifr<x->nframes;++ifr)
-	 	fprintf(fp,"\teold[%d]=%lf enew[%d]=%lf efix[%d]=%lf mul[%d]=%lf",ifr,x->eold[ifr],ifr,x->enew[ifr],ifr,x->efix[ifr],ifr,OP_Mul(x,ifr,iw));
-         fprintf(fp,"\nemax=%lf\n",emax);
-         for (ir=0;ir<in->ndata;++ir)
-		fprintf(fp,"\t <x>[%d]=%lf\t",ir,x->rest_av[ir]);
-         fprintf(fp,"\n");
-         fprintf(fp,"\n");
+ 	 for (f=0;f<x->nframes;++f)
+	 	fprintf(fp,"\teold[%d]=%lf enew[%d]=%lf efix[%d]=%lf mul[%d]=%lf",f,x->eold[f],f,x->enew[f],f,x->efix[f],f,OP_Mul(x,f,iw));
+         fprintf(fp,"\neshift=%lf\n",x->eshift);
 	 fclose(fp);
 	#endif
 
-	return chi2;
+	return OP_Averages(x,in);
+}
+
+/***************************************************
+ Undo the last OP_functionDiff (same iw and deltae)
+ ***************************************************/
+void OP_UndoDiff(int iw, double deltae, struct s_optimizepot *x, struct s_optimizepot_input *in, struct s_mc_parms *parms)
+{
+	int ir;
+	long long k,m;
+
+	for (k=x->cstart[iw];k<x->cstart[iw+1];++k)
+		x->enew[x->cfr[k]] -= deltae * x->cmc[k];
+
+	if (x->fullold) OP_Weights(x,in,parms);
+	else
+	{
+		for (k=x->cstart[iw],m=0;k<x->cstart[iw+1];++k,++m) x->w[x->cfr[k]] = x->wold[m];
+		x->z = x->zold;
+		x->z2 = x->z2old;
+		for (ir=0;ir<in->ndata;++ir) x->sw[ir] = x->swold[ir];
+	}
+	OP_Averages(x,in);
 }
 

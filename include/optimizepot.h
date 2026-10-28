@@ -39,6 +39,9 @@
 
 #define OP_NCONTMAX	500	// maximum number of contacts
 #define OP_NRESMAX	100	// maximum number of restrains
+#define OP_NDIFFMAX	1000	// steps of the reweighting between two computations of all the weights from scratch
+#define OP_EXPMAX	600.	// largest exponent of a weight (relative to the largest one at the last computation from scratch)
+#define OP_ZMIN		1e-250	// smallest sum of the weights
 #define REALLOCATE		// if the number of contacts exceed OP_NCONTMAX, reallocate the structure
 //#define OP_DEBUG
 
@@ -56,5 +59,6 @@ int NFitted(struct s_optimizepot_input *in);
 double OP_function(double **e, struct s_optimizepot *x, struct s_optimizepot_input *in, struct s_mc_parms *parms);
 void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntypes, double **emat, int irun, double **ematold);
 double OP_functionDiff(int iw, double deltae, struct s_optimizepot *x, struct s_optimizepot_input *in, struct s_mc_parms *parms);
+void OP_UndoDiff(int iw, double deltae, struct s_optimizepot *x, struct s_optimizepot_input *in, struct s_mc_parms *parms);
 void FreeOpt(struct s_optimizepot *x,struct s_mc_parms *parms,int nrestr);
 void FreeOptInput(struct s_optimizepot_input *x);

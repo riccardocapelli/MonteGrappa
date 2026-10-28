@@ -186,6 +186,12 @@ group_regression() {
 		[ -f $r ] || continue
 		if [ "$(cat $r)" = PASS ]; then NPASS=$((NPASS+1)); else NFAIL=$((NFAIL+1)); FAILED="$FAILED\n  regression $(basename $(dirname $r) | sed 's/^reg_//')"; fi
 	done
+	[ $UPDATE = 1 ] && return
+	# progress file: written by default, its last state is the end of the last run; tmginfo 0 switches it off
+	if grep -q "^run  *2 of 2" $WORK/reg_optim/mginfo 2>/dev/null && grep -q "^phase  *finished" $WORK/reg_optim/mginfo
+	then pass "mginfo at the end"; else fail "mginfo at the end" "$(head -5 $WORK/reg_optim/mginfo 2>&1 | tr '\n' ' ')"; fi
+	mg mginfo_off ca.pol ca.pot "nchains 1\nTemp 1.0\npivot 1\nnstep 1000\ntmginfo 0\n"
+	if [ $? -eq 0 ] && [ ! -e $WORK/mginfo_off/mginfo ]; then pass "tmginfo 0"; else fail "tmginfo 0" "mginfo written or run failed"; fi
 }
 
 ######################################################################

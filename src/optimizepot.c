@@ -750,6 +750,7 @@ void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntype
 	}
 	
 	// minimize
+	MGInfo_Optimize(parms,irun,0,parms->op_itermax,chi2old/ndata);
 	for (istep=0;istep<parms->op_itermax;++istep)
 	{
 		iw = irand(p->op->ncontacts);
@@ -803,6 +804,7 @@ void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntype
 		// print something
 	//	if (!(istep%parms->op_print)) fprintf(stderr,"   %5d\t\t%lf\t%lf\n",istep,chi2old, chi2old/(parms->op_input->ndata));
 		if (!(istep%parms->op_print)) fprintf(stderr,"   %5d\t\t%lf\n",istep,chi2old/ndata);
+		MGInfo_Optimize(parms,irun,istep+1,parms->op_itermax,chi2old/ndata);
 		// exit condition
 		if (chi2old<parms->op_stop) break;
 	}

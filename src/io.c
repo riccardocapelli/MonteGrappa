@@ -474,6 +474,7 @@ struct s_mc_parms *ReadMcParms(char *fname)
 	x->nprintlog = 1000;
 	x->ncheckpoint = 0;
 	x->tcheckpoint = 600;
+	x->tmginfo = 60;
 	strcpy(x->fntrj,"traj");
 	x->r2shell = 6.;
 	x->ntemp = 0;
@@ -556,6 +557,7 @@ struct s_mc_parms *ReadMcParms(char *fname)
 		ReadParD(aux,"nprinte",&(x->nprinte));
 		ReadParD(aux,"ncheckpoint",&(x->ncheckpoint));
 		ReadParD(aux,"tcheckpoint",&(x->tcheckpoint));
+		ReadParD(aux,"tmginfo",&(x->tmginfo));
 		ReadParS(aux,"traj",x->fntrj);
 		ReadParS(aux,"trjformat",trjformat);
 		ReadParS(aux,"logfile",nlog);

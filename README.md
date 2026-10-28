@@ -154,6 +154,14 @@ New keywords of the parameter file:
  - cells N         cell list for the energy: 1 always, 0 never, -1 automatic
                    (default; used for large systems when it is faster)
  - tcheckpoint N   seconds between checkpoints (default 600)
+ - tmginfo N       seconds between updates of the file mginfo (default 60, 0 =
+                   not written), the progress of the simulation as the mdinfo
+                   file of Amber: run, step, energy, acceptance and speed, or
+                   step and chi2 of the optimization of the potential; time
+                   elapsed and left in the run and in the whole simulation,
+                   and expected end (from the duration of the runs already
+                   completed; before the first one ends, Monte Carlo only).
+                   With MPI it is written by rank 0
  - nprintobs N     every N steps, write observables of aggregation to obs.dat
                    (obs_run<run>_proc<rank>.dat as for energies): number of
                    clusters of chains, largest and mean cluster size, pairs of

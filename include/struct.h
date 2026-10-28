@@ -310,6 +310,7 @@ struct s_mc_parms
 	int nprinte;		// when to print energy
 	int ncheckpoint;	// write a checkpoint every ncheckpoint steps (<=0: every tcheckpoint seconds)
 	int tcheckpoint;	// wall-clock seconds between checkpoints when ncheckpoint<=0
+	int tmginfo;		// wall-clock seconds between updates of the file mginfo (0: not written)
 	FILE *flog;
 	int shell;		// 1=activate shell
 	int nshell;		// update shell every %d step

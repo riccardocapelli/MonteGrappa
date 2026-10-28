@@ -356,6 +356,13 @@ FILE *OpenTrajectory(char *base, struct s_polymer *p, struct s_mc_parms *parms, 
 void PrintTrajectory(FILE *fp, struct s_polymer *p, struct s_mc_parms *parms, struct s_potential *u);
 void PrintObservables(FILE *fp, struct s_polymer *p, int npol, unsigned long long istep);
 void SetSidechainExtents(struct s_polymer *p, int npol, int nosidechains);
+
+//mginfo.c
+void MGInfo_StartRun(struct s_mc_parms *parms, unsigned long long step0);
+void MGInfo_MC(struct s_mc_parms *parms, int irun, unsigned long long istep, double e, double T, int force);
+void MGInfo_EndMC(struct s_mc_parms *parms, int irun);
+void MGInfo_Optimize(struct s_mc_parms *parms, int irun, int istep, int nstep, double chi2);
+void MGInfo_EndRun(struct s_mc_parms *parms, int irun);
 double EnergyHFieldsAll(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms);
 
 

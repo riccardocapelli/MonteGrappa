@@ -602,6 +602,7 @@ int main(int argc, char *argv[])
 		if (parms->fobs) { fclose(parms->fobs); parms->fobs = NULL; }
 
 	
+		if (my_rank==0) MGInfo_EndRun(parms,irun);
 		#ifdef ACTIVE_MPI
             	if (my_rank==0) fprintf(stderr,"End of iteration %d\n",irun);
 		#else

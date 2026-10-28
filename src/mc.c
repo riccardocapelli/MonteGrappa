@@ -182,6 +182,11 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 	}
 	CheckpointName(fchkp,sizeof(fchkp),my_rank);
 	time_t tcheckpoint = time(NULL);
+	if (my_rank==0)
+	{
+		MGInfo_StartRun(parms,istep);
+		MGInfo_MC(parms,irun,istep,p->etot,t,1);
+	}
 
  
 	#ifdef OPTIMIZEPOT
@@ -627,8 +632,12 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			WriteCheckpoint(fchkp,chk,p,parms->npol);
 		}
 
+		// progress in the file mginfo (every tmginfo seconds)
+		if (my_rank==0 && istep%1000==0) MGInfo_MC(parms,irun,istep,p->etot,t,0);
+
 	} while (istep<parms->nstep && stop==0);	
 	///////////////////////////////////////// end MC LOOP
+	if (my_rank==0) MGInfo_EndMC(parms,irun);
 		
 	// print summary
 	#ifdef ACTIVE_MPI	

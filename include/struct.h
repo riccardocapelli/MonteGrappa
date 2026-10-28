@@ -332,6 +332,8 @@ struct s_mc_parms
 	int nodihpot;		//0=there is a potential on dihedrals, 1; there is not
 	int nohfields;		//0=there is a H fields potential, 1: there is not
 	int echeck;		//1=check incremental energy against TotalEnergy after every move (slow, for debugging)
+	int rigid;		// residues farther than this from the end of the part rotated by a pivot move rigidly with it
+				// (their sidechains and hydrogen bonds included): their pairs keep their energy (-1: never used)
 	int cells;		//cell list for the energy: 1=on, 0=off, -1=automatic (on for large systems)
 	int nprintobs;		//write the observables of aggregation every nprintobs steps (0=never)
 	FILE *fobs;		//... to this file (opened for each run)

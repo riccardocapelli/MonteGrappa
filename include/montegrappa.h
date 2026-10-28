@@ -98,6 +98,7 @@
         #define EPSILON 0.0001
         #define EPSILON2 0.0001
         #define LARGE 9E9
+        #define RIGID_TOL2 1E-12		// (A^2) an atom moved rigidly if this close to the rigid motion of its old position
 
 #define OPTIMIZEPOT
 
@@ -319,6 +320,7 @@ double EnergyMonomer(struct s_polymer *p, struct s_potential *u, int i, int ci, 
 void AddContact(struct s_polymer *p, int i, int j, int ci, int cj, double e);
 void AddShell(struct s_polymer *p, int i, int j, int ci, int cj);
 void ResetContactsMonomer(struct s_polymer *p, int i, int ci);
+void ResetContactsMonomerOutside(struct s_polymer *p, int i, int ci, const char *rig);
 double GetEnergyMonomer(struct s_polymer *p, int ip, int iw);
 void PrintContacts(FILE *fp, struct s_polymer *p,int ip, unsigned long long step);
 void CountContacts(FILE *fp,struct s_polymer *polymer,struct s_mc_parms *parms,unsigned long long step);
@@ -329,7 +331,10 @@ void SetTrueShellFlags(struct s_polymer *p,struct s_mc_parms *parms);
 void SetFalseShellFlags(struct s_polymer *p,struct s_mc_parms *parms);
 void UpdateShellFlags(struct s_polymer *p,int ip,int ifrom,int ito);
 double GetEnergyMonomerRange(struct s_polymer *p, int from, int to, int ip);
+double GetEnergyMonomerRangeRigid(struct s_polymer *p, int from, int to, int ip, const char *rig);
 double EnergyMonomerRange(struct s_polymer *p, struct s_potential *u, int from, int to, int ip, int npol, int shell, int update, int nosidechains, int disentangle, int hb);
+double EnergyMonomerRangeRigid(struct s_polymer *p, struct s_potential *u, int from, int to, int ip, int npol, int shell, int update, int nosidechains, int disentangle, int hb, const char *rig);
+int RigidMargin(struct s_polymer *p, struct s_potential *u, int npol, int nat, int hb, int nosidechains);
 double EnergyPair(struct s_polymer *p, struct s_potential *u, int i, int j, int ci, int cj, int update, int sidechains, int disentangle, int tooclose, int hb);
 double EnergyAngles(struct s_polymer *p, struct s_potential *u, int iw, int ic, int update);
 double EnergyDihedrals(struct s_polymer *p, struct s_potential *u, int iw, int ic, int update);

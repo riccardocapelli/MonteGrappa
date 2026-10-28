@@ -123,6 +123,19 @@ Results:
    Simulations using them should be repeated.
  - A missing Temp keyword is now an error (it silently ran at T=0).
 
+Speed:
+ - Optimization of the potential: a step changes one element of the
+   matrix, so only the frames that contain that pair of types change their
+   weight; the sums of the reweighting are updated with them (and computed
+   again from scratch every 1000 steps). The cost of a step is proportional
+   to the frames of the pair instead of all the frames: for 1PGB a few
+   percent of them.
+ - Pivot moves do not recompute the pairs of residues that they rotate
+   rigidly together (about a third of the pairs for 1PGB, 15% faster).
+   A residue is taken as rigid only if its sidechain atoms, and the atoms
+   its hydrogen bonds refer to, are checked to have followed the rigid
+   motion; the trajectories are the same as before (up to rounding).
+
 Restart:
  - A checkpoint is written by default every 10 minutes (keyword
    tcheckpoint, in seconds); "ncheckpoint N" writes it every N steps

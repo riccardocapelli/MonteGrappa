@@ -564,6 +564,16 @@ double EnergyMonomer(struct s_polymer *p, struct s_potential *u, int i, int ci, 
  ********************************************************************/
 double EnergyMonomerRange(struct s_polymer *p, struct s_potential *u, int from, int to, int ip, int npol, int shell, int update, int nosidechains, int disentangle, int hb)
 {
+	return EnergyMonomerRangeRigid(p,u,from,to,ip,npol,shell,update,nosidechains,disentangle,hb,NULL);
+}
+
+/********************************************************************
+ The same, when the residues of chain ip (within [from,to]) with
+ rig[i]=1 moved rigidly together: their pairs keep energy and contacts
+ (rig=NULL computes all the pairs)
+ ********************************************************************/
+double EnergyMonomerRangeRigid(struct s_polymer *p, struct s_potential *u, int from, int to, int ip, int npol, int shell, int update, int nosidechains, int disentangle, int hb, const char *rig)
+{
 	int i,j,cj,k,tooclose;
 	double etot=0,e;
 
@@ -577,7 +587,8 @@ double EnergyMonomerRange(struct s_polymer *p, struct s_potential *u, int from, 
 		//#pragma omp parallel for 
 		for (i=from;i<=to;++i)
 		{
-			ResetContactsMonomer(p,i,ip);
+			if (rig && rig[i]) ResetContactsMonomerOutside(p,i,ip,rig);
+			else ResetContactsMonomer(p,i,ip);
 		}
 
 	// box energy
@@ -621,7 +632,7 @@ double EnergyMonomerRange(struct s_polymer *p, struct s_potential *u, int from, 
 				else if ( (bi->pos.x-bj->pos.x)*(bi->pos.x-bj->pos.x) + (bi->pos.y-bj->pos.y)*(bi->pos.y-bj->pos.y)
 					+ (bi->pos.z-bj->pos.z)*(bi->pos.z-bj->pos.z) > rmax*rmax ) continue;
 
-				if ( ip!=cj || j<from || j>to || i<j )				// if j in [from,to] of the same chain, require i<j to count only once
+				if ( ( ip!=cj || j<from || j>to || i<j ) && !( rig && ip==cj && rig[i] && rig[j] ) )	// j in [from,to] of the same chain: i<j to count once; skip rigid pairs
 				{
 					tooclose = 0;
 					if (ip == cj && Abs(i-j) <= u->g_imin) tooclose = 1;
@@ -672,7 +683,7 @@ double EnergyMonomerRange(struct s_polymer *p, struct s_potential *u, int from, 
 			{
 				cj = c->chain[c->cand[k]];
 				j = c->res[c->cand[k]];
-				if ( ip!=cj || j<from || j>to || i<j )				// if j in [from,to] of the same chain, require i<j to count only once
+				if ( ( ip!=cj || j<from || j>to || i<j ) && !( rig && ip==cj && rig[i] && rig[j] ) )	// j in [from,to] of the same chain: i<j to count once; skip rigid pairs
 				{
 					tooclose = 0;
 					if (ip == cj && Abs(i-j) <= u->g_imin) tooclose = 1;
@@ -703,7 +714,7 @@ double EnergyMonomerRange(struct s_polymer *p, struct s_potential *u, int from, 
 					if ( (bi->pos.x-bj->pos.x)*(bi->pos.x-bj->pos.x) + (bi->pos.y-bj->pos.y)*(bi->pos.y-bj->pos.y)
 						+ (bi->pos.z-bj->pos.z)*(bi->pos.z-bj->pos.z) > rmax*rmax ) continue;
 
-					if ( ip!=cj || j<from || j>to || i<j )				// if j in [from,to] of the same chain, require i<j to count only once
+					if ( ( ip!=cj || j<from || j>to || i<j ) && !( rig && ip==cj && rig[i] && rig[j] ) )	// j in [from,to] of the same chain: i<j to count once; skip rigid pairs
 					{
 						//fprintf(stderr,"energypair atomi %d di %d / %d di %d \n",i,ip,j,cj);
 						tooclose = 0;
@@ -841,6 +852,96 @@ void ResetContactsMonomer(struct s_polymer *p, int i, int ci)
 }
 
 /********************************************************************
+ As ResetContactsMonomer, but keeping the contacts of i with the
+ residues of its own chain with rig[j]=1
+ ********************************************************************/
+void ResetContactsMonomerOutside(struct s_polymer *p, int i, int ci, const char *rig)
+{
+	struct s_back *bi = ((p+ci)->back)+i, *bn;
+	int k,l,neigh,cn,nk=0;
+
+	for (k=0;k<bi->ncontacts;++k)
+	{
+		neigh = bi->contacts[k];
+		cn = bi->contacts_p[k];
+		if (cn==ci && rig[neigh])						// kept, in the same order
+		{
+			bi->contacts[nk] = neigh;
+			bi->contacts_p[nk] = cn;
+			bi->e[nk] = bi->e[k];
+			nk++;
+			continue;
+		}
+		bn = ((p+cn)->back)+neigh;						// remove i from the list of neigh
+		for (l=0;l<bn->ncontacts;++l)
+			if (bn->contacts[l]==i && bn->contacts_p[l]==ci)
+			{
+				bn->contacts[l] = bn->contacts[bn->ncontacts-1];
+				bn->contacts_p[l] = bn->contacts_p[bn->ncontacts-1];
+				bn->e[l] = bn->e[bn->ncontacts-1];
+				bn->ncontacts --;
+				l--;
+			}
+	}
+	for (k=nk;k<bi->ncontacts;++k) bi->e[k] = 0;
+	bi->ncontacts = nk;
+}
+
+/********************************************************************
+ How far (in backbone units) the positions that the energy of a unit
+ depends on can be from it: the reference atoms of the rotamers of its
+ sidechain and, with hydrogen bonds, the atoms preceding its donors and
+ acceptors. A pivot move rotates rigidly the units farther than this
+ from the end of the rotated part, if their sidechains were consistent
+ with their rotamers (see RigidFlags in mc.c). -1 if some reference is
+ not found (pivot moves then compute all the pairs).
+ ********************************************************************/
+int RigidMargin(struct s_polymer *p, struct s_potential *u, int npol, int nat, int hb, int nosidechains)
+{
+	int ic,i,is,ir,k,d=0,ref[4],nref,*owner;
+	struct s_back *b;
+	struct s_rotamers *r;
+
+	owner = (int *) malloc(nat*sizeof(int));
+	if (!owner) Error("Cannot allocate in RigidMargin");
+	for (ic=0;ic<npol;++ic)
+	{
+		for (k=0;k<nat;++k) owner[k] = -1;
+		for (i=0;i<(p+ic)->nback;++i)
+		{
+			b = ((p+ic)->back)+i;
+			if (b->ia>=0 && b->ia<nat) owner[b->ia] = i;
+			for (is=0;is<b->nside;++is)
+				if (b->side[is].ia>=0 && b->side[is].ia<nat) owner[b->side[is].ia] = i;
+		}
+		for (i=0;i<(p+ic)->nback;++i)
+		{
+			b = ((p+ic)->back)+i;
+			for (is=0;is<b->nside && !nosidechains;++is)
+				for (ir=0;ir<b->nrot;++ir)
+				{
+					r = b->side[is].rot+ir;
+					ref[0] = r->b1; ref[1] = r->b2; ref[2] = r->b3; nref = 3;
+					if (hb && b->side[is].ia>=0 && b->side[is].ia<nat && u->hb[b->side[is].ia]) ref[nref++] = u->hb_iam[b->side[is].ia];
+					for (k=0;k<nref;++k)
+					{
+						if (ref[k]<0 || ref[k]>=nat || owner[ref[k]]<0) { free(owner); return -1; }
+						if (Abs(owner[ref[k]]-i) > d) d = Abs(owner[ref[k]]-i);
+					}
+				}
+			if (hb && b->ia>=0 && b->ia<nat && u->hb[b->ia])
+			{
+				k = u->hb_iam[b->ia];
+				if (k<0 || k>=nat || owner[k]<0) { free(owner); return -1; }
+				if (Abs(owner[k]-i) > d) d = Abs(owner[k]-i);
+			}
+		}
+	}
+	free(owner);
+	return d;
+}
+
+/********************************************************************
  Read the total interaction energy of a monomer with the others
  from its energy structure
  ********************************************************************/
@@ -862,6 +963,14 @@ double GetEnergyMonomer(struct s_polymer *p, int ip, int iw)
  ********************************************************************/
 double GetEnergyMonomerRange(struct s_polymer *p, int from, int to, int ip)
 {
+	return GetEnergyMonomerRangeRigid(p,from,to,ip,NULL);
+}
+
+/********************************************************************
+ The same without the pairs of residues of chain ip with rig[i]=1
+ ********************************************************************/
+double GetEnergyMonomerRangeRigid(struct s_polymer *p, int from, int to, int ip, const char *rig)
+{
 	double e=0;
 	int i,iw,j,cj;
 	
@@ -873,7 +982,8 @@ double GetEnergyMonomerRange(struct s_polymer *p, int from, int to, int ip)
 			{
 				j = ((((p+ip)->back)+iw)->contacts)[i];
 				cj = ((((p+ip)->back)+iw)->contacts_p)[i];
-				if (ip!=cj || j<from || j>to || iw<j)				// count only once contacts in [from,to] of the same chain
+				if ( (ip!=cj || j<from || j>to || iw<j)				// count only once contacts in [from,to] of the same chain
+					&& !(rig && ip==cj && rig[iw] && rig[j]) )
 					e += ((((p+ip)->back)+iw)->e)[i];
 			}
 		}

@@ -857,6 +857,94 @@ void CopyResiduePositions_NOCONT(struct s_back *from, struct s_back *to)
 }
 
 /*****************************************************************************
+ Orthonormal frame of three positions (origin a, first axis along b-a)
+ *****************************************************************************/
+static void RigidFrame(struct vector a, struct vector b, struct vector c, double f[3][3])
+{
+	double n,d;
+	int k;
+
+	f[0][0] = b.x-a.x; f[0][1] = b.y-a.y; f[0][2] = b.z-a.z;
+	n = sqrt(f[0][0]*f[0][0]+f[0][1]*f[0][1]+f[0][2]*f[0][2]);
+	for (k=0;k<3;++k) f[0][k] /= n;
+	f[1][0] = c.x-a.x; f[1][1] = c.y-a.y; f[1][2] = c.z-a.z;
+	d = f[1][0]*f[0][0]+f[1][1]*f[0][1]+f[1][2]*f[0][2];
+	for (k=0;k<3;++k) f[1][k] -= d*f[0][k];
+	n = sqrt(f[1][0]*f[1][0]+f[1][1]*f[1][1]+f[1][2]*f[1][2]);
+	for (k=0;k<3;++k) f[1][k] /= n;
+	f[2][0] = f[0][1]*f[1][2]-f[0][2]*f[1][1];
+	f[2][1] = f[0][2]*f[1][0]-f[0][0]*f[1][2];
+	f[2][2] = f[0][0]*f[1][1]-f[0][1]*f[1][0];
+}
+
+// the position x (before the move) carried by the rigid motion of the frames fo (before) and fn (after)
+static int RigidSame(struct vector x, struct vector ao, double fo[3][3], struct vector an, double fn[3][3], struct vector y)
+{
+	double c[3],z[3];
+	int k;
+
+	for (k=0;k<3;++k) c[k] = fo[k][0]*(x.x-ao.x) + fo[k][1]*(x.y-ao.y) + fo[k][2]*(x.z-ao.z);
+	for (k=0;k<3;++k) z[k] = c[0]*fn[0][k] + c[1]*fn[1][k] + c[2]*fn[2][k];
+	return (an.x+z[0]-y.x)*(an.x+z[0]-y.x) + (an.y+z[1]-y.y)*(an.y+z[1]-y.y) + (an.z+z[2]-y.z)*(an.z+z[2]-y.z) < RIGID_TOL2;
+}
+
+/*****************************************************************************
+ After a pivot move, the residues [from,to] of chain ip were rotated
+ rigidly with their backbone (from and to farther than parms->rigid from
+ the pivot): flag those whose sidechain atoms (and the atoms their hydrogen
+ bonds refer to) moved rigidly too, comparing with oldp. A sidechain that
+ did not match its rotamer (a move rebuilt only the residues next to the
+ atom it moved) was rebuilt by AddSidechain and is not flagged. Returns
+ the flags of the residues of the chain, or NULL if none is used.
+ *****************************************************************************/
+static char *RigidFlags(struct s_polymer *p, struct s_polymer *oldp, struct s_potential *pot, struct s_mc_parms *parms, int ip, int from, int to)
+{
+	static char *rig=NULL;
+	static int nrig=0;
+	struct s_back *b,*bo;
+	struct vector ao,an;
+	double fo[3][3],fn[3][3];
+	int i,is,ia,n=(p+ip)->nback;
+
+	if (parms->rigid<0) return NULL;
+	if (from<0) from = 0;
+	if (to>n-1) to = n-1;
+	if (to-from < 2) return NULL;
+	if (n > nrig)
+	{
+		rig = (char *) realloc(rig,n);
+		if (!rig) Error("Cannot allocate in RigidFlags");
+		nrig = n;
+	}
+	memset(rig,0,n);
+
+	b = (p+ip)->back;
+	bo = (oldp+ip)->back;
+	ao = bo[from].pos;
+	an = b[from].pos;
+	RigidFrame(bo[from].pos,bo[from+1].pos,bo[from+2].pos,fo);
+	RigidFrame(b[from].pos,b[from+1].pos,b[from+2].pos,fn);
+
+	for (i=from;i<=to;++i)
+	{
+		rig[i] = 1;
+		if (!parms->nosidechains)
+			for (is=0;is<b[i].nside && rig[i];++is)
+				rig[i] = RigidSame(bo[i].side[is].pos,ao,fo,an,fn,b[i].side[is].pos);
+		if (parms->hb && rig[i])
+		{
+			if (pot->hb[b[i].ia]) rig[i] = RigidSame(*((oldp+ip)->vback[pot->hb_iam[b[i].ia]]),ao,fo,an,fn,*((p+ip)->vback[pot->hb_iam[b[i].ia]]));
+			for (is=0;is<b[i].nside && rig[i];++is)
+			{
+				ia = b[i].side[is].ia;
+				if (pot->hb[ia]) rig[i] = RigidSame(*((oldp+ip)->vback[pot->hb_iam[ia]]),ao,fo,an,fn,*((p+ip)->vback[pot->hb_iam[ia]]));
+			}
+		}
+	}
+	return rig;
+}
+
+/*****************************************************************************
  Make a pivot move in a random backbone atom (very inefficient!)
 	 returns 1 if it could make the move, 0 if nothing was done
  *****************************************************************************/
@@ -864,6 +952,7 @@ int MoveBackbonePivot(struct s_polymer *p,struct s_polymer *oldp, struct s_poten
 {
 	int iw,ok=0,half,ip;
 	double dw=0,deltaE;
+	char *rig;
 		
 	ip = irand(parms->npol);
 
@@ -885,8 +974,8 @@ int MoveBackbonePivot(struct s_polymer *p,struct s_polymer *oldp, struct s_poten
 
 		if ( (((p+ip)->back)+iw+1)->move == 0 ) { parms->mov++; return 0;}
 
-		// calculate old energy
-		deltaE = -GetEnergyMonomerRange(p,0,iw,ip);							// two-body energy
+		// calculate old energy (the two-body one after the move)
+		deltaE = 0;
 		if (!parms->nodihpot)
 		{
 			deltaE -= (((p+ip)->back)+iw+1)->e_dih;							// old dihedral energy
@@ -900,7 +989,10 @@ int MoveBackbonePivot(struct s_polymer *p,struct s_polymer *oldp, struct s_poten
 		ok = PivotBackward((p+ip),iw+1,dw,iw,parms);							// moved atoms are in [0,iw-1]; changed dihedral is iw+1
 		ok *= AddSidechain(p,0,iw,ip);
 
-		deltaE += EnergyMonomerRange(p,pot,0,iw,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);			// new energy of iw with the others
+		// the pairs of residues that moved rigidly together do not change: old two-body energy without them (from oldp)
+		rig = RigidFlags(p,oldp,pot,parms,ip,0,iw-1-parms->rigid);
+		deltaE -= GetEnergyMonomerRangeRigid(oldp,0,iw,ip,rig);
+		deltaE += EnergyMonomerRangeRigid(p,pot,0,iw,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb,rig);			// new energy of iw with the others
 		if (!parms->nodihpot)
 			deltaE += EnergyDihedrals(p,pot,iw+1,ip,1);
 		if (!parms->nohfields)
@@ -914,8 +1006,8 @@ int MoveBackbonePivot(struct s_polymer *p,struct s_polymer *oldp, struct s_poten
 	
 		if ( (((p+ip)->back)+iw)->move == 0 ) { parms->mov++; return 0; }
 
-		// calculate old energy
-		deltaE = -GetEnergyMonomerRange(p,iw,(p+ip)->nback-1,ip);
+		// calculate old energy (the two-body one after the move)
+		deltaE = 0;
 		if (!parms->nodihpot)
 		{
 			deltaE -= (((p+ip)->back)+iw)->e_dih;							// old dihedral energy
@@ -928,7 +1020,9 @@ int MoveBackbonePivot(struct s_polymer *p,struct s_polymer *oldp, struct s_poten
 		ok = PivotForward((p+ip),iw-1,dw,(p+ip)->nback-iw-1,parms);			// moved atoms are in [iw+1,nback-1]; changed dihedral of iw
 		ok *= AddSidechain(p,iw,(p+ip)->nback-1,ip);
 
-		deltaE += EnergyMonomerRange(p,pot,iw,(p+ip)->nback-1,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
+		rig = RigidFlags(p,oldp,pot,parms,ip,iw+1+parms->rigid,(p+ip)->nback-1);
+		deltaE -= GetEnergyMonomerRangeRigid(oldp,iw,(p+ip)->nback-1,ip,rig);
+		deltaE += EnergyMonomerRangeRigid(p,pot,iw,(p+ip)->nback-1,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb,rig);
 		if (!parms->nodihpot)
 			deltaE += EnergyDihedrals(p,pot,iw,ip,1);
 		if (!parms->nohfields)
@@ -987,6 +1081,7 @@ int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_pote
 
 	int half,ok=1,m,iw,ip,idir;
 	double dw=0,deltaE;
+	char *rig;
 
 	if(nmul<0) nmul=2+irand(-nmul-1);				//generate random nmul in [2,-mul] if required
 
@@ -1007,7 +1102,7 @@ int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_pote
 	{
 		if ( iw+2-nmul < 2 ) nmul = iw;										// if nmul beyond beginning of the chain, decrease it
 
-		deltaE = -GetEnergyMonomerRange(p,0,iw,ip);							// calculate old energy
+		deltaE = 0;											// old energy (the two-body one after the move)
 		if (!parms->nodihpot)
 			for (m=0;m<nmul;++m) deltaE -= (((p+ip)->back)+iw-m+1)->e_dih;	// old dihedral energy
 		if (!parms->nohfields){
@@ -1026,7 +1121,9 @@ int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_pote
 		ok *= AddSidechain(p,0,iw,ip);
 
 //		deltaE += EnergyMonomerRange(p,pot,0,iw,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);				// new energy of iw with the others
-		deltaE += EnergyMonomerRange(p,pot,0,iw,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);    
+		rig = RigidFlags(p,oldp,pot,parms,ip,0,iw-nmul-parms->rigid);					// [0,iw-nmul] gets all the rotations
+		deltaE -= GetEnergyMonomerRangeRigid(oldp,0,iw,ip,rig);
+		deltaE += EnergyMonomerRangeRigid(p,pot,0,iw,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb,rig);    
 
 
 		if (!parms->nodihpot)													// new dihedral energy
@@ -1041,7 +1138,7 @@ int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_pote
 	{
 		if ( iw-2+nmul > (p+ip)->nback - 3 ) nmul = (p+ip)->nback - 1 - iw;			// if nmul is beyond the end, decrease it
 
-		deltaE = -GetEnergyMonomerRange(p,iw,(p+ip)->nback-1,ip);					// calculate old energy
+		deltaE = 0;											// old energy (the two-body one after the move)
 		if (!parms->nodihpot)
 			for (m=0;m<nmul;++m)deltaE -= (((p+ip)->back)+iw+m)->e_dih;				// old dihedral energy
 		if (!parms->nohfields)
@@ -1058,7 +1155,9 @@ int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_pote
 		ok *= AddSidechain(p,iw,(p+ip)->nback-1,ip);
 
 		//shell disattivate: mossa globale
-		deltaE += EnergyMonomerRange(p,pot,iw,(p+ip)->nback-1,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);   
+		rig = RigidFlags(p,oldp,pot,parms,ip,iw+nmul+parms->rigid,(p+ip)->nback-1);			// [iw+nmul,nback-1] gets all the rotations
+		deltaE -= GetEnergyMonomerRangeRigid(oldp,iw,(p+ip)->nback-1,ip,rig);
+		deltaE += EnergyMonomerRangeRigid(p,pot,iw,(p+ip)->nback-1,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb,rig);   
 	//	deltaE += EnergyMonomerRange(p,pot,iw,p->nback-1,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);			// new energy of iw with the others
 		if (!parms->nodihpot)														// new dihedral energy
 			for (m=0;m<nmul;++m) deltaE += EnergyDihedrals(p,pot,iw+m,ip,1);

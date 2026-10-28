@@ -276,7 +276,7 @@ int PDB2NCAC(struct atom_s *pdb, struct atom_s *ca, int n)
             ++k;
         }
     
-	return k;
+    return k;
 }
 
 /*****************************************************************************

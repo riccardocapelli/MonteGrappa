@@ -350,7 +350,7 @@ double **ContactMap(struct s_parms *parms, struct s_polymer *p, int nchains, int
 							}
 					}
 
-			return cm;
+	return cm;
 }
 
 /*****************************************************************************
@@ -580,6 +580,7 @@ void HydrophobicInteraction(struct s_parms *parms, struct s_polymer *p, double *
 				}
 				cnt++;
 			}
+	fprintf(stderr,"Added %d hydrophobic interactions.\n",cnt);
 }
 
 /**********************************************

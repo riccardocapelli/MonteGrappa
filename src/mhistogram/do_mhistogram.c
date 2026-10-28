@@ -684,7 +684,7 @@ void print_state (size_t iter, gsl_multiroot_fsolver *s, int ntemp)
  *****************************************************************************/
 int GMHequation (const gsl_vector *ff, void *params, gsl_vector *eqq)
 {
-  int i,ie,it,nbin,ntemp,debug,paranoid,*useit,*binok;
+  int i,ie,it,nbin,ntemp,*useit,*binok;
   double num,den,fmax,e,emin,ebin,kb;
   double f[NTEMPMAX], eq[NTEMPMAX], *T, **h, n;
 
@@ -701,8 +701,6 @@ int GMHequation (const gsl_vector *ff, void *params, gsl_vector *eqq)
   ntemp = ((struct rparams *) params)->ntemp;
   nbin = ((struct rparams *) params)->nbin;
   kb = ((struct rparams *) params)->kb;
-  debug = ((struct rparams *) params)->debug;
-  paranoid = ((struct rparams *) params)->paranoid;
   useit = ((struct rparams *) params)->useit;
   binok = ((struct rparams *) params)->binok;
 
@@ -770,7 +768,7 @@ int GMHequation (const gsl_vector *ff, void *params, gsl_vector *eqq)
  *****************************************************************************/
 int GMHequation_df (const gsl_vector *ff, void *params, gsl_matrix *J)
 {
-  int i,ie,iT,nbin,ntemp,debug,paranoid,*useit, *binok;
+  int i,ie,iT,nbin,ntemp,*useit, *binok;
   double den2[NEBINMAX],fmax[NEBINMAX],e,emin,ebin,kb,sum,d,fmax2;
   double f[NTEMPMAX], deriv, *T, **h, n[NTEMPMAX],s[NEBINMAX];
   gsl_vector *eqq;
@@ -788,8 +786,6 @@ int GMHequation_df (const gsl_vector *ff, void *params, gsl_matrix *J)
   ntemp = ((struct rparams *) params)->ntemp;
   nbin = ((struct rparams *) params)->nbin;
   kb = ((struct rparams *) params)->kb;
-  debug = ((struct rparams *) params)->debug;
-  paranoid = ((struct rparams *) params)->paranoid;
   useit = ((struct rparams *) params)->useit;
   binok = ((struct rparams *) params)->binok;
 

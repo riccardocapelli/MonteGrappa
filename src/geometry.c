@@ -531,7 +531,9 @@ int PivotForward(struct s_polymer *p, int iw, double dw, int n, struct s_mc_parm
 	M[2][1] = V.y * V.z * ocw - V.x * sw;
 	M[2][2] = V.z * V.z * ocw + cw;
 	
+	#ifdef _OPENMP
 	#pragma omp parallel for private (U,W)
+	#endif
 	// move n atoms from iw+2 to iw+2+n
 	for (i=iw+2;i<iw+2+n;++i)
      // for(i=iw;i<iw+n;++i)
@@ -912,7 +914,9 @@ void CopyPolymer(struct s_polymer *from, struct s_polymer *to, int cfrom, int ct
 	(to+cto)->nback = (from+cfrom)->nback;
 	(to+cto)->etot = (from+cfrom)->etot;
 	strcpy((to+cto)->title,(from+cfrom)->title);
+	#ifdef _OPENMP
 	#pragma omp parallel for private(j,k)
+	#endif
 	for (i=0;i<(from+cfrom)->nback;++i)
 	{
 		(((to+cto)->back)+i)->ia = (((from+cfrom)->back)+i)->ia;

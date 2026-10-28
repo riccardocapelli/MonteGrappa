@@ -747,7 +747,7 @@ void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntype
 	//print chi2
 	if(parms->nrun>1)
 	{
-		sprintf(aux,"chi2.dat");
+		snprintf(aux,sizeof(aux),"chi2.dat");
 		fc = fopen(aux,"a");
 		if (ndata < parms->op_input->ndata)			// run, chi2 of the fitted and of the validation restraints
 			fprintf(fc,"%d\t%lf\t%lf\n",irun+irunstart, chi2old/ndata, chi2val0);
@@ -838,7 +838,7 @@ void OP_SamplePotential(struct s_polymer *p, struct s_mc_parms *parms, int ntype
 	
 
 	// print to file
-	sprintf(aux,"restraints_%d.dat",irun);
+	snprintf(aux,sizeof(aux),"restraints_%d.dat",irun);
 	fp = fopen(aux,"w");
 	for (i=0;i<parms->op_input->ndata;++i)
 		fprintf(fp,"%d\t%lf\t%lf\t%lf\n",i,p->op->rest_av[i],parms->op_input->expdata[i],parms->op_input->sigma[i]);

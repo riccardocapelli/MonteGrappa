@@ -284,7 +284,7 @@ void send_struct(int *nback, int iproc, int nprocs, int *nat, int *ntypes, MPI_S
 
 void send_struct_to_proc(int *nback, int iproc,int jproc, int nprocs, int *nat, int *ntypes, MPI_Status astatus)
 {
-        int buffer_size, position,i=0;
+        int buffer_size, position;
         char buffer[buffer_max];
         buffer_size = 3*sizeof(int);
         if(buffer_size>buffer_max)
@@ -388,6 +388,7 @@ struct s_polymer *send_pol_to_proc(int iproc,int jproc, int nprocs, int nback, M
         int i, j, k, l,position,buffer_size;
 
         char buffer[buffer_max];
+        buffer[0] = 0;				// nothing is packed if nback=0, and nothing is sent
         (startp+npol)->nback = nback;
         buffer_size=(sizeof(struct s_back)*nback);
 

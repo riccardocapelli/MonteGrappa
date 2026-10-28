@@ -1424,7 +1424,7 @@ void ResetStStuff(struct s_mc_parms *x,char *fname){
 /********************************************************************
  Parse input file to obtain parameters (D=decimal, F=double, S=string, N=standalone)
  ********************************************************************/
-void ReadParD(char *s, char key[20], int *par)
+void ReadParD(char *s, const char *key, int *par)
 {
 	int l,r;
 
@@ -1438,7 +1438,7 @@ void ReadParD(char *s, char key[20], int *par)
 
 }
 
-void ReadParLLU(char *s, char key[20], unsigned long long *par)
+void ReadParLLU(char *s, const char *key, unsigned long long *par)
 {
 	int l,r;
 
@@ -1453,7 +1453,7 @@ void ReadParLLU(char *s, char key[20], unsigned long long *par)
 }
 
 
-void ReadParL(char *s, char key[20], long *par)
+void ReadParL(char *s, const char *key, long *par)
 {
 	int l,r;
 
@@ -1467,7 +1467,7 @@ void ReadParL(char *s, char key[20], long *par)
 
 }
 
-void ReadParF(char *s, char key[20], double *par)
+void ReadParF(char *s, const char *key, double *par)
 {
 	int l,r;
 
@@ -1480,7 +1480,7 @@ void ReadParF(char *s, char key[20], double *par)
 	}
 }
 
-void ReadParSn(char *s, char *key, char *par, size_t size)
+void ReadParSn(char *s, const char *key, char *par, size_t size)
 {
 	int l,r;
 	char buf[1000];
@@ -1496,7 +1496,7 @@ void ReadParSn(char *s, char *key, char *par, size_t size)
 	}
 }
 
-void ReadParN(char *s, char key[20], int *par)
+void ReadParN(char *s, const char *key, int *par)
 {
 	int l,v;
 

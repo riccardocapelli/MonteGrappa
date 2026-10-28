@@ -70,7 +70,7 @@ int main(int argc, char *argv[])
 	int nprocs,j;
 	time_t rawtime;
 	MPI_Init(&argc,&argv);
-	MPI_Status astatus;
+	MPI_Status astatus = {0};			// passed by value to the functions that send the structures
 	struct s_mpi_parms *mpiparms=malloc(sizeof(struct s_mpi_parms));
 
 	MPI_Comm_size(MPI_COMM_WORLD,&nprocs);

@@ -42,22 +42,19 @@
  *****************************************************************************/
 struct s_polymer *AlloPolymer(int npol, int nback, int nside, int nrot, int natoms, int shell, int noside, FILE *flog)
 {
-	int ires,iside,ipol,size;
+	int ires,iside,ipol;
 	struct s_polymer *p;
 
 	p = (struct s_polymer *) calloc(npol,sizeof(struct s_polymer));
-	size = npol*sizeof(struct s_polymer);
 	if (!p) Error("Cannot allocate polymer");
 
 	for (ipol=0;ipol<npol;++ipol)
 	{
 		(p+ipol)->back = (struct s_back *) calloc(nback,sizeof(struct s_back));
 		if (!(p+ipol)->back) Error("Cannot allocate backbone");
-		size += nback * sizeof(struct s_back);
 
 		(p+ipol)->vback = (struct vector **) calloc(natoms,sizeof(struct vector *));
 		if (!(p+ipol)->vback) Error("Cannot allocate vback");
-		size += nback * sizeof(struct vector *);
 
 		// allocate sidechains
 		for (ires=0;ires<nback;++ires)
@@ -67,21 +64,15 @@ struct s_polymer *AlloPolymer(int npol, int nback, int nside, int nrot, int nato
 			if (!noside)
 			{
 				(((p+ipol)->back)+ires)->side = (struct s_side *) calloc(nside,sizeof(struct s_side));
-				size += nside*sizeof(struct s_side);
 				if (!(((p+ipol)->back)+ires)->side) Error("Cannot alocate  sidechain");
 			}
 			(((p+ipol)->back)+ires)->contacts = (int *) calloc(NCONTMAX,sizeof(int));
-			size += NCONTMAX*sizeof(int);
 			(((p+ipol)->back)+ires)->contacts_p = (int *) calloc(NCONTMAX,sizeof(int));
-			size += NCONTMAX*sizeof(int);
 			(((p+ipol)->back)+ires)->e = (double *) calloc(NCONTMAX,sizeof(double));
-			size += NCONTMAX*sizeof(double);
 			if (shell)
 			{
 				(((p+ipol)->back)+ires)->shell = (int *) calloc(NSHELLMAX,sizeof(int));
-				size += NCONTMAX*sizeof(int);
 				(((p+ipol)->back)+ires)->shell_p = (int *) calloc(NSHELLMAX,sizeof(int));
-				size += NCONTMAX*sizeof(int);
 			}
 			(((p+ipol)->back)+ires)->ncontacts = 0;
 			(((p+ipol)->back)+ires)->nshell = 0;
@@ -93,7 +84,6 @@ struct s_polymer *AlloPolymer(int npol, int nback, int nside, int nrot, int nato
 				for (iside=0;iside<nside;++iside)
 				{
 					(((((p+ipol)->back)+ires)->side)+iside)->rot = (struct s_rotamers *) calloc(nrot,sizeof(struct s_rotamers));
-					size += nrot*sizeof(struct s_rotamers);
 				}
 
 				for (iside=0;iside<natoms;++iside) ((p+ipol)->vback)[iside] = NULL;
@@ -102,8 +92,6 @@ struct s_polymer *AlloPolymer(int npol, int nback, int nside, int nrot, int nato
 
 	}
 
-	if (noside) { nside=0; nrot=0; }
-//	fprintf(stderr,"Allocate polymer structure of size  %lf MB (nchains=%d, nback=%d, nside=%d, nrot=%d)\n",(double)size/1024/1024,npol,nback,nside,nrot);
 
 
 	return p;

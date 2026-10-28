@@ -177,7 +177,9 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
 	if (p->cells) CellsBuild(p,u->rcut,u->boxtype=='p' ? u->lbox : 0.);
 
 	if (update)
+		#ifdef _OPENMP
 		#pragma omp parallel for private(i,j)
+		#endif
 		  for (ci=0;ci<npol;++ci)
 			for (i=0;i<(p+ci)->nback;++i)
                   {
@@ -202,7 +204,9 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
 	}
 	else
 	{
+	#ifdef _OPENMP
 	#pragma omp parallel for private(cj,i,j,tooclose) reduction(+:etot)
+	#endif
 	for (ci=0;ci<npol;++ci)                                     // loops on polymers
             for (cj=ci;cj<npol;++cj)
                   for (i=0;i<(p+ci)->nback;++i)             // loops on backbone atoms of each polymer
@@ -242,7 +246,9 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
 		}
 		else
 		{
+		#ifdef _OPENMP
 		#pragma omp parallel for shared(ebox) private(i) reduction(+:eang,edih,ehfs)
+		#endif
 			for (ci=0;ci<npol;++ci)
 			{
 				for (i=0;i<(p+ci)->nback;++i)
@@ -1063,7 +1069,9 @@ void CountContacts(FILE *fp,struct s_polymer *polymer,struct s_mc_parms *parms,u
 
 void SetTrueShellFlags(struct s_polymer *p,struct s_mc_parms *parms){
  int ip,i;
+ #ifdef _OPENMP
  #pragma omp parallel for
+ #endif
  for(ip=0;ip<parms->npol;++ip)
    for(i=0;i<(p+ip)->nback;++i)
       (((p+ip)->back)+i)->shellflag=true;
@@ -1072,7 +1080,9 @@ void SetTrueShellFlags(struct s_polymer *p,struct s_mc_parms *parms){
 
 void SetFalseShellFlags(struct s_polymer *p,struct s_mc_parms *parms){
  int ip,i;
+ #ifdef _OPENMP
  #pragma omp parallel for
+ #endif
  for(ip=0;ip<parms->npol;++ip)
    for(i=0;i<(p+ip)->nback;++i)
       (((p+ip)->back)+i)->shellflag=false;
@@ -1083,7 +1093,9 @@ void SetFalseShellFlags(struct s_polymer *p,struct s_mc_parms *parms){
 void UpdateShellFlags(struct s_polymer *p,int ip,int ifrom,int ito){
 
   int i;
+  #ifdef _OPENMP
   #pragma omp parallel for
+  #endif
   for(i=ifrom;i<ito;i++)
 	(((p+ip)->back)+i)->shellflag=true;
 
@@ -1202,7 +1214,9 @@ void UpdateShell(struct s_polymer *p, struct s_mc_parms *parms)
 
 
 	//  double loop
+	#ifdef _OPENMP
 	#pragma omp parallel for private(cj,i,j,r2,js,is)
+	#endif
 	for (ci=0;ci<parms->npol;++ci)
 	{
 		for (cj=ci;cj<parms->npol;++cj)

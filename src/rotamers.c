@@ -53,7 +53,7 @@ struct rot_input_s *AlloRotamer(int naa, FILE *flog)
            {
               *(((x+i)->atom)+j) = (struct rot_atom_s *) calloc(ROT_ATMAX,sizeof(struct rot_atom_s));
               size += sizeof(struct rot_atom_s);
-              if (!(*((x+i)->atom)+j)) Error("Cannot allocate rotamers (3)");
+              if (!(*(((x+i)->atom)+j))) Error("Cannot allocate rotamers (3)");
            }
     }
 

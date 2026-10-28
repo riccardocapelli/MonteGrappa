@@ -126,7 +126,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 	t=parms->T[my_rank];
 
 	char fexname[100];
-	sprintf(fexname,"exchange_proc%d.dat",my_rank);			// one file per rank: they would overwrite each other
+	snprintf(fexname,sizeof(fexname),"exchange_proc%d.dat",my_rank);			// one file per rank: they would overwrite each other
 	FILE *fexchange=fopen(fexname,"w");
 	if (!fexchange) Error("Cannot open exchange file");
 	#else
@@ -393,7 +393,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 
 			//fprintf(stderr,"DEBUG: ok=%d\tTotal Energy %lf\n",ok,TotalEnergy(p,pot,parms,parms->npol,0,parms->nosidechains,parms->debug,my_rank));
 			//fpirintf(stderr,"DEBUG: \t\t\tetot=%lf\n",p->etot);
-			sprintf(p->title,"step %llu\tE=%lf",istep,p->etot);
+			snprintf(p->title,sizeof(p->title),"step %llu\tE=%lf",istep,p->etot);
 			PrintTrajectory(ftrj,p,parms,pot);
 			fflush(ftrj);
 			iprinttrj = 0;
@@ -445,7 +445,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			{
 				if ((parms->p)->st_ttarget_harvest==1 && st_iprint>=(parms->p)->st_printpdb && t <= (parms->p)->st_ttarget + EPSILON && (parms->p)->st_nm==1)
                 {
-					sprintf(p->title,"step %llu\tE=%lf",istep,p->etot);
+					snprintf(p->title,sizeof(p->title),"step %llu\tE=%lf",istep,p->etot);
 					PrintPDBStream(p,parms->npol,(parms->p)->st_pdbf);
 					nconf++;
 
@@ -657,7 +657,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 	}
 
 	fprintf(stderr,"\n");
-	sprintf(p->title,"final");
+	snprintf(p->title,sizeof(p->title),"final");
 	PrintTrajectory(ftrj,p,parms,pot);
 
 
@@ -1692,8 +1692,9 @@ int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potenti
 
 
 
-void SoftExit()
+void SoftExit(int sig)
 {
+	(void) sig;
 	softexit = 1;
 }
 

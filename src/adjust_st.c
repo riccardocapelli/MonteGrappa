@@ -1072,31 +1072,31 @@ int CheckHistogramsAdjust3(int *counts, double *temp, double *g, int *ntemp, int
 			}
 
 
-			for (i=0;i<nholes;++i)
+		for (i=0;i<nholes;++i)
+		{
+			temp[*ntemp] = (temp[hole[i]-1] + temp[hole[i]])/2.;
+
+			g[*ntemp] = ExtrapolateLinear(temp[*ntemp],temp[hole[i]-1],g[hole[i]-1],temp[hole[i]],g[hole[i]]);
+
+			(*ntemp) ++;
+			if (*ntemp>ntmax)
 			{
-				temp[*ntemp] = (temp[hole[i]-1] + temp[hole[i]])/2.;
-
-				g[*ntemp] = ExtrapolateLinear(temp[*ntemp],temp[hole[i]-1],g[hole[i]-1],temp[hole[i]],g[hole[i]]);
-
-				(*ntemp) ++;
-				if (*ntemp>ntmax)
-				{
-					fprintf(stderr,"It cannot add more temperatures because ntmax is reached (ntemp=%d)\n.ENDING SIMULATION\n",*ntemp);
-					exit(0);
-				}
-				if (debug>0) fprintf(stderr,"Adding new temperature %lf (g=%lf)\n",temp[(*ntemp)-1],g[(*ntemp)-1]);
+				fprintf(stderr,"It cannot add more temperatures because ntmax is reached (ntemp=%d)\n.ENDING SIMULATION\n",*ntemp);
+				exit(0);
 			}
+			if (debug>0) fprintf(stderr,"Adding new temperature %lf (g=%lf)\n",temp[(*ntemp)-1],g[(*ntemp)-1]);
+		}
 
-			*ntemp = OrderTemperatures(*ntemp,temp,g,prob_up,prob_down,h,nbin,debug,counts);
+		*ntemp = OrderTemperatures(*ntemp,temp,g,prob_up,prob_down,h,nbin,debug,counts);
 
-			if (debug>0)
-			{
-				fprintf(stderr,"Retrying with new temperatures:\n");
-				for (j=0;j<*ntemp;++j) fprintf(stderr,"%lf (g=%lf)\t",temp[j],g[j]);
-				fprintf(stderr,"\nBACK TO SIMULATION\n\n");
-			}
+		if (debug>0)
+		{
+			fprintf(stderr,"Retrying with new temperatures:\n");
+			for (j=0;j<*ntemp;++j) fprintf(stderr,"%lf (g=%lf)\t",temp[j],g[j]);
+			fprintf(stderr,"\nBACK TO SIMULATION\n\n");
+		}
 
-			return 0;
+		return 0;
 	}
 
 	return 1;

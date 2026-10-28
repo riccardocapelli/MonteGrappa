@@ -36,11 +36,11 @@ void ReadHistogram(struct histo_s *h, int itemp, struct param_s *p)
 	// which columns
 	strcpy(form,"");
 	for (i=0;i<p->ncol1[itemp]-1;i++)
-	  sprintf(form,"%s%%*s ",form);
-	sprintf(form,"%s%%lf ",form);
+	  strcat(form,"%*s ");
+	strcat(form,"%lf ");
 	for (i=p->ncol1[itemp];i<p->ncol2[itemp]-1;i++)
-	  sprintf(form,"%s%%*s ",form);
-	sprintf(form,"%s%%lf",form);
+	  strcat(form,"%*s ");
+	strcat(form,"%lf");
 	if (p->debug>0)
 		fprintf(stderr," debug: format %s\n",form);
 
@@ -100,8 +100,8 @@ int ReadData(struct param_s *p, double *d, int itemp)
 	// format to be read
 	strcpy(form,"");
 	for (i=0;i<p->ncol1[itemp]-1;i++)
-	  sprintf(form,"%s%%*s ",form);
-	sprintf(form,"%s%%lf",form);
+	  strcat(form,"%*s ");
+	strcat(form,"%lf");
 
 	if (p->debug>0)
 		fprintf(stderr,"debug: format %s\n",form);
@@ -126,7 +126,7 @@ int ReadData(struct param_s *p, double *d, int itemp)
  *****************************************************************************/
 void MakeHistogram(struct histo_s *h, double *d, int itemp, int ndata, struct param_s *p)
 {
-	int i,ibin,z=0;
+	int i,ibin;
 	double min=999999.9,max=-9999999.9,ebin=1.;
 
 	// find min and max
@@ -150,7 +150,6 @@ void MakeHistogram(struct histo_s *h, double *d, int itemp, int ndata, struct pa
 				Error("NBINMAX too small");
 			}
 		(h+itemp)->histo[ibin] ++;
-		z++;
 	}
 
 
@@ -206,7 +205,7 @@ void Test(struct param_s *p)
 
 	for (it=0;it<p->ntemp;it++)
 	{
-		sprintf(nfile,"test_%d.dat",it);
+		snprintf(nfile,sizeof(nfile),"test_%d.dat",it);
 		fout = fopen(nfile,"w");
 		em=0; z=0;
 		for (ie=-100;ie<100;ie++)

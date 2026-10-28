@@ -189,13 +189,13 @@ void SetLookbackTables(struct s_polymer *p, int nc);
 void PrintVector(FILE *fp, char c[], struct vector x);
 void PrintAngles(FILE *fp, char c[], struct angles x);
 void PrintStructure(struct s_polymer *p, int npol, FILE *fp, int shell);
-void ReadParD(char *s, char key[20], int *par);
-void ReadParL(char *s, char key[20], long *par);
-void ReadParF(char *s, char key[20], double *par);
-void ReadParSn(char *s, char *key, char *par, size_t size);
+void ReadParD(char *s, const char *key, int *par);
+void ReadParL(char *s, const char *key, long *par);
+void ReadParF(char *s, const char *key, double *par);
+void ReadParSn(char *s, const char *key, char *par, size_t size);
 #define ReadParS(s,key,par) ReadParSn((s),(key),(par),sizeof(par))		// par must be an array
-void ReadParN(char *s, char key[20], int *par);
-void ReadParLLU(char *s, char key[20], unsigned long long *par);
+void ReadParN(char *s, const char *key, int *par);
+void ReadParLLU(char *s, const char *key, unsigned long long *par);
 void ComputeIAPDB(struct s_polymer *p,struct s_mc_parms *mc_parms);
 void PrintPotential(struct s_potential *u, char *eoutfile, int nat, int ntypes, int noangpot, int nodihpot, int hb, int nohfields);
 
@@ -231,7 +231,7 @@ int MoveSidechain(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms 
 void UpdateMonomerRange(struct s_polymer *from, struct s_polymer *to, int wfrom, int wto, int p, int shell);
 void UpdateChainRanges(struct s_polymer *from, struct s_polymer *to, int nr, int *ch, int *wfrom, int *wto);
 int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potential *pot, int nmul, struct s_mc_parms *parms, double t);
-void SoftExit();
+void SoftExit(int sig);
 int MoveMultipleFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,
 		unsigned long long istep, int debug, double t);
 int MoveCoM(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,

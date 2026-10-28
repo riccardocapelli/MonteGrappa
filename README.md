@@ -139,6 +139,11 @@ Speed:
    atoms once and shifts the atoms of a residue to the periodic image once,
    with the same arithmetic: in all 1PGB is 30% faster than before these
    changes, with the same trajectory.
+ - Pairs of residues are skipped when the spheres containing their atoms
+   (centred in their mean position) are farther than the interaction
+   range: most of the pairs that passed the old test, on the backbone atoms
+   plus the extents of the sidechains, had no atom in range. 1PGB: 20%
+   faster again, same trajectory.
 
 Restart:
  - A checkpoint is written by default every 10 minutes (keyword

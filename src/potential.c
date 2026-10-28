@@ -524,10 +524,10 @@ double EnergyMonomer(struct s_polymer *p, struct s_potential *u, int i, int ci, 
 }
 
 /********************************************************************
- Residues g0..g1-1 of the compact copy of the positions that pass the
- test at the beginning of EnergyPair with the residue at (xi,yi,zi),
- of reach ri: appended to c->cand from position nhit (branchless, in
- their order). Returns the new number of candidates.
+ Residues g0..g1-1 of the compact copy whose sphere (CellsSphere) is
+ within reach of the sphere of centre (xi,yi,zi) and radius plus range ri
+ (the others cannot interact): appended to c->cand from position nhit
+ (branchless, in their order). Returns the new number of candidates.
  ********************************************************************/
 static inline int CandidatesRange(struct s_cells *c, int g0, int g1, double xi, double yi, double zi, double ri, struct s_potential *u, int nhit)
 {
@@ -539,9 +539,9 @@ static inline int CandidatesRange(struct s_cells *c, int g0, int g1, double xi, 
 		double box=u->lbox;
 		for (g=g0;g<g1;++g)
 		{
-			dx = c->x[g]-xi; dy = c->y[g]-yi; dz = c->z[g]-zi;
+			dx = c->sx[g]-xi; dy = c->sy[g]-yi; dz = c->sz[g]-zi;
 			dx -= box*round(dx/box); dy -= box*round(dy/box); dz -= box*round(dz/box);
-			rmax = ri + c->ext[g];
+			rmax = ri + c->srad[g];
 			c->cand[nhit] = g;
 			nhit += ( dx*dx + dy*dy + dz*dz <= rmax*rmax );
 		}
@@ -549,8 +549,8 @@ static inline int CandidatesRange(struct s_cells *c, int g0, int g1, double xi, 
 	else
 		for (g=g0;g<g1;++g)
 		{
-			dx = c->x[g]-xi; dy = c->y[g]-yi; dz = c->z[g]-zi;
-			rmax = ri + c->ext[g];
+			dx = c->sx[g]-xi; dy = c->sy[g]-yi; dz = c->sz[g]-zi;
+			rmax = ri + c->srad[g];
 			c->cand[nhit] = g;
 			nhit += ( dx*dx + dy*dy + dz*dz <= rmax*rmax );
 		}
@@ -604,14 +604,13 @@ double EnergyMonomerRangeRigid(struct s_polymer *p, struct s_potential *u, int f
 	// if not shell, with cell list
 	if (shell == 0 && p->cells && p->cells->active)
 	{
-		struct s_back *bi,*bj;
 		struct s_cells *c = p->cells;
-		double rmax;
-		int ncand,k;
+		double rmax,dx,dy,dz;
+		int ncand,k,g,gi;
 
 		for (i=from;i<=to;++i)
 		{
-			bi = ((p+ip)->back)+i;
+			gi = c->offset[ip]+i;
 			ncand = CellsCandidates(p,ip,i);
 			if (ncand<0)						// too many: all residues, in the same order
 			{
@@ -620,16 +619,13 @@ double EnergyMonomerRangeRigid(struct s_polymer *p, struct s_potential *u, int f
 			}
 			for (k=0;k<ncand;++k)
 			{
-				cj = c->chain[c->cand[k]];
-				j = c->res[c->cand[k]];
-				bj = ((p+cj)->back)+j;
-				rmax = u->rcut + bi->ext + bj->ext;
-				if (c->box > 0)
-				{
-					if ( Dist2S(bi->pos,bj->pos,ImageShift(bi->pos,bj->pos,c->box)) > rmax*rmax ) continue;
-				}
-				else if ( (bi->pos.x-bj->pos.x)*(bi->pos.x-bj->pos.x) + (bi->pos.y-bj->pos.y)*(bi->pos.y-bj->pos.y)
-					+ (bi->pos.z-bj->pos.z)*(bi->pos.z-bj->pos.z) > rmax*rmax ) continue;
+				g = c->cand[k];
+				cj = c->chain[g];
+				j = c->res[g];
+				rmax = u->rcut + c->srad[gi] + c->srad[g];				// spheres of the residues (see CellsSphere)
+				dx = c->sx[g]-c->sx[gi]; dy = c->sy[g]-c->sy[gi]; dz = c->sz[g]-c->sz[gi];
+				if (c->box > 0) { dx -= c->box*round(dx/c->box); dy -= c->box*round(dy/c->box); dz -= c->box*round(dz/c->box); }
+				if ( dx*dx + dy*dy + dz*dz > rmax*rmax ) continue;
 
 				if ( ( ip!=cj || j<from || j>to || i<j ) && !( rig && ip==cj && rig[i] && rig[j] ) )	// j in [from,to] of the same chain: i<j to count once; skip rigid pairs
 				{
@@ -657,9 +653,9 @@ double EnergyMonomerRangeRigid(struct s_polymer *p, struct s_potential *u, int f
 		for (i=from;i<=to;++i)
 		{
 			gi = c->offset[ip]+i;
-			xi = c->x[gi]; yi = c->y[gi]; zi = c->z[gi]; ri = u->rcut + c->ext[gi];
+			xi = c->sx[gi]; yi = c->sy[gi]; zi = c->sz[gi]; ri = u->rcut + c->srad[gi];
 
-			// same test as at the beginning of EnergyPair; branchless, the hits keep their order
+			// spheres of the residues (tighter than the test at the beginning of EnergyPair); branchless, the hits keep their order
 			// (a rigid residue skips the rigid ones, whose pairs are kept)
 			if (rig && rig[i])
 			{

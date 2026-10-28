@@ -353,6 +353,7 @@ void CellsAlloc(struct s_polymer *p, struct s_polymer *topo, int npol, int force
 void CellsFree(struct s_polymer *p);
 void CellsBuild(struct s_polymer *p, double rcut, double box);
 void CellsUpdateRange(struct s_polymer *p, int ic, int from, int to);
+void CellsUpdateSphere(struct s_polymer *p, int ic, int i);
 int CellsCandidates(struct s_polymer *p, int ic, int i);
 int CellsCheck(struct s_polymer *p);
 int FindClusters(struct s_polymer *p, int npol, int *member, int *start, int *cluster_of);

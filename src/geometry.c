@@ -597,6 +597,7 @@ int AddSidechain(struct s_polymer *p, int istart, int istop, int ch)
 		if (p->cells)
 		{
 			p->cells->ext[p->cells->offset[ch]+i] = (((p+ch)->back)+i)->ext;
+			CellsUpdateSphere(p,ch,i);
 			if (p->cells->active && (((p+ch)->back)+i)->ext > p->cells->extcap) p->cells->dirty = 1;
 		}
 	}

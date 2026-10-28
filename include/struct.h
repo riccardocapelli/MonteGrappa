@@ -441,6 +441,7 @@ struct s_cells
 	int *next,*prev,*bucket;	// linked lists, bucket of each residue
 	int *cand;			// candidates returned by CellsCandidates
 	double *x,*y,*z,*ext;		// compact copy of backbone positions and sidechain extents (always kept)
+	double *sx,*sy,*sz,*srad;	// sphere containing all the atoms of each residue (centre and radius, at most ext)
 	int dirty;			// 1 = to be rebuilt before use
 	int forced;			// 1 = always used (keyword cells 1)
 	int allowed;			// 0 = never used (keyword cells 0, or small system)

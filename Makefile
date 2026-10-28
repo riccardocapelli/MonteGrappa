@@ -75,7 +75,7 @@ else
 endif
 GRAPPINO_SRC = geometry io memory misc potential energy pdb rotamers grappino optimizepot cells mginfo
 GRAPPINO_OBJ = $(GRAPPINO_SRC:%=$(GRAPPINO_DIR)/%.o)
-MGP2PDB_SRC  = mgp2pdb io memory geometry misc
+MGP2PDB_SRC  = mgp2pdb io memory geometry misc cells
 MGP2PDB_OBJ  = $(MGP2PDB_SRC:%=obj/TOOLS/%.o)
 
 .PHONY: montegrappa grappino mgp2pdb dcd2pdb mhistogram all clean cleanobj check check-asan check-stat FORCE

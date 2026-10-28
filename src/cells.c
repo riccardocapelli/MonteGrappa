@@ -62,6 +62,31 @@
 #define CELLS_EXT_MARGIN 0.5		// slack added to the largest sidechain extent (A)
 
 /*****************************************************************************
+ Sphere containing all the atoms of residue b (global index g): centred in
+ their mean position, or in the backbone atom with radius ext if that is
+ not larger. Two residues farther than the sum of their radii plus the
+ interaction range cannot interact; for a residue with one sidechain atom
+ the radius is half its extent.
+ *****************************************************************************/
+static inline void CellsSphere(struct s_cells *c, int g, struct s_back *b)
+{
+	double cx=b->pos.x,cy=b->pos.y,cz=b->pos.z,r2,r2max,rad;
+	int is;
+
+	for (is=0;is<b->nside;++is) { cx += b->side[is].pos.x; cy += b->side[is].pos.y; cz += b->side[is].pos.z; }
+	cx /= b->nside+1; cy /= b->nside+1; cz /= b->nside+1;
+	r2max = (b->pos.x-cx)*(b->pos.x-cx) + (b->pos.y-cy)*(b->pos.y-cy) + (b->pos.z-cz)*(b->pos.z-cz);
+	for (is=0;is<b->nside;++is)
+	{
+		r2 = (b->side[is].pos.x-cx)*(b->side[is].pos.x-cx) + (b->side[is].pos.y-cy)*(b->side[is].pos.y-cy) + (b->side[is].pos.z-cz)*(b->side[is].pos.z-cz);
+		if (r2 > r2max) r2max = r2;
+	}
+	rad = sqrt(r2max)*(1.+1e-12) + 1e-12;			// rounding of the square root and of the sums
+	if (rad >= b->ext) { cx = b->pos.x; cy = b->pos.y; cz = b->pos.z; rad = b->ext; }
+	c->sx[g] = cx; c->sy[g] = cy; c->sz[g] = cz; c->srad[g] = rad;
+}
+
+/*****************************************************************************
  Allocate the cell list of system p (attached to p->cells), whose npol chains
  have the same number of residues as those of topo
  *****************************************************************************/
@@ -94,8 +119,12 @@ void CellsAlloc(struct s_polymer *p, struct s_polymer *topo, int npol, int force
 	c->y = (double *) malloc(c->nres*sizeof(double));
 	c->z = (double *) malloc(c->nres*sizeof(double));
 	c->ext = (double *) malloc(c->nres*sizeof(double));
+	c->sx = (double *) malloc(c->nres*sizeof(double));
+	c->sy = (double *) malloc(c->nres*sizeof(double));
+	c->sz = (double *) malloc(c->nres*sizeof(double));
+	c->srad = (double *) malloc(c->nres*sizeof(double));
 	if (!c->head || !c->next || !c->prev || !c->bucket || !c->chain || !c->res || !c->cand) Error("Cannot allocate cell list");
-	if (!c->x || !c->y || !c->z || !c->ext) Error("Cannot allocate cell list");
+	if (!c->x || !c->y || !c->z || !c->ext || !c->sx || !c->sy || !c->sz || !c->srad) Error("Cannot allocate cell list");
 
 	for (ic=0;ic<npol;++ic)
 		for (i=0;i<(topo+ic)->nback;++i)
@@ -120,6 +149,7 @@ void CellsFree(struct s_polymer *p)
 	free(c->offset); free(c->head); free(c->next); free(c->prev);
 	free(c->bucket); free(c->chain); free(c->res); free(c->cand);
 	free(c->x); free(c->y); free(c->z); free(c->ext);
+	free(c->sx); free(c->sy); free(c->sz); free(c->srad);
 	free(c);
 	p->cells = NULL;
 }
@@ -171,6 +201,7 @@ void CellsBuild(struct s_polymer *p, double rcut, double box)
 	{
 		b = ((p+c->chain[g])->back)+c->res[g];
 		c->x[g] = b->pos.x; c->y[g] = b->pos.y; c->z[g] = b->pos.z; c->ext[g] = b->ext;
+		CellsSphere(c,g,b);
 		if (b->ext > extmax) extmax = b->ext;
 		v[0] = b->pos.x; v[1] = b->pos.y; v[2] = b->pos.z;
 		for (d=0;d<3;++d)
@@ -217,6 +248,14 @@ void CellsBuild(struct s_polymer *p, double rcut, double box)
 }
 
 /*****************************************************************************
+ Sphere of residue i of chain ic after its sidechain changed (AddSidechain)
+ *****************************************************************************/
+void CellsUpdateSphere(struct s_polymer *p, int ic, int i)
+{
+	CellsSphere(p->cells,p->cells->offset[ic]+i,((p+ic)->back)+i);
+}
+
+/*****************************************************************************
  Move residues [from,to] of chain ic to the cells of their current position
  *****************************************************************************/
 void CellsUpdateRange(struct s_polymer *p, int ic, int from, int to)
@@ -234,6 +273,7 @@ void CellsUpdateRange(struct s_polymer *p, int ic, int from, int to)
 		b = ((p+ic)->back)+i;
 		g = c->offset[ic]+i;
 		c->x[g] = b->pos.x; c->y[g] = b->pos.y; c->z[g] = b->pos.z; c->ext[g] = b->ext;
+		CellsSphere(c,g,b);
 		if (!c->active) continue;					// only the compact copy
 		if (b->ext > c->extcap) { c->dirty = 1; return; }
 		h = CellBucket(c,CellCoord(b->pos.x,c->invL),CellCoord(b->pos.y,c->invL),CellCoord(b->pos.z,c->invL));
@@ -293,12 +333,16 @@ int CellsCheck(struct s_polymer *p)
 	struct s_cells *c = p->cells;
 	struct s_back *b;
 	int g,h,nbad=0;
+	double sx,sy,sz,srad;
 
 	if (!c || c->dirty) return 0;
 	for (g=0;g<c->nres;++g)
 	{
 		b = ((p+c->chain[g])->back)+c->res[g];
 		if (c->x[g]!=b->pos.x || c->y[g]!=b->pos.y || c->z[g]!=b->pos.z || c->ext[g]!=b->ext) { nbad++; continue; }
+		sx = c->sx[g]; sy = c->sy[g]; sz = c->sz[g]; srad = c->srad[g];
+		CellsSphere(c,g,b);
+		if (sx!=c->sx[g] || sy!=c->sy[g] || sz!=c->sz[g] || srad!=c->srad[g]) { nbad++; continue; }
 		if (c->active)
 		{
 			h = CellBucket(c,CellCoord(b->pos.x,c->invL),CellCoord(b->pos.y,c->invL),CellCoord(b->pos.z,c->invL));

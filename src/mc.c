@@ -144,8 +144,10 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 	t=parms->T[my_rank];
 
 	char fexname[100];
-	snprintf(fexname,sizeof(fexname),"exchange_proc%d.dat",my_rank);			// one file per rank: they would overwrite each other
-	FILE *fexchange=fopen(fexname,"w");
+	// one file per rank (they would overwrite each other) and per run, as the energy files
+	if (parms->nrun>1) snprintf(fexname,sizeof(fexname),"exchange_run%d_proc%d.dat",irun,my_rank);
+	else snprintf(fexname,sizeof(fexname),"exchange_proc%d.dat",my_rank);
+	FILE *fexchange=fopen(fexname,chk->restart ? "a" : "w");		// a restart continues the file of the run
 	if (!fexchange) Error("Cannot open exchange file");
 	#else
 	int my_rank=0;

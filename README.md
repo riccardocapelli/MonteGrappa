@@ -276,4 +276,6 @@ Output:
  - The coordinates in the pdb trajectories are in columns 31-54, as in the
    pdb format (they were one column to the left).
  - With MPI, each replica writes its exchanges to exchange_proc<rank>.dat
-   and the acceptance of exchanges is printed at the end.
+   (exchange_run<run>_proc<rank>.dat with more than one run, as the energy
+   files, and a restart appends to it) and the acceptance of exchanges is
+   printed at the end.

@@ -570,10 +570,20 @@ group_mpi_multi() {
 	( cd $d && mpirun4 $MPI fragment.pol fragment.pot run.par > stdout.log 2> stderr.log )
 	rm -rf $d.b; cp -r $d $d.b
 	for r in 0 1 2 3; do awk '$1<3000' $d/energy_proc$r.ene > $d.b/energy_proc$r.ene; rm -f $d.b/last_proc$r.pol; done
+	for r in 0 1 2; do awk '$2<3000' $d/exchange_proc$r.dat > $d.b/exchange_proc$r.dat; done
 	( cd $d.b && mpirun4 $MPI checkpoint fragment.pot run.par > stdout.log 2> stderr.log )
 	ok=1
 	for r in 0 1 2 3; do cmp -s $d/energy_proc$r.ene $d.b/energy_proc$r.ene && cmp -s $d/last_proc$r.pol $d.b/last_proc$r.pol || ok=0; done
+	for r in 0 1 2; do cmp -s $d/exchange_proc$r.dat $d.b/exchange_proc$r.dat || ok=0; done
 	if [ $ok = 1 ]; then pass "pt restart (4 ranks)"; else fail "pt restart (4 ranks)" "files differ (see $d.b)"; fi
+
+	# two runs: the exchanges of each run in their own file
+	d=$WORK/pt_nrun; mkdir -p $d; cp $DATA/fragment.pol $DATA/fragment.pot $d/
+	par $d/run.par "${PT_PAR}seed 9\nnstep 20000\nnprinte 1000\nnrun 2\n"
+	( cd $d && mpirun4 $MPI fragment.pol fragment.pot run.par > stdout.log 2> stderr.log )
+	ok=1
+	for r in 0 1 2; do for k in 0 1; do awk '{ if ($2>20000 || $2<l) bad=1; l=$2; n++ } END { exit (bad || n==0) }' $d/exchange_run${k}_proc$r.dat 2>/dev/null || ok=0; done; done
+	if [ $ok = 1 ]; then pass "pt exchanges in one file per run"; else fail "pt exchanges in one file per run" "see $d"; fi
 
 	# the lowest-temperature replica samples the canonical distribution at T=0.6
 	for seed in 11 22 33 44; do

@@ -337,6 +337,8 @@ struct s_mc_parms
 	int nodihpot;		//0=there is a potential on dihedrals, 1; there is not
 	int nohfields;		//0=there is a H fields potential, 1: there is not
 	int echeck;		//1=check incremental energy against TotalEnergy after every move (slow, for debugging)
+	int **sidelo,**sidehi;	// the sidechain of residue i of chain ic is built from residues sidelo[ic][i]..sidehi[ic][i] (SetSidechainDependencies)
+	int sidereach;		// largest distance of those residues from i
 	int rigid;		// residues farther than this from the end of the part rotated by a pivot move rigidly with it
 				// (their sidechains and hydrogen bonds included): their pairs keep their energy (-1: never used)
 	int cells;		//cell list for the energy: 1=on, 0=off, -1=automatic (on for large systems)
@@ -353,6 +355,8 @@ struct s_mc_parms
 	double dx_clm;		//displacement of cluster
 	double avb_rin;		// aggregation-volume-bias move: radius of the bonded region around a chain
 	double avb_pin;		// ... and probability of moving a chain into it
+	int cbmc_n;		// configurational-bias regrowth (keyword cbmc): largest number of backbone atoms regrown at an end (nmax_cbmc)
+	int cbmc_k;		// ... and number of trials for each of their dihedrals (ntrial_cbmc)
 	double dtheta;
 	double r_cloose;	// constrains in the bond distance,
 	double a_cloose;	// angles

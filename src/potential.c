@@ -951,6 +951,83 @@ void ResetContactsMonomerOutside(struct s_polymer *p, int i, int ci, const char 
 }
 
 /********************************************************************
+ The residues whose backbone or sidechain atoms the rotamers of the
+ sidechain of each residue are built from (AddSidechain): a move that
+ changes the position of one of them must rebuild that sidechain too
+ (see SideRange). Usually the residue itself and its neighbours; the
+ last oxygen of a chain refers to the N two residues before.
+ ********************************************************************/
+void SetSidechainDependencies(struct s_polymer *p, struct s_mc_parms *parms, int nat)
+{
+	int ic,i,is,ir,k,ref[3],*owner,nwarn=0;
+	struct s_back *b;
+	struct s_rotamers *r;
+
+	owner = (int *) malloc(nat*sizeof(int));
+	parms->sidelo = (int **) malloc(parms->npol*sizeof(int *));
+	parms->sidehi = (int **) malloc(parms->npol*sizeof(int *));
+	if (!owner || !parms->sidelo || !parms->sidehi) Error("Cannot allocate in SetSidechainDependencies");
+	parms->sidereach = 0;
+	for (ic=0;ic<parms->npol;++ic)
+	{
+		parms->sidelo[ic] = (int *) malloc((p+ic)->nback*sizeof(int));
+		parms->sidehi[ic] = (int *) malloc((p+ic)->nback*sizeof(int));
+		if (!parms->sidelo[ic] || !parms->sidehi[ic]) Error("Cannot allocate in SetSidechainDependencies");
+		for (k=0;k<nat;++k) owner[k] = -1;
+		for (i=0;i<(p+ic)->nback;++i)
+		{
+			b = ((p+ic)->back)+i;
+			if (b->ia>=0 && b->ia<nat) owner[b->ia] = i;
+			for (is=0;is<b->nside;++is)
+				if (b->side[is].ia>=0 && b->side[is].ia<nat) owner[b->side[is].ia] = i;
+		}
+		for (i=0;i<(p+ic)->nback;++i)
+		{
+			b = ((p+ic)->back)+i;
+			parms->sidelo[ic][i] = parms->sidehi[ic][i] = i;
+			for (is=0;is<b->nside;++is)
+				for (ir=0;ir<b->nrot;++ir)
+				{
+					r = b->side[is].rot+ir;
+					ref[0] = r->b1; ref[1] = r->b2; ref[2] = r->b3;
+					for (k=0;k<3;++k)
+					{
+						if (ref[k]<0 || ref[k]>=nat || owner[ref[k]]<0)
+							Error("A rotamer refers to an atom which is not in its chain");
+						if (owner[ref[k]] != i && (((p+ic)->back)+owner[ref[k]])->ia != ref[k] && !nwarn++)
+							fprintf(stderr,"WARNING: a rotamer of residue %d refers to a sidechain atom of residue %d: a change of rotamer\n"
+								"         of the latter does not rebuild it\n",i,owner[ref[k]]);
+						if (owner[ref[k]] < parms->sidelo[ic][i]) parms->sidelo[ic][i] = owner[ref[k]];
+						if (owner[ref[k]] > parms->sidehi[ic][i]) parms->sidehi[ic][i] = owner[ref[k]];
+					}
+				}
+			if (i-parms->sidelo[ic][i] > parms->sidereach) parms->sidereach = i-parms->sidelo[ic][i];
+			if (parms->sidehi[ic][i]-i > parms->sidereach) parms->sidereach = parms->sidehi[ic][i]-i;
+		}
+	}
+	free(owner);
+}
+
+/********************************************************************
+ Extend the range [a,b] of residues of chain ip (of nback residues) that
+ a move rebuilds and recomputes, to all the residues whose sidechain is
+ built from residues in [m0,m1], those whose backbone the move changed
+ ********************************************************************/
+void SideRange(struct s_mc_parms *parms, int ip, int nback, int m0, int m1, int *a, int *b)
+{
+	int k,k0=m0-parms->sidereach,k1=m1+parms->sidereach;
+
+	if (k0<0) k0 = 0;
+	if (k1>nback-1) k1 = nback-1;
+	for (k=k0;k<=k1;++k)
+		if (parms->sidelo[ip][k] <= m1 && parms->sidehi[ip][k] >= m0)
+		{
+			if (k < *a) *a = k;
+			if (k > *b) *b = k;
+		}
+}
+
+/********************************************************************
  How far (in backbone units) the positions that the energy of a unit
  depends on can be from it: the reference atoms of the rotamers of its
  sidechain and, with hydrogen bonds, the atoms preceding its donors and

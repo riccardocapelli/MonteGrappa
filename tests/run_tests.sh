@@ -23,7 +23,8 @@
 #               sample the same mean energy as plain runs at that temperature
 #   stat        (slow, not in the default) detailed balance: the BGS local move
 #               must sample the same mean energy as pivot moves, and so must
-#               interacting chains with and without the avbmc move
+#               interacting chains with and without the avbmc move, and chains
+#               with and without the cbmc regrowth of their ends
 #
 # options
 #   --asan              use bin/montegrappa_asan and fail on sanitizer reports
@@ -195,7 +196,7 @@ group_regression() {
 }
 
 ######################################################################
-MOVES="flip pivot mpivot sidechain lpivot mflip movecom movebias moverot comcluster rotcluster backrub backsiderub"
+MOVES="flip pivot mpivot sidechain lpivot mflip movecom movebias moverot comcluster rotcluster backrub backsiderub cbmc"
 
 # system|pol|pot|header
 ECHECK_SYSTEMS="
@@ -424,6 +425,31 @@ group_stat() {
 	cat $WORK/stat_summary | sed 's/^/        /'
 	if awk 'NR==1{m1=$2;s1=$3} NR==2{m2=$2;s2=$3} END{d=m1-m2; if(d<0)d=-d; exit !(d < 3*sqrt(s1*s1+s2*s2))}' $WORK/stat_summary
 	then pass "BGS vs pivot mean energy"; else fail "BGS vs pivot mean energy" "difference above 3 sigma"; fi
+
+	# configurational-bias regrowth of the ends, added to the same moves: the Go fragment at T=1.2 and polyalanine
+	# (sidechains, dihedral potential, peptide bonds that cannot rotate) must keep their mean energy
+	local sys pol pot hdr ns ref
+	for sys in frag ala; do
+		case $sys in
+			frag) pol=fragment.pol; pot=fragment.pot; hdr="nchains 1\nTemp 1.2\n"; ns=2000000; ref="pivot 1\nmpivot 1\n" ;;
+			ala) pol=polyala.pol; pot=polyala.pot; hdr="nchains 1\nTemp 1.0\n"; ns=4000000; ref="pivot 1\nmpivot 1\nflip 1\n" ;;
+		esac
+		for setup in ref cbmc; do
+			for seed in 11 22 33 44; do
+				mv="$ref"; [ $setup = cbmc ] && mv="${ref}cbmc 1\nnmax_cbmc 6\n"
+				( mg stat_cbmc_${sys}_${setup}_$seed $pol $pot "${hdr}seed $seed\nnstep $ns\n${mv}nprinttrj 100000000\nnprinte 100\nnprintlog 100000000\n" ) &
+			done
+		done
+		wait
+		for setup in ref cbmc; do
+			for seed in 11 22 33 44; do
+				awk '{n++; e[n]=$2} END{s=0; for(i=int(n/2)+1;i<=n;i++) s+=e[i]; print s/(n-int(n/2))}' $WORK/stat_cbmc_${sys}_${setup}_$seed/energy.ene
+			done | awk -v s=$setup '{m+=$1; m2+=$1*$1; n++} END{mu=m/n; printf "%s %f %f\n", s, mu, sqrt((m2/n-mu*mu)/(n-1))}'
+		done > $WORK/stat_cbmc_${sys}_summary
+		sed 's/^/        /' $WORK/stat_cbmc_${sys}_summary
+		if awk 'NR==1{m1=$2;s1=$3} NR==2{m2=$2;s2=$3} END{d=m1-m2; if(d<0)d=-d; exit !(d < 3*sqrt(s1*s1+s2*s2))}' $WORK/stat_cbmc_${sys}_summary
+		then pass "cbmc mean energy ($sys)"; else fail "cbmc mean energy ($sys)" "difference above 3 sigma"; fi
+	done
 
 	# three interacting rigid chains in a periodic box: whole-chain moves with and without avbmc
 	for setup in ref avb; do

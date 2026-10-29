@@ -240,6 +240,20 @@ New keywords of the parameter file:
                    larger than 2*avb_rin.
    avb_rin R       radius (A) of the bonded region (required)
    avb_pin P       probability of a move into the bonded region (default 0.5)
+ - cbmc N          configurational-bias regrowth of the ends of the chains
+                   (Siepmann and Frenkel, Mol. Phys. 75, 59 (1992)), frequency
+                   as the other moves: the last n backbone atoms of one end
+                   (n random up to nmax_cbmc) are grown again one at a time,
+                   with their bond lengths and angles; the dihedral of each one
+                   is chosen among ntrial_cbmc random trials with the Boltzmann
+                   weight of its backbone pairs and dihedral potential, and the
+                   move is accepted with the ratio of the Rosenbluth weights of
+                   the new and old conformations, corrected for the rest of the
+                   energy. Dihedrals that cannot rotate (move 0) are kept. It
+                   rearranges the ends also in compact states, where pivot
+                   moves are rejected by overlaps.
+   nmax_cbmc N     largest number of backbone atoms regrown (default 6)
+   ntrial_cbmc N   trials for each dihedral (default 8)
  - trjformat F     format of the trajectory: pdb (default) or dcd. The dcd
                    file <traj>.dcd is binary, single precision, with the unit
                    cell in a periodic box (read by VMD, MDAnalysis, mdtraj);
@@ -248,9 +262,15 @@ New keywords of the parameter file:
                    [first [last [stride]]]" converts it to pdb. A restart
                    continues the dcd file as it does the pdb one.
  - movebias without nmul_local is an error (it did nothing)
+ - Moves that change the backbone rebuild all the sidechains built from what
+   they moved: a flip near the end of a chain did not rebuild its last oxygen,
+   whose rotamer refers to the nitrogen two atoms before, and a later move
+   rebuilt it as a hidden, irreversible change. echeck now also checks that
+   every sidechain matches its rotamer. Runs with sidechains differ from
+   before.
 
 Checkpoints written by earlier versions of this revision cannot be read
-(one more move type).
+(more move types).
 
 Output:
  - The coordinates in the pdb trajectories are in columns 31-54, as in the

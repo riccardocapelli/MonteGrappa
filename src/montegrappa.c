@@ -342,6 +342,7 @@ int main(int argc, char *argv[])
 	if (parms->hb && my_rank==0 && CheckHBReferences(startp,u,parms->npol,nat))
 		fprintf(stderr,"WARNING: the energy of these hydrogen bonds is not updated when only the reference atom moves\n");
 	SetSidechainExtents(startp,parms->npol,parms->nosidechains);
+	SetSidechainDependencies(startp,parms,nat);					// moves rebuild the sidechains built from what they move
 	// pivot moves skip the pairs within the part they rotate rigidly (not with disentangle, where overlaps count)
 	parms->rigid = parms->disentangle ? -1 : RigidMargin(startp,u,parms->npol,nat,parms->hb,parms->nosidechains);
 	fprintf(fproc,"Rigid margin of pivot moves: %d\n",parms->rigid);

@@ -286,13 +286,15 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
   
   double deltaE,W1=0.,W2=0.;
 
-  int nang,i,m,ok=1;
+  int nang,i,m,ok=1,ra,rb;
 
   if (iw < nmul+3)
   {
     if ( (((p+ip)->back)+iw+1)->move == 0 ) { return 0;}
 
-    deltaE = -GetEnergyMonomerRange(p,0,iw,ip);							// two-body energy
+    ra = 0; rb = iw;									// and the sidechains built from [0,iw-1]
+    SideRange(parms,ip,(p+ip)->nback,0,iw-1,&ra,&rb);
+    deltaE = -GetEnergyMonomerRange(p,ra,rb,ip);							// two-body energy
   
     if (!parms->nodihpot)
       deltaE -= (((p+ip)->back)+iw+1)->e_dih;							// old dihedral energy
@@ -301,9 +303,9 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
   
     ok = PivotBackward((p+ip),iw+1,0.2*(0.5-frand())*180./PI,iw,parms);		// +-0.1 rad, in degrees; moved atoms are in [0,iw-1]; changed dihedral is iw+1
 
-    ok *= AddSidechain(p,0,iw,ip);
+    ok *= AddSidechain(p,ra,rb,ip);
     
-    deltaE += EnergyMonomerRange(p,pot,0,iw,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);			// new energy of iw with the others
+    deltaE += EnergyMonomerRange(p,pot,ra,rb,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);			// new energy of iw with the others
     
     if (!parms->nodihpot)
       deltaE += EnergyDihedrals(p,pot,iw+1,ip,1);
@@ -314,12 +316,12 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
 
     if (ok == 0) 			// move rejected
     {
-      UpdateMonomerRange(oldp,p,0,iw,ip,0);                         
+      UpdateMonomerRange(oldp,p,ra,rb,ip,0);                         
       return 0;	
     }
     else
     {
-      UpdateMonomerRange(p,oldp,0,iw,ip,0); 
+      UpdateMonomerRange(p,oldp,ra,rb,ip,0); 
       parms->acc++;
       p->etot+=deltaE;
       return 1;
@@ -334,7 +336,9 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
   { 
      if ( (((p+ip)->back)+iw)->move == 0 ) { return 0; }
 
-     deltaE=-GetEnergyMonomerRange(p,iw,(p+ip)->nback-1,ip);
+     ra = iw; rb = (p+ip)->nback-1;							// and the sidechains built from [iw+1,nback-1]
+     SideRange(parms,ip,(p+ip)->nback,iw+1,(p+ip)->nback-1,&ra,&rb);
+     deltaE=-GetEnergyMonomerRange(p,ra,rb,ip);
      
      if (!parms->nodihpot)
         deltaE -= (((p+ip)->back)+iw)->e_dih;		
@@ -343,9 +347,9 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
 
     ok = PivotForward((p+ip),iw-1,0.2*(0.5-frand())*180./PI,(p+ip)->nback-iw-1,parms);	// +-0.1 rad, in degrees; moved atoms are in [iw+1,nback-1]; changed dihedral of iw
    
-    ok *= AddSidechain(p,iw,(p+ip)->nback-1,ip);
+    ok *= AddSidechain(p,ra,rb,ip);
     
-    deltaE += EnergyMonomerRange(p,pot,iw,(p+ip)->nback-1,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
+    deltaE += EnergyMonomerRange(p,pot,ra,rb,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
    
     if (!parms->nodihpot)
 	deltaE += EnergyDihedrals(p,pot,iw,ip,1);
@@ -360,12 +364,12 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
     
     if (ok == 0) 			// move rejected
     {
-      UpdateMonomerRange(oldp,p,iw,(p+ip)->nback-1,ip,0);                           // ... if moved second half
+      UpdateMonomerRange(oldp,p,ra,rb,ip,0);                           // ... if moved second half
       return 0;	
     }
     else
     {
-      UpdateMonomerRange(p,oldp,iw,(p+ip)->nback-1,ip,0); 
+      UpdateMonomerRange(p,oldp,ra,rb,ip,0); 
       parms->acc++;
       p->etot+=deltaE;
       return 1;
@@ -388,7 +392,9 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
       if ((b+k)->move) kd[nang++] = k;
     if (nang==0) return 0;
 
-    deltaE=-GetEnergyMonomerRange(p,iw,iw+nmul,ip);
+    ra = iw; rb = iw+nmul;								// and the sidechains built from [iw+2,iw+nmul-1]
+    SideRange(parms,ip,(p+ip)->nback,iw+2,iw+nmul-1,&ra,&rb);
+    deltaE=-GetEnergyMonomerRange(p,ra,rb,ip);
 
     if (!parms->nodihpot)
       for(i=0;i<nmul+3;i++)
@@ -419,11 +425,11 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
     if (ok) ok = CheckLockedDihedralRange(p,ip,iw+nmul-1,iw+nmul+1,2.0);
 
     if (ok && !parms->nosidechains)
-      ok = AddSidechain(p,iw,iw+nmul,ip);
+      ok = AddSidechain(p,ra,rb,ip);
 
     if (ok)
     {
-      deltaE += EnergyMonomerRange(p,pot,iw,iw+nmul,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);
+      deltaE += EnergyMonomerRange(p,pot,ra,rb,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);
 
       if (!parms->nodihpot)
         for(i=0;i<nmul+3;i++)
@@ -452,13 +458,13 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
 
     if (ok)
     {
-      UpdateMonomerRange(p,oldp,iw,iw+nmul,ip,parms->shell);
+      UpdateMonomerRange(p,oldp,ra,rb,ip,parms->shell);
       parms->acc++;
       p->etot += deltaE;
       return 1;
     }
 
-    UpdateMonomerRange(oldp,p,iw,iw+nmul,ip,parms->shell);
+    UpdateMonomerRange(oldp,p,ra,rb,ip,parms->shell);
     return 0;
 
   }// end of local forward
@@ -497,7 +503,7 @@ int LocalMove(struct s_polymer *p, struct s_polymer *oldp,struct s_polymer *frag
 static int BackRubMove(struct s_polymer *p, struct s_polymer *oldp,struct s_potential *pot,struct s_mc_parms *parms,double t,int newrot)
 {
   int ok=1;
-  int iw,ip;
+  int iw,ip,ra,rb;
   int out;
 
   double dw,deltaE;
@@ -512,7 +518,9 @@ static int BackRubMove(struct s_polymer *p, struct s_polymer *oldp,struct s_pote
 
   parms->mov++;
 
-  deltaE = -GetEnergyMonomerRange(p,iw-3,iw+3,ip);                                                 // two-body energy
+  ra = iw-3; rb = iw+3;										// and the sidechains built from [iw-2,iw+2]
+  SideRange(parms,ip,(p+ip)->nback,iw-2,iw+2,&ra,&rb);
+  deltaE = -GetEnergyMonomerRange(p,ra,rb,ip);                                                 // two-body energy
 
   if (!parms->nodihpot)
   {
@@ -544,12 +552,12 @@ static int BackRubMove(struct s_polymer *p, struct s_polymer *oldp,struct s_pote
       (((p+ip)->back)+iw)->irot = irand( (((p+ip)->back)+iw)->nrot );
 
     if(!parms->nosidechains)
-      ok *= AddSidechain(p,iw-3,iw+3,ip);
+      ok *= AddSidechain(p,ra,rb,ip);
   }
 
   if (ok)
   {
-    deltaE += EnergyMonomerRange(p,pot,iw-3,iw+3,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);
+    deltaE += EnergyMonomerRange(p,pot,ra,rb,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);
 
     if (!parms->nodihpot)
     {
@@ -571,11 +579,11 @@ static int BackRubMove(struct s_polymer *p, struct s_polymer *oldp,struct s_pote
 
   if (ok == 0)                        // move rejected
   {
-    UpdateMonomerRange(oldp,p,iw-3,iw+3,ip,0);
+    UpdateMonomerRange(oldp,p,ra,rb,ip,0);
     return 0;
   }
 
-  UpdateMonomerRange(p,oldp,iw-3,iw+3,ip,0);
+  UpdateMonomerRange(p,oldp,ra,rb,ip,0);
   parms->acc++;
   p->etot+=deltaE;
   return 1;

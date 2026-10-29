@@ -56,7 +56,7 @@
         #define FNAMEMAX	256		// maximum length of file names
         #define SHELL_SKIN	2.		// minimum distance (A) between shell radius and interaction range
         #define CELLS_AUTO_MIN	100		// cells=-1 considers a cell list from this number of residues (see cells.c)
-        #define NMOVES		14		// number of types of allowed moves
+        #define NMOVES		15		// number of types of allowed moves
         #define NDIHFMAX	361		// maximum number of bins in tabled dihedral potential
 
         #define NREPMAX		40
@@ -337,7 +337,10 @@ double GetEnergyMonomerRange(struct s_polymer *p, int from, int to, int ip);
 double GetEnergyMonomerRangeRigid(struct s_polymer *p, int from, int to, int ip, const char *rig);
 double EnergyMonomerRange(struct s_polymer *p, struct s_potential *u, int from, int to, int ip, int npol, int shell, int update, int nosidechains, int disentangle, int hb);
 double EnergyMonomerRangeRigid(struct s_polymer *p, struct s_potential *u, int from, int to, int ip, int npol, int shell, int update, int nosidechains, int disentangle, int hb, const char *rig);
+int MoveCBMC(struct s_polymer *p, struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot, double t);
 int RigidMargin(struct s_polymer *p, struct s_potential *u, int npol, int nat, int hb, int nosidechains);
+void SetSidechainDependencies(struct s_polymer *p, struct s_mc_parms *parms, int nat);
+void SideRange(struct s_mc_parms *parms, int ip, int nback, int m0, int m1, int *a, int *b);
 double EnergyPair(struct s_polymer *p, struct s_potential *u, int i, int j, int ci, int cj, int update, int sidechains, int disentangle, int tooclose, int hb);
 double EnergyAngles(struct s_polymer *p, struct s_potential *u, int iw, int ic, int update);
 double EnergyDihedrals(struct s_polymer *p, struct s_potential *u, int iw, int ic, int update);

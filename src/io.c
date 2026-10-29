@@ -468,6 +468,8 @@ struct s_mc_parms *ReadMcParms(char *fname)
 	x->dx_clm = 1.;
 	x->avb_rin = 0.;
 	x->avb_pin = 0.5;
+	x->cbmc_n = 6;
+	x->cbmc_k = 8;
 	x->dtheta=1.;
 	x->randdw = 1;
 	x->nprinttrj = 1000;
@@ -587,6 +589,9 @@ struct s_mc_parms *ReadMcParms(char *fname)
 		ReadParD(aux,"backrub",&(x->movetype[11]));
                 ReadParD(aux,"backsiderub",&(x->movetype[12]));
 		ReadParD(aux,"avbmc",&(x->movetype[13]));
+		ReadParD(aux,"cbmc",&(x->movetype[14]));
+		ReadParD(aux,"nmax_cbmc",&(x->cbmc_n));
+		ReadParD(aux,"ntrial_cbmc",&(x->cbmc_k));
 		ReadParF(aux,"r_cloose",&(x->r_cloose));
 		ReadParF(aux,"a_cloose",&(x->a_cloose));
 		ReadParF(aux,"d_cloose",&(x->d_cloose));
@@ -845,6 +850,7 @@ struct s_mc_parms *ReadMcParms(char *fname)
 	if (x->movetype[7] != -1 && x->nmul_local < 3) Error("movebias needs nmul_local (at least 3)");
 	if (x->movetype[13] != -1 && (x->avb_rin <= 0 || x->avb_pin <= 0 || x->avb_pin >= 1))
 		Error("avbmc needs avb_rin > 0 and 0 < avb_pin < 1");
+	if (x->movetype[14] != -1 && (x->cbmc_n < 1 || x->cbmc_k < 1)) Error("cbmc needs nmax_cbmc and ntrial_cbmc of at least 1");
 	if (!strcmp(trjformat,"dcd")) x->trjdcd = 1;
 	else if (strcmp(trjformat,"pdb")) Error("trjformat must be pdb or dcd");
 	#ifdef ACTIVE_MPI

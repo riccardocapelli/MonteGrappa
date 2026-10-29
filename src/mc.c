@@ -50,7 +50,7 @@ int softexit;
  *****************************************************************************/
 static void CheckEnergyDrift(struct s_polymer *p, struct s_polymer *oldp, struct s_potential *pot, struct s_mc_parms *parms, int move, unsigned long long istep, int my_rank)
 {
-	static int nreported[NMOVES],nreported_old[NMOVES];
+	static int nreported[NMOVES],nreported_old[NMOVES],nreported_side[NMOVES];
 	double etrue;
 	int ic,i,k,q,found;
 	struct s_back *a,*b;
@@ -70,6 +70,24 @@ static void CheckEnergyDrift(struct s_polymer *p, struct s_polymer *oldp, struct
 			}
 			if (!found && nreported_old[move]++ < 5)
 				fprintf(stderr,"ECHECK: oldp differs from p after move %d at step %llu (chain %d residue %d)\n",move,istep,ic,i);
+		}
+
+	// every sidechain atom where its rotamer puts it (a move must rebuild all the sidechains built from what it moved)
+	for (ic=0;ic<parms->npol && !parms->nosidechains;++ic)
+		for (i=0;i<(p+ic)->nback;++i)
+		{
+			struct s_rotamers *r;
+			struct vector v;
+			int out;
+
+			a = ((p+ic)->back)+i;
+			for (k=0;k<a->nside;++k)
+			{
+				r = a->side[k].rot + a->irot;
+				v = Spherical2Cartesian(*((p+ic)->vback[r->b1]),*((p+ic)->vback[r->b2]),*((p+ic)->vback[r->b3]),r->ang,p->tables,&out);
+				if (out && Dist2(v,a->side[k].pos) > 1e-12 && nreported_side[move]++ < 5)
+					fprintf(stderr,"ECHECK: sidechain of residue %d (chain %d) does not match its rotamer after move %d at step %llu\n",i,ic,move,istep);
+			}
 		}
 
 	// before TotalEnergy, which rebuilds them
@@ -362,6 +380,14 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			mdone[13]++; if (parms->echeck) CheckEnergyDrift(p,oldp,pot,parms,13,istep,my_rank);
 		}
 
+		if (mcount[14] == parms->movetype[14])						// configurational-bias regrowth of an end
+		{
+			ok=MoveCBMC(p,oldp,parms,pot,t);
+			if(ok>-1) mcount[14]=0;
+			if(ok==1) macc[14]++;
+			mdone[14]++; if (parms->echeck) CheckEnergyDrift(p,oldp,pot,parms,14,istep,my_rank);
+		}
+
 /************************************************\
  * 	print di varie ed eventuali		*
 \************************************************/
@@ -651,7 +677,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 	#endif
 	{
 		static const char *movename[NMOVES] = {"Flip","Pivot","MPivot","Sidechain","LPivot","MFlip","CoM shift",
-							"Local","Rotation","Cluster CoM","Cluster Rot","BackRub","BackSideRub","AVB"};
+							"Local","Rotation","Cluster CoM","Cluster Rot","BackRub","BackSideRub","AVB","CBMC"};
 		for (i=0;i<NMOVES;++i)
 			if (parms->movetype[i]!=-1)
 				fprintf(stderr,"\t%s:\t%lld / %lld = %lf\n",movename[i],macc[i],mdone[i],mdone[i] ? (double)macc[i]/mdone[i] : 0.);
@@ -671,7 +697,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 int MoveBackboneFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,
 		unsigned long long istep, int debug, double t)
 {
-	int iw,ip,ok=0,out;
+	int iw,ip,ok=0,out,ra,rb;
 	double dw,deltaE=0.;
 
 	ip = irand(parms->npol);						// which chain to move
@@ -681,8 +707,12 @@ int MoveBackboneFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 	 if (debug>2) fprintf(stderr,"step=%d flip ip = %d iw=%d\n",istep,ip,iw); fflush(stderr);
 	#endif
 
+	// the residues whose sidechain is built from iw (iw-1..iw+1, and the last oxygen of the chain from iw+2)
+	ra = iw-1; rb = iw+1;
+	SideRange(parms,ip,(p+ip)->nback,iw,iw,&ra,&rb);
+
 	// old energies
-	deltaE = - GetEnergyMonomerRange(p,iw-1,iw+1,ip);			// old energy of iw with the others (iw-1 & iw+1 because I move their sidechains)
+	deltaE = - GetEnergyMonomerRange(p,ra,rb,ip);			// old energy of iw with the others (and of the residues whose sidechains move)
 
 	if (!parms->noangpot)
 	{
@@ -707,18 +737,18 @@ int MoveBackboneFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 	if (iw==0)
 	{	
 		ok = MoveHead((p+ip),parms);						// move the head
-		ok *= AddSidechain(p,0,1,ip);
+		ok *= AddSidechain(p,ra,rb,ip);
 	}
 	else if (iw==(p+ip)->nback-1)
 	{
 		ok = MoveTail((p+ip),parms);						// move the tail
-		ok *= AddSidechain(p,(p+ip)->nback-2,(p+ip)->nback-1,ip);
+		ok *= AddSidechain(p,ra,rb,ip);
 	}
 	else
 	{
 		dw = 2. * parms->dw_flip * (0.5 - frand());				// angle to flip
 		ok = Flip((p+ip),iw,dw);						// make the flip
-		ok *= AddSidechain(p,iw-1,iw+1,ip);
+		ok *= AddSidechain(p,ra,rb,ip);
 	}
 
 	// check if constrains are violated
@@ -737,7 +767,7 @@ int MoveBackboneFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 	// calculate new energy
 	if (ok)
 	{
-		deltaE += EnergyMonomerRange(p,pot,iw-1,iw+1,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);		// new energy of iw with the others
+		deltaE += EnergyMonomerRange(p,pot,ra,rb,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);		// new energy of iw with the others
 		if (!parms->noangpot)
 		{
 			if (iw>0) deltaE += EnergyAngles(p,pot,iw-1,ip,1);
@@ -762,11 +792,11 @@ int MoveBackboneFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 
 	if (ok == 0) 			// move rejected
 	{
-		UpdateMonomerRange(oldp,p,iw-1,iw+1,ip,parms->shell);							// return to the old position, contacts, etc.
+		UpdateMonomerRange(oldp,p,ra,rb,ip,parms->shell);							// return to the old position, contacts, etc.
 	}
 	else					// move accepted
 	{
-		UpdateMonomerRange(p,oldp,iw-1,iw+1,ip,parms->shell);							// update oldp
+		UpdateMonomerRange(p,oldp,ra,rb,ip,parms->shell);							// update oldp
 		p->etot += deltaE;
 		parms->acc ++;
 	}
@@ -964,7 +994,7 @@ static char *RigidFlags(struct s_polymer *p, struct s_polymer *oldp, struct s_po
  *****************************************************************************/
 int MoveBackbonePivot(struct s_polymer *p,struct s_polymer *oldp, struct s_potential *pot, struct s_mc_parms *parms, double t)
 {
-	int iw,ok=0,half,ip;
+	int iw,ok=0,half,ip,ra,rb;
 	double dw=0,deltaE;
 	char *rig;
 		
@@ -1001,12 +1031,14 @@ int MoveBackbonePivot(struct s_polymer *p,struct s_polymer *oldp, struct s_poten
 		
 		// move
 		ok = PivotBackward((p+ip),iw+1,dw,iw,parms);							// moved atoms are in [0,iw-1]; changed dihedral is iw+1
-		ok *= AddSidechain(p,0,iw,ip);
+		ra = 0; rb = iw;									// and the sidechains built from [0,iw-1]
+		SideRange(parms,ip,(p+ip)->nback,0,iw-1,&ra,&rb);
+		ok *= AddSidechain(p,ra,rb,ip);
 
 		// the pairs of residues that moved rigidly together do not change: old two-body energy without them (from oldp)
 		rig = RigidFlags(p,oldp,pot,parms,ip,0,iw-1-parms->rigid);
-		deltaE -= GetEnergyMonomerRangeRigid(oldp,0,iw,ip,rig);
-		deltaE += EnergyMonomerRangeRigid(p,pot,0,iw,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb,rig);			// new energy of iw with the others
+		deltaE -= GetEnergyMonomerRangeRigid(oldp,ra,rb,ip,rig);
+		deltaE += EnergyMonomerRangeRigid(p,pot,ra,rb,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb,rig);			// new energy of iw with the others
 		if (!parms->nodihpot)
 			deltaE += EnergyDihedrals(p,pot,iw+1,ip,1);
 		if (!parms->nohfields)
@@ -1032,11 +1064,13 @@ int MoveBackbonePivot(struct s_polymer *p,struct s_polymer *oldp, struct s_poten
 		}
 		// move
 		ok = PivotForward((p+ip),iw-1,dw,(p+ip)->nback-iw-1,parms);			// moved atoms are in [iw+1,nback-1]; changed dihedral of iw
-		ok *= AddSidechain(p,iw,(p+ip)->nback-1,ip);
+		ra = iw; rb = (p+ip)->nback-1;							// and the sidechains built from [iw+1,nback-1]
+		SideRange(parms,ip,(p+ip)->nback,iw+1,(p+ip)->nback-1,&ra,&rb);
+		ok *= AddSidechain(p,ra,rb,ip);
 
 		rig = RigidFlags(p,oldp,pot,parms,ip,iw+1+parms->rigid,(p+ip)->nback-1);
-		deltaE -= GetEnergyMonomerRangeRigid(oldp,iw,(p+ip)->nback-1,ip,rig);
-		deltaE += EnergyMonomerRangeRigid(p,pot,iw,(p+ip)->nback-1,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb,rig);
+		deltaE -= GetEnergyMonomerRangeRigid(oldp,ra,rb,ip,rig);
+		deltaE += EnergyMonomerRangeRigid(p,pot,ra,rb,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb,rig);
 		if (!parms->nodihpot)
 			deltaE += EnergyDihedrals(p,pot,iw,ip,1);
 		if (!parms->nohfields)
@@ -1055,14 +1089,12 @@ int MoveBackbonePivot(struct s_polymer *p,struct s_polymer *oldp, struct s_poten
 	if (ok == 0) 			// move rejected
 	{
 
-		if (iw < half) UpdateMonomerRange(oldp,p,0,iw,ip,0);                               // return to the old position, contacts, etc. (if moved first half)
-		else UpdateMonomerRange(oldp,p,iw,(p+ip)->nback-1,ip,0);                           // ... if moved second half
+		UpdateMonomerRange(oldp,p,ra,rb,ip,0);                               // return to the old position, contacts, etc.
 		
 	}
 	else					// move accepted
 	{
-	        if (iw < half) UpdateMonomerRange(p,oldp,0,iw,ip,0);                               // update oldp (if moved first half)
-	        else UpdateMonomerRange(p,oldp,iw,(p+ip)->nback-1,ip,0);     
+	        UpdateMonomerRange(p,oldp,ra,rb,ip,0);                               // update oldp
 
 		if(parms->shell==1 )		// if shells are active, update them 
 		{
@@ -1093,7 +1125,7 @@ int MoveBackbonePivot(struct s_polymer *p,struct s_polymer *oldp, struct s_poten
 int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potential *pot, int nmul, struct s_mc_parms *parms, double t)
 {
 
-	int half,ok=1,m,iw,ip,idir;
+	int half,ok=1,m,iw,ip,idir,ra,rb;
 	double dw=0,deltaE;
 	char *rig;
 
@@ -1132,12 +1164,14 @@ int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_pote
 
  				ok *= PivotBackward((p+ip),iw+1-m,dw,iw-m,parms);				// moves in [0,iw-1]
 			}
-		ok *= AddSidechain(p,0,iw,ip);
+		ra = 0; rb = iw;									// and the sidechains built from [0,iw-1]
+		SideRange(parms,ip,(p+ip)->nback,0,iw-1,&ra,&rb);
+		ok *= AddSidechain(p,ra,rb,ip);
 
 //		deltaE += EnergyMonomerRange(p,pot,0,iw,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);				// new energy of iw with the others
 		rig = RigidFlags(p,oldp,pot,parms,ip,0,iw-nmul-parms->rigid);					// [0,iw-nmul] gets all the rotations
-		deltaE -= GetEnergyMonomerRangeRigid(oldp,0,iw,ip,rig);
-		deltaE += EnergyMonomerRangeRigid(p,pot,0,iw,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb,rig);    
+		deltaE -= GetEnergyMonomerRangeRigid(oldp,ra,rb,ip,rig);
+		deltaE += EnergyMonomerRangeRigid(p,pot,ra,rb,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb,rig);    
 
 
 		if (!parms->nodihpot)													// new dihedral energy
@@ -1166,12 +1200,14 @@ int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_pote
 
 				ok *= PivotForward((p+ip),iw-1+m,dw,(p+ip)->nback-iw-1-m,parms);	// moves in [iw+1,nback-1]
 			}
-		ok *= AddSidechain(p,iw,(p+ip)->nback-1,ip);
+		ra = iw; rb = (p+ip)->nback-1;							// and the sidechains built from [iw+1,nback-1]
+		SideRange(parms,ip,(p+ip)->nback,iw+1,(p+ip)->nback-1,&ra,&rb);
+		ok *= AddSidechain(p,ra,rb,ip);
 
 		//shell disattivate: mossa globale
 		rig = RigidFlags(p,oldp,pot,parms,ip,iw+nmul+parms->rigid,(p+ip)->nback-1);			// [iw+nmul,nback-1] gets all the rotations
-		deltaE -= GetEnergyMonomerRangeRigid(oldp,iw,(p+ip)->nback-1,ip,rig);
-		deltaE += EnergyMonomerRangeRigid(p,pot,iw,(p+ip)->nback-1,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb,rig);   
+		deltaE -= GetEnergyMonomerRangeRigid(oldp,ra,rb,ip,rig);
+		deltaE += EnergyMonomerRangeRigid(p,pot,ra,rb,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb,rig);   
 	//	deltaE += EnergyMonomerRange(p,pot,iw,p->nback-1,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);			// new energy of iw with the others
 		if (!parms->nodihpot)														// new dihedral energy
 			for (m=0;m<nmul;++m) deltaE += EnergyDihedrals(p,pot,iw+m,ip,1);
@@ -1192,24 +1228,17 @@ int MoveMultiplePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_pote
 	{	
 
 	//	if (idir == -1) UpdateMonomerRange(oldp,p,0,iw,ip,parms->shell);				// return to the old position, contacts, etc. (if moved first half)
-		if (idir == -1) UpdateMonomerRange(oldp,p,0,iw,ip,0);
+		UpdateMonomerRange(oldp,p,ra,rb,ip,0);
 
-		else
-			//UpdateMonomerRange(oldp,p,iw,p->nback-1,ip,parms->shell);				// ... if moved second half
-			UpdateMonomerRange(oldp,p,iw,(p+ip)->nback-1,ip,0);
-			//...if moved second half
 
 			
 	}
 	else					// move accepted
 	{
 //		if (idir == -1) UpdateMonomerRange(p,oldp,0,iw,ip,parms->shell);				// update oldp (if moved first half)
-		if ( idir == -1) UpdateMonomerRange(p,oldp,0,iw,ip,0);
+		UpdateMonomerRange(p,oldp,ra,rb,ip,0);
 
 
-//		else UpdateMonomerRange(p,oldp,iw,p->nback-1,ip,parms->shell);		
-		// ... if moved second half
-		 else UpdateMonomerRange(p,oldp,iw,(p+ip)->nback-1,ip,0);
 
 		if(parms->shell==1 )            // if shells are active, update them 
                 {
@@ -1496,7 +1525,7 @@ void CompareStructures(struct s_polymer *a, struct s_polymer *b, int nc, int nat
 
 int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potential *pot, int nmul, struct s_mc_parms *parms, double t)
 {
-      int half,ok=1,m,iw,ip,idir;
+      int half,ok=1,m,iw,ip,idir,ra,rb;
       double dw=0,deltaE,rc2;
 
       if(nmul<0) nmul=2+irand(-nmul-1);                     //generate random nmul in [2,-mul] if required
@@ -1520,7 +1549,9 @@ int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potenti
             if ( iw-nmul-1 < 2 ) nmul = iw - 1;                                                       // if nmul beyond beginning of the chain, decrease it
             if (nmul < 1) { parms->mov ++; return 0; }                                                // nothing to move
 
-            deltaE = -GetEnergyMonomerRange(p,iw-nmul-1,iw,ip);                                 // calculate old energy
+            ra = iw-nmul-1; rb = iw;									// and the sidechains built from [iw-nmul,iw-1]
+            SideRange(parms,ip,(p+ip)->nback,iw-nmul,iw-1,&ra,&rb);
+            deltaE = -GetEnergyMonomerRange(p,ra,rb,ip);                                 // calculate old energy
             if (!parms->nodihpot)
 				for (m=0;m<nmul+3;++m) deltaE -= (((p+ip)->back)+iw-m+1)->e_dih;  // old dihedral energy in [iw-nmul-1,iw+1]
             if (!parms->noangpot)
@@ -1547,9 +1578,9 @@ int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potenti
 
             if (ok==1)
             {
-				ok = AddSidechain(p,iw-nmul-1,iw,ip);
+				ok = AddSidechain(p,ra,rb,ip);
 
-				deltaE += EnergyMonomerRange(p,pot,iw-nmul-1,iw,ip,parms->npol,parms->shell,1,
+				deltaE += EnergyMonomerRange(p,pot,ra,rb,ip,parms->npol,parms->shell,1,
                                                                         parms->nosidechains,parms->disentangle,parms->hb);                      // new energy of iw with the others
 				if (!parms->nodihpot)                                                                                                         // new dihedral energy
                         for (m=0;m<nmul+3;++m) deltaE += EnergyDihedrals(p,pot,iw-m+1,ip,1);
@@ -1570,7 +1601,9 @@ int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potenti
             if ( iw+2+nmul > (p+ip)->nback - 1 ) nmul = (p+ip)->nback - 3 - iw;                // if nmul is beyond the end, decrease it
             if (nmul < 1) { parms->mov ++; return 0; }                                                // nothing to move
 
-            deltaE = -GetEnergyMonomerRange(p,iw,iw+nmul+1,ip);                                // calculate old energy
+            ra = iw; rb = iw+nmul+1;									// and the sidechains built from [iw+1,iw+nmul]
+            SideRange(parms,ip,(p+ip)->nback,iw+1,iw+nmul,&ra,&rb);
+            deltaE = -GetEnergyMonomerRange(p,ra,rb,ip);                                // calculate old energy
             if (!parms->nodihpot)
                   for (m=0;m<nmul+3;++m) deltaE -= (((p+ip)->back)+iw+m)->e_dih;               // old dihedral energy
             if (!parms->noangpot)
@@ -1596,9 +1629,9 @@ int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potenti
 
             if (ok==1)
             {
-				ok = AddSidechain(p,iw,iw+nmul+1,ip);
+				ok = AddSidechain(p,ra,rb,ip);
 
-				deltaE += EnergyMonomerRange(p,pot,iw,iw+nmul+1,ip,parms->npol,parms->shell,1,
+				deltaE += EnergyMonomerRange(p,pot,ra,rb,ip,parms->npol,parms->shell,1,
                                                                                     parms->nosidechains,parms->disentangle,parms->hb);                // new energy of iw with the others
 				if (!parms->nodihpot)                                                                                                               // new dihedral energy
 					for (m=0;m<nmul+3;++m) deltaE += EnergyDihedrals(p,pot,iw+m,ip,1);
@@ -1624,13 +1657,13 @@ int MoveLoosePivot(struct s_polymer *p, struct s_polymer *oldp, struct s_potenti
 
       if (ok == 0)                  // move rejected
       {
-            if (idir == -1) UpdateMonomerRange(oldp,p,iw-nmul-1,iw,ip,parms->shell);            // return to the old position, contacts, etc. (if moved first half)
-            else UpdateMonomerRange(oldp,p,iw,iw+nmul+1,ip,parms->shell);                       // ... if moved second half
+            if (idir == -1) UpdateMonomerRange(oldp,p,ra,rb,ip,parms->shell);            // return to the old position, contacts, etc. (if moved first half)
+            else UpdateMonomerRange(oldp,p,ra,rb,ip,parms->shell);                       // ... if moved second half
       }
       else                          // move accepted
       {
-            if (idir == -1) UpdateMonomerRange(p,oldp,iw-nmul-1,iw,ip,parms->shell);                        // update oldp (if moved first half)
-            else UpdateMonomerRange(p,oldp,iw,iw+nmul+1,ip,parms->shell);                       // ... if moved second half
+            if (idir == -1) UpdateMonomerRange(p,oldp,ra,rb,ip,parms->shell);                        // update oldp (if moved first half)
+            else UpdateMonomerRange(p,oldp,ra,rb,ip,parms->shell);                       // ... if moved second half
             p->etot += deltaE;
             parms->acc ++;
       }
@@ -1662,7 +1695,7 @@ void SoftExit(int sig)
 int MoveMultipleFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot,
 		unsigned long long istep, int debug, double t)
 {
-	int iw1,iw2,ip,ok=0,i,out;
+	int iw1,iw2,ip,ok=0,i,out,ra,rb;
 	double dw,deltaE=0;
 
 	ip = irand(parms->npol);						// which chain to move
@@ -1679,7 +1712,9 @@ int MoveMultipleFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 	#endif
 
 	// old energies
-	deltaE = - GetEnergyMonomerRange(p,iw1-1,iw2+1,ip);			// old energy  (iw1-1 & iw2+1 because I move their sidechains)
+	ra = iw1-1; rb = iw2+1;						// and the sidechains built from [iw1,iw2]
+	SideRange(parms,ip,(p+ip)->nback,iw1,iw2,&ra,&rb);
+	deltaE = - GetEnergyMonomerRange(p,ra,rb,ip);			// old energy  (iw1-1 & iw2+1 because I move their sidechains)
 
 	if (!parms->noangpot)
 	{
@@ -1703,7 +1738,7 @@ int MoveMultipleFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 
 	if (ok==0)
 	{
-		UpdateMonomerRange(oldp,p,iw1-1,iw2+1,ip,parms->shell);		// return to the old position, contacts, etc.
+		UpdateMonomerRange(oldp,p,ra,rb,ip,parms->shell);		// return to the old position, contacts, etc.
 		parms->mov ++;
 		return 0;
 	}
@@ -1721,13 +1756,13 @@ int MoveMultipleFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 	// flipping [iw1,iw2] changes the dihedrals iw1-1, iw1, iw2+1 and iw2+2
 	if (ok) ok = CheckLockedDihedralRange(p,ip,iw1-1,iw1,parms->d_cloose) && CheckLockedDihedralRange(p,ip,iw2+1,iw2+2,parms->d_cloose);
 
-	if (ok) ok = AddSidechain(p,iw1-1,iw2+1,ip);
+	if (ok) ok = AddSidechain(p,ra,rb,ip);
 
 
 	// calculate new energy
 	if (ok)
 	{
-		deltaE += EnergyMonomerRange(p,pot,iw1-1,iw2+1,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);		// new energy of iw with the others
+		deltaE += EnergyMonomerRange(p,pot,ra,rb,ip,parms->npol,parms->shell,1,parms->nosidechains,parms->disentangle,parms->hb);		// new energy of iw with the others
 		if (!parms->noangpot)
 		{
 			if (iw1>0) deltaE += EnergyAngles(p,pot,iw1-1,ip,1);
@@ -1755,11 +1790,11 @@ int MoveMultipleFlip(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_par
 
 	if (ok == 0) 			// move rejected
 	{
-		UpdateMonomerRange(oldp,p,iw1-1,iw2+1,ip,parms->shell);							// return to the old position, contacts, etc.
+		UpdateMonomerRange(oldp,p,ra,rb,ip,parms->shell);							// return to the old position, contacts, etc.
 	}
 	else					// move accepted
 	{
-		UpdateMonomerRange(p,oldp,iw1-1,iw2+1,ip,parms->shell);							// update oldp
+		UpdateMonomerRange(p,oldp,ra,rb,ip,parms->shell);							// update oldp
 		p->etot += deltaE;
 		parms->acc ++;
 
@@ -2199,6 +2234,150 @@ int MoveAVB(struct s_polymer *p,struct s_polymer *oldp, struct s_mc_parms *parms
 	else
 	{
 		UpdateMonomerRange(p,oldp,0,(p+ip)->nback-1,ip,0);
+		if(parms->shell==1) parms->ishell=1;
+		p->etot += deltaE;
+		parms->acc ++;
+	}
+	parms->mov ++;
+
+	return ok;
+}
+
+
+/*****************************************************************************
+ Fast energy of backbone atom j of chain ip with the backbone atoms already in
+ place during a regrowth (dir>0: those before j in its chain, dir<0: those
+ after it; all the other chains) and of the dihedral it completes
+ *****************************************************************************/
+static double CBMCEnergy(struct s_polymer *p, struct s_potential *pot, struct s_mc_parms *parms, int ip, int j, int dir)
+{
+	int cq,q,q0,q1,tooclose;
+	double e,etot=0;
+
+	for (cq=0;cq<parms->npol;++cq)
+	{
+		q0 = 0; q1 = (p+cq)->nback-1;
+		if (cq==ip) { if (dir>0) q1 = j-1; else q0 = j+1; }
+		for (q=q0;q<=q1;++q)
+		{
+			tooclose = (cq==ip && Abs(j-q) <= pot->g_imin);
+			e = EnergyPair(p,pot,j,q,ip,cq,0,1,parms->disentangle,tooclose,0);	// backbone only, contacts untouched
+			if (e>=LARGE && !parms->disentangle) return LARGE;
+			etot += e;
+		}
+	}
+	if (!parms->nodihpot) etot += EnergyDihedrals(p,pot,dir>0 ? j-1 : j+2,ip,0);
+	return etot;
+}
+
+/*****************************************************************************
+ Configurational-bias regrowth of an end of a chain (Siepmann and Frenkel,
+ Mol. Phys. 75, 59 (1992)): the last n backbone atoms of one end (n uniform
+ in 1..nmax_cbmc) are grown again one at a time, keeping their bond lengths and
+ angles. The dihedral of each one (if its bond can rotate) is chosen among
+ ntrial_cbmc random trials with the Boltzmann weight of a fast energy (CBMCEnergy);
+ the old conformation is weighted in the same way, with its own dihedral as
+ one of the trials. The move is accepted with
+	min[1, W_new/W_old exp(-(dE - (u_new - u_old))/T)]
+ where W are the Rosenbluth weights (products over the atoms of the sums of
+ the weights of the trials), dE the true change of energy and u the sums of
+ the fast energies of the chosen trials.
+ *****************************************************************************/
+int MoveCBMC(struct s_polymer *p, struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot, double t)
+{
+	int ip,nb,n,dir,m0,m1,ra,rb,kd0,kd1,k,i,j,nt,ok=1,out,K=parms->cbmc_k;
+	double deltaE,usel_old=0,usel_new=0,lnw_old=0,lnw_new=0,w,r,u[K];
+	struct vector x[K],xold;
+	struct s_back *bk;
+
+	ip = irand(parms->npol);
+	nb = (p+ip)->nback;
+	bk = (p+ip)->back;
+	dir = irand(2) ? 1 : -1;						// 1: regrow the end of the chain, -1: its beginning
+	n = 1 + irand(parms->cbmc_n);
+	if (n > nb-3) { parms->mov++; return 0; }				// three atoms must stay to place the first one
+	if (dir>0) { m0 = nb-n; m1 = nb-1; kd0 = m0-1; kd1 = nb-2; }
+	else { m0 = 0; m1 = n-1; kd0 = 2; kd1 = m1+2; }			// the dihedrals k (atoms k-2..k+1) that change
+	if (kd0 < 2) kd0 = 2;
+	if (kd1 > nb-2) kd1 = nb-2;
+
+	struct angles g[n];						// bond length and angle of the regrown atoms (kept)
+
+	ra = m0; rb = m1;						// and the sidechains built from them
+	SideRange(parms,ip,nb,m0,m1,&ra,&rb);
+
+	// old energy
+	deltaE = -GetEnergyMonomerRange(p,ra,rb,ip);
+	if (!parms->nodihpot) for (k=kd0;k<=kd1;++k) deltaE -= (bk+k)->e_dih;
+	if (!parms->nohfields) deltaE -= GetHFields(p,parms->npol);
+
+	// Rosenbluth weight of the old conformation, retracing its growth
+	for (i=0;i<n;++i)
+	{
+		j = (dir>0) ? m0+i : m1-i;
+		if (dir>0) g[i] = Cartesian2Spherical((bk+j-3)->pos,(bk+j-2)->pos,(bk+j-1)->pos,(bk+j)->pos,p->tables,&out);
+		else g[i] = Cartesian2Spherical((bk+j+3)->pos,(bk+j+2)->pos,(bk+j+1)->pos,(bk+j)->pos,p->tables,&out);
+		if (!out) ok = 0;
+		nt = ((bk+(dir>0 ? j-1 : j+2))->move == 1) ? K : 1;		// a dihedral which cannot rotate is kept
+		xold = (bk+j)->pos;
+		u[0] = CBMCEnergy(p,pot,parms,ip,j,dir);
+		for (k=1;k<nt;++k)
+		{
+			struct angles gt = g[i];
+			gt.dih = 360.*frand() - 180.;
+			if (dir>0) (bk+j)->pos = Spherical2Cartesian((bk+j-3)->pos,(bk+j-2)->pos,(bk+j-1)->pos,gt,p->tables,&out);
+			else (bk+j)->pos = Spherical2Cartesian((bk+j+3)->pos,(bk+j+2)->pos,(bk+j+1)->pos,gt,p->tables,&out);
+			u[k] = out ? CBMCEnergy(p,pot,parms,ip,j,dir) : LARGE;
+		}
+		(bk+j)->pos = xold;
+		for (w=0,k=0;k<nt;++k) if (u[k] < LARGE) w += exp(-u[k]/t);
+		if (w <= 0) ok = 0;
+		else { lnw_old += log(w); usel_old += u[0]; }
+	}
+
+	// grow the new conformation
+	for (i=0;i<n && ok;++i)
+	{
+		j = (dir>0) ? m0+i : m1-i;
+		nt = ((bk+(dir>0 ? j-1 : j+2))->move == 1) ? K : 1;
+		for (k=0;k<nt;++k)
+		{
+			struct angles gt = g[i];
+			if (nt > 1) gt.dih = 360.*frand() - 180.;
+			if (dir>0) x[k] = Spherical2Cartesian((bk+j-3)->pos,(bk+j-2)->pos,(bk+j-1)->pos,gt,p->tables,&out);
+			else x[k] = Spherical2Cartesian((bk+j+3)->pos,(bk+j+2)->pos,(bk+j+1)->pos,gt,p->tables,&out);
+			(bk+j)->pos = x[k];
+			u[k] = out ? CBMCEnergy(p,pot,parms,ip,j,dir) : LARGE;
+		}
+		for (w=0,k=0;k<nt;++k) if (u[k] < LARGE) w += exp(-u[k]/t);
+		if (w <= 0) { ok = 0; break; }
+		r = frand() * w;						// trial k with probability exp(-u_k/T)/w
+		for (k=0;k<nt-1;++k)
+		{
+			if (u[k] < LARGE) r -= exp(-u[k]/t);
+			if (r < 0) break;
+		}
+		while (u[k] >= LARGE) k--;					// (only if rounding left r>=0 past the last allowed trial)
+		(bk+j)->pos = x[k];
+		lnw_new += log(w);
+		usel_new += u[k];
+	}
+
+	// true energy of the new conformation
+	if (ok) ok = AddSidechain(p,ra,rb,ip);
+	if (ok)
+	{
+		deltaE += EnergyMonomerRange(p,pot,ra,rb,ip,parms->npol,0,1,parms->nosidechains,parms->disentangle,parms->hb);
+		if (!parms->nodihpot) for (k=kd0;k<=kd1;++k) deltaE += EnergyDihedrals(p,pot,k,ip,1);
+		if (!parms->nohfields) deltaE += EnergyHFieldsAll(p,pot,parms);
+		ok = Metropolis(deltaE - (usel_new-usel_old) - t*(lnw_new-lnw_old),t,p->tables);
+	}
+
+	if (ok == 0)
+		UpdateMonomerRange(oldp,p,ra,rb,ip,0);
+	else
+	{
+		UpdateMonomerRange(p,oldp,ra,rb,ip,0);
 		if(parms->shell==1) parms->ishell=1;
 		p->etot += deltaE;
 		parms->acc ++;

@@ -346,6 +346,7 @@ int RigidMargin(struct s_polymer *p, struct s_potential *u, int npol, int nat, i
 void SetSidechainDependencies(struct s_polymer *p, struct s_mc_parms *parms, int nat);
 void SideRange(struct s_mc_parms *parms, int ip, int nback, int m0, int m1, int *a, int *b);
 double EnergyPair(struct s_polymer *p, struct s_potential *u, int i, int j, int ci, int cj, int update, int sidechains, int disentangle, int tooclose, int hb);
+double EnergyPairCells(struct s_polymer *p, struct s_potential *u, int gi, int gj, int i, int j, int ci, int cj, int update, int nosidechains, int disentangle, int tooclose);
 double EnergyAngles(struct s_polymer *p, struct s_potential *u, int iw, int ic, int update);
 double EnergyDihedrals(struct s_polymer *p, struct s_potential *u, int iw, int ic, int update);
 void PrintEnergies(FILE *fp, int nc, unsigned long long step, struct s_polymer *p);

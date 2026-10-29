@@ -119,6 +119,12 @@ void SetPairParameters(struct s_potential *u, int ntypes)
 			u->pp[i*ntypes+j].rw2 = (u->r_2)[i][j];
 			u->pp[i*ntypes+j].e = (u->e)[i][j];
 		}
+	u->pp_r2max = 0;
+	for (i=0;i<ntypes*ntypes;++i)
+	{
+		if (u->pp[i].r02 > u->pp_r2max) u->pp_r2max = u->pp[i].r02;
+		if (u->pp[i].rw2 > u->pp_r2max) u->pp_r2max = u->pp[i].rw2;
+	}
 }
 
 /********************************************************************
@@ -224,7 +230,8 @@ static int TotalPairEnergyCells(struct s_polymer *p, struct s_potential *u, stru
 					{
 						tooclose = 0;
 						if (ci==cj && j-i <= u->g_imin ) tooclose = 1;
-						*etot += EnergyPair(p,u,i,j,ci,cj,update,nosidechains,parms->disentangle,tooclose,parms->hb);
+						if (parms->hb) *etot += EnergyPair(p,u,i,j,ci,cj,update,nosidechains,parms->disentangle,tooclose,parms->hb);
+						else *etot += EnergyPairCells(p,u,g,list[k],i,j,ci,cj,update,nosidechains,parms->disentangle,tooclose);
 					}
 				}
 			}
@@ -522,6 +529,78 @@ double EnergyPair(struct s_polymer *p, struct s_potential *u, int i, int j, int 
 }
 
 /********************************************************************
+ As EnergyPair (without hydrogen bonds), for residues gi=(ci,i) and
+ gj=(cj,j) of the cell list, reading their atoms from its compact copy
+ (CellsSphere): the same pairs of atoms with the same arithmetic, in
+ the same order. The distances of an atom of j from all the atoms of i
+ are computed together (vectorized), and the pairs farther than any
+ interaction (pp_r2max) skip the lookup of their parameters
+ ********************************************************************/
+double EnergyPairCells(struct s_polymer *p, struct s_potential *u, int gi, int gj, int i, int j, int ci, int cj, int update, int nosidechains, int disentangle, int tooclose)
+{
+	struct s_cells *c = p->cells;
+	const double *ax = c->ax, *ay = c->ay, *az = c->az;
+	const int *at = c->at;
+	int a0 = c->aoff[gi], na = c->aoff[gi+1]-a0, b0 = c->aoff[gj], b1 = c->aoff[gj+1];
+	int k,ja,record=0,incontact=0;
+	double r2bb,rmax,thr,etot=0,econt=0,xi=ax[a0],yi=ay[a0],zi=az[a0],pjx,pjy,pjz,px,py,pz;
+	double row[NSIDEMAX+1],rowb[NSIDEMAX+1];
+	struct vector sh = {0.,0.,0.};
+
+	// within same aa do not interact
+	if (ci==cj && c->iaa[gi] == c->iaa[gj]) return 0;
+
+	// no atom of the two residues can be within the interaction range
+	if (u->boxtype=='p')
+	{
+		struct vector va = {xi,yi,zi}, vb = {ax[b0],ay[b0],az[b0]};
+		sh = ImageShift(va,vb,u->lbox);
+	}
+	r2bb = (ax[b0]+sh.x-xi)*(ax[b0]+sh.x-xi) + (ay[b0]+sh.y-yi)*(ay[b0]+sh.y-yi) + (az[b0]+sh.z-zi)*(az[b0]+sh.z-zi);
+	rmax = u->rcut + c->ext[gi] + c->ext[gj];
+	if (r2bb > rmax*rmax) return 0;
+
+	#ifdef OPTIMIZEPOT
+	record = p->op->record;
+	#endif
+	thr = tooclose ? u->g_r0hard*u->g_r0hard : u->pp_r2max;	// AtomPairEnergy does nothing for pairs of atoms this far
+	pjx = ax[b0] + sh.x; pjy = ay[b0] + sh.y; pjz = az[b0] + sh.z;
+
+	// backbone-backbone, if not consecutive (covalent)
+	if ( ci!=cj || (i!=(j+1) && i!=(j-1)) )
+		if (r2bb < thr && AtomPairEnergy(p,u,at[a0],at[b0],r2bb,tooclose,disentangle,record,&etot,&econt,&incontact)) goto large;
+
+	if (nosidechains == 1) goto done;
+
+	// distances of the backbone atom of j from the sidechain of i (evaluated at the end)
+	for (k=1;k<na;++k)
+		rowb[k] = (pjx-ax[a0+k])*(pjx-ax[a0+k]) + (pjy-ay[a0+k])*(pjy-ay[a0+k]) + (pjz-az[a0+k])*(pjz-az[a0+k]);
+
+	for (ja=b0+1;ja<b1;++ja)
+	{
+		// distances of sidechain atom ja of j from the atoms of i (backbone first), then their energies in this order
+		px = ax[ja] + sh.x; py = ay[ja] + sh.y; pz = az[ja] + sh.z;
+		for (k=0;k<na;++k)
+			row[k] = (px-ax[a0+k])*(px-ax[a0+k]) + (py-ay[a0+k])*(py-ay[a0+k]) + (pz-az[a0+k])*(pz-az[a0+k]);
+		if (row[0] < thr && AtomPairEnergy(p,u,at[a0],at[ja],row[0],tooclose,disentangle,record,&etot,&econt,&incontact)) goto large;
+		for (k=1;k<na;++k)
+			if (row[k] < thr && AtomPairEnergy(p,u,at[a0+k],at[ja],row[k],tooclose,disentangle,record,&etot,&econt,&incontact)) goto large;
+	}
+
+	// sidechain of i - backbone of j
+	for (k=1;k<na;++k)
+		if (rowb[k] < thr && AtomPairEnergy(p,u,at[b0],at[a0+k],rowb[k],tooclose,disentangle,record,&etot,&econt,&incontact)) goto large;
+
+	done:
+	if (update && incontact) AddContact(p,i,j,ci,cj,econt);
+	return etot;
+
+	large:
+	etot = LARGE;
+	goto done;
+}
+
+/********************************************************************
  Calculate the energy of ith residue with all the others,
  updating contact lists and partial energies. (single loop)
  ********************************************************************/
@@ -700,7 +779,8 @@ double EnergyMonomerRangeRigid(struct s_polymer *p, struct s_potential *u, int f
 				{
 					tooclose = 0;
 					if (ip == cj && Abs(i-j) <= u->g_imin) tooclose = 1;
-					e = EnergyPair(p,u,i,j,ip,cj,update,nosidechains,disentangle,tooclose,hb);
+					if (hb) e = EnergyPair(p,u,i,j,ip,cj,update,nosidechains,disentangle,tooclose,hb);
+					else e = EnergyPairCells(p,u,gi,g,i,j,ip,cj,update,nosidechains,disentangle,tooclose);
 					if (e>=LARGE && !disentangle) return LARGE;
 					etot += e;
 				}
@@ -743,7 +823,8 @@ double EnergyMonomerRangeRigid(struct s_polymer *p, struct s_potential *u, int f
 				{
 					tooclose = 0;
 					if (ip == cj && Abs(i-j) <= u->g_imin) tooclose = 1;
-					e = EnergyPair(p,u,i,j,ip,cj,update,nosidechains,disentangle,tooclose,hb);
+					if (hb) e = EnergyPair(p,u,i,j,ip,cj,update,nosidechains,disentangle,tooclose,hb);
+					else e = EnergyPairCells(p,u,gi,c->cand[k],i,j,ip,cj,update,nosidechains,disentangle,tooclose);
 					if (e>=LARGE && !disentangle) return LARGE;
 					etot += e;
 				}

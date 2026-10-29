@@ -152,8 +152,15 @@ Speed:
    the list of its partner, so a residue is removed from the lists of its
    neighbours without searching them, and the sidechains are rebuilt from
    offsets computed once for each rotamer instead of their sines and
-   cosines: another 4-5%, same trajectory. In all, the Monte Carlo of 1PGB
-   is 1.9 times faster than at the start of these changes.
+   cosines: another 4-5%, same trajectory.
+ - The cell list keeps a compact copy of all the atoms of each residue
+   (positions and types), updated with its sphere; with it the energy of a
+   pair of residues computes the distances of an atom from all the atoms
+   of the other residue together, and skips the parameters of the pairs of
+   atoms farther than any interaction. Same trajectory, 1PGB 7% faster
+   (the potentials with hydrogen bonds keep the previous function). In
+   all, the Monte Carlo of 1PGB is 2 times faster than at the start of
+   these changes.
 
 Restart:
  - A checkpoint is written by default every 10 minutes (keyword

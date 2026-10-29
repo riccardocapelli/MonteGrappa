@@ -134,6 +134,7 @@ struct s_potential
 	double **r0_2;					// square width of hard core repulsion
 	struct s_pairpar *pp;				// r0_2, r_2 and e of each pair of types in one array (rebuilt when they change)
 	int npptypes;					// number of types of pp
+	double pp_r2max;				// largest r0_2 and r_2 of pp: farther pairs of atoms do not interact
 
 	double *e_ang;					// energy constant of angular potential
 	double *ang0;					// equilibrium angle
@@ -454,6 +455,9 @@ struct s_cells
 	int *cand;			// candidates returned by CellsCandidates
 	double *x,*y,*z,*ext;		// compact copy of backbone positions and sidechain extents (always kept)
 	double *sx,*sy,*sz,*srad;	// sphere containing all the atoms of each residue (centre and radius, at most ext)
+	int *aoff;			// atoms of residue g: aoff[g] (backbone) .. aoff[g+1]-1 (sidechain, in order)
+	double *ax,*ay,*az;		// ... their positions (compact copy, updated with the sphere)
+	int *at,*iaa;			// ... their types, and the amino acid of each residue
 	int dirty;			// 1 = to be rebuilt before use
 	int forced;			// 1 = always used (keyword cells 1)
 	int allowed;			// 0 = never used (keyword cells 0, or small system)

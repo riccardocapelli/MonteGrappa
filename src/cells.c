@@ -84,6 +84,16 @@ static inline void CellsSphere(struct s_cells *c, int g, struct s_back *b)
 	rad = sqrt(r2max)*(1.+1e-12) + 1e-12;			// rounding of the square root and of the sums
 	if (rad >= b->ext) { cx = b->pos.x; cy = b->pos.y; cz = b->pos.z; rad = b->ext; }
 	c->sx[g] = cx; c->sy[g] = cy; c->sz[g] = cz; c->srad[g] = rad;
+
+	// compact copy of the atoms (read by EnergyPairCells)
+	is = c->aoff[g];
+	c->ax[is] = b->pos.x; c->ay[is] = b->pos.y; c->az[is] = b->pos.z;
+	for (++is;is<c->aoff[g+1];++is)
+	{
+		c->ax[is] = b->side[is-c->aoff[g]-1].pos.x;
+		c->ay[is] = b->side[is-c->aoff[g]-1].pos.y;
+		c->az[is] = b->side[is-c->aoff[g]-1].pos.z;
+	}
 }
 
 /*****************************************************************************
@@ -93,7 +103,8 @@ static inline void CellsSphere(struct s_cells *c, int g, struct s_back *b)
 void CellsAlloc(struct s_polymer *p, struct s_polymer *topo, int npol, int forced, int allowed)
 {
 	struct s_cells *c;
-	int ic,i,g;
+	struct s_back *b;
+	int ic,i,g,k;
 
 	c = (struct s_cells *) calloc(1,sizeof(struct s_cells));
 	if (!c) Error("Cannot allocate cell list");
@@ -134,6 +145,29 @@ void CellsAlloc(struct s_polymer *p, struct s_polymer *topo, int npol, int force
 			c->res[g] = i;
 		}
 
+	// compact copy of the atoms: the backbone atom of each residue followed by its sidechain
+	c->aoff = (int *) malloc((c->nres+1)*sizeof(int));
+	c->iaa = (int *) malloc(c->nres*sizeof(int));
+	if (!c->aoff || !c->iaa) Error("Cannot allocate cell list");
+	c->aoff[0] = 0;
+	for (g=0;g<c->nres;++g)
+	{
+		b = ((topo+c->chain[g])->back)+c->res[g];
+		c->aoff[g+1] = c->aoff[g] + 1 + b->nside;
+		c->iaa[g] = b->iaa;
+	}
+	c->ax = (double *) malloc(c->aoff[c->nres]*sizeof(double));
+	c->ay = (double *) malloc(c->aoff[c->nres]*sizeof(double));
+	c->az = (double *) malloc(c->aoff[c->nres]*sizeof(double));
+	c->at = (int *) malloc(c->aoff[c->nres]*sizeof(int));
+	if (!c->ax || !c->ay || !c->az || !c->at) Error("Cannot allocate cell list");
+	for (g=0;g<c->nres;++g)
+	{
+		b = ((topo+c->chain[g])->back)+c->res[g];
+		c->at[c->aoff[g]] = b->itype;
+		for (k=0;k<b->nside;++k) c->at[c->aoff[g]+1+k] = b->side[k].itype;
+	}
+
 	c->dirty = 1;
 	c->forced = forced;
 	c->allowed = allowed || forced;
@@ -150,6 +184,7 @@ void CellsFree(struct s_polymer *p)
 	free(c->bucket); free(c->chain); free(c->res); free(c->cand);
 	free(c->x); free(c->y); free(c->z); free(c->ext);
 	free(c->sx); free(c->sy); free(c->sz); free(c->srad);
+	free(c->aoff); free(c->iaa); free(c->ax); free(c->ay); free(c->az); free(c->at);
 	free(c);
 	p->cells = NULL;
 }
@@ -332,7 +367,7 @@ int CellsCheck(struct s_polymer *p)
 {
 	struct s_cells *c = p->cells;
 	struct s_back *b;
-	int g,h,nbad=0;
+	int g,h,k,nbad=0;
 	double sx,sy,sz,srad;
 
 	if (!c || c->dirty) return 0;
@@ -340,6 +375,10 @@ int CellsCheck(struct s_polymer *p)
 	{
 		b = ((p+c->chain[g])->back)+c->res[g];
 		if (c->x[g]!=b->pos.x || c->y[g]!=b->pos.y || c->z[g]!=b->pos.z || c->ext[g]!=b->ext) { nbad++; continue; }
+		if (c->ax[c->aoff[g]]!=b->pos.x || c->ay[c->aoff[g]]!=b->pos.y || c->az[c->aoff[g]]!=b->pos.z) { nbad++; continue; }
+		for (k=0;k<b->nside;++k)
+			if (c->ax[c->aoff[g]+1+k]!=b->side[k].pos.x || c->ay[c->aoff[g]+1+k]!=b->side[k].pos.y || c->az[c->aoff[g]+1+k]!=b->side[k].pos.z) break;
+		if (k < b->nside) { nbad++; continue; }
 		sx = c->sx[g]; sy = c->sy[g]; sz = c->sz[g]; srad = c->srad[g];
 		CellsSphere(c,g,b);
 		if (sx!=c->sx[g] || sy!=c->sy[g] || sz!=c->sz[g] || srad!=c->srad[g]) { nbad++; continue; }

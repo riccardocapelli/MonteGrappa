@@ -50,7 +50,7 @@ int softexit;
  *****************************************************************************/
 static void CheckEnergyDrift(struct s_polymer *p, struct s_polymer *oldp, struct s_potential *pot, struct s_mc_parms *parms, int move, unsigned long long istep, int my_rank)
 {
-	static int nreported[NMOVES],nreported_old[NMOVES],nreported_side[NMOVES];
+	static int nreported[NMOVES],nreported_old[NMOVES],nreported_side[NMOVES],nreported_rev[NMOVES];
 	double etrue;
 	int ic,i,k,q,found;
 	struct s_back *a,*b;
@@ -71,6 +71,10 @@ static void CheckEnergyDrift(struct s_polymer *p, struct s_polymer *oldp, struct
 			if (!found && nreported_old[move]++ < 5)
 				fprintf(stderr,"ECHECK: oldp differs from p after move %d at step %llu (chain %d residue %d)\n",move,istep,ic,i);
 		}
+
+	// every contact entry knows where its partner keeps the reverse one (contacts_r)
+	if ((k = ContactsReverseErrors(p,parms->npol)) + (q = ContactsReverseErrors(oldp,parms->npol)) > 0 && nreported_rev[move]++ < 5)
+		fprintf(stderr,"ECHECK: %d (p) and %d (oldp) contact entries with a wrong reverse index after move %d at step %llu\n",k,q,move,istep);
 
 	// every sidechain atom where its rotamer puts it (a move must rebuild all the sidechains built from what it moved)
 	for (ic=0;ic<parms->npol && !parms->nosidechains;++ic)
@@ -854,6 +858,7 @@ static void CopyResidue(struct s_back *from, struct s_back *to, int contacts)
 		{
 			(to->contacts)[k] = (from->contacts)[k];
 			(to->contacts_p)[k] = (from->contacts_p)[k];
+			(to->contacts_r)[k] = (from->contacts_r)[k];
 			(to->e)[k] = (from->e)[k];
 		}
 		to->ncontacts = from->ncontacts;
@@ -1351,6 +1356,7 @@ void UpdateChainRanges(struct s_polymer *from, struct s_polymer *to, int nr, int
 		{
 			bt->contacts[j] = bf->contacts[j];
 			bt->contacts_p[j] = bf->contacts_p[j];
+			bt->contacts_r[j] = bf->contacts_r[j];
 			bt->e[j] = bf->e[j];
 		}
 	}

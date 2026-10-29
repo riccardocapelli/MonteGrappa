@@ -296,6 +296,9 @@ struct angles Cartesian2Spherical( struct vector A, struct vector B,
                                        struct vector C, struct vector D, struct s_tables *tables, int *out);
 struct vector Spherical2Cartesian(struct vector A, struct vector B,
                                   struct vector C, struct angles W, struct s_tables *tables, int *out);
+void SphericalOffsets(struct angles W, struct s_tables *tables, double *ZR);
+struct vector Frame2Cartesian(struct vector A, struct vector B,
+                              struct vector C, const double *ZR, struct s_tables *tables, int *out);
 struct vector RotateVector(struct vector v, double theta, int w, struct s_tables *tables);
 int PivotForward(struct s_polymer *p, int iw, double dw, int n, struct s_mc_parms *parms);
 int PivotBackward(struct s_polymer *p, int iw, double dw, int n, struct s_mc_parms *parms);
@@ -323,6 +326,7 @@ extern unsigned long long contacts_stamp;
 int ContactsTouched(int **c, int **i);
 void ContactsNewMove(void);
 void ResetContactsMonomer(struct s_polymer *p, int i, int ci);
+int ContactsReverseErrors(struct s_polymer *p, int npol);
 void ResetContactsMonomerOutside(struct s_polymer *p, int i, int ci, const char *rig);
 double GetEnergyMonomer(struct s_polymer *p, int ip, int iw);
 void PrintContacts(FILE *fp, struct s_polymer *p,int ip, unsigned long long step);

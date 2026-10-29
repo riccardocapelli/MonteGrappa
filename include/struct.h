@@ -88,6 +88,7 @@ struct s_back
 	int ncontacts;			// number of backbone atoms whose atom (including sidechain) are in contact with this
 	int *contacts;			// list of atoms in contact
 	int *contacts_p;		// ... which chain it belongs to
+	int *contacts_r;		// ... position of this in its list (removal without searching, see AddContact)
 	
 	double *e;			// interaction energy of this with the others residues
 	double e_ang;			// angular energy
@@ -120,6 +121,8 @@ struct s_rotamers
 	int b2;
 	int b3;
 	struct angles ang;				// the spherical coordinate of the sidechain atom
+	struct angles zang;				// cache: zr are the offsets of the atom in the frame of b1,b2,b3 for these angles
+	double zr[3];					// (recomputed when ang changes, see AddSidechain)
 };
 
 struct s_pairpar { double r02,rw2,e; };	// hard core and square well of a pair of types, contiguous (see SetPairParameters)

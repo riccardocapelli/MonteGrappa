@@ -147,8 +147,13 @@ Speed:
  - After a move only the contact lists that it changed are copied between
    the trial and the backup copy of the system (they are recorded as they
    change), and the parameters of the pairs of types are kept in one array:
-   another 6%. In all, the Monte Carlo of 1PGB is 1.8 times faster than at
-   the start of these changes.
+   another 6%.
+ - Each entry of a contact list knows the position of the reverse entry in
+   the list of its partner, so a residue is removed from the lists of its
+   neighbours without searching them, and the sidechains are rebuilt from
+   offsets computed once for each rotamer instead of their sines and
+   cosines: another 4-5%, same trajectory. In all, the Monte Carlo of 1PGB
+   is 1.9 times faster than at the start of these changes.
 
 Restart:
  - A checkpoint is written by default every 10 minutes (keyword

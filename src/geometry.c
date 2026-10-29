@@ -361,15 +361,42 @@ struct angles Cartesian2Spherical( struct vector A, struct vector B,
 }
 
 /*****************************************************************************
+  Offsets ZR of Z in the frame of A,B,C (see Frame2Cartesian) given its
+  spherical coordinates W (angles in degrees)
+ *****************************************************************************/
+void SphericalOffsets(struct angles W, struct s_tables *tables, double *ZR)
+{
+  double sb;
+
+  /* From angular internal coords to cartesian internal coords */
+  sb = FastSin(W.ang,tables);
+  ZR[0] = - W.r * FastCos(W.ang,tables);
+  ZR[1] = - W.r * sb * FastCos(W.dih,tables);
+  ZR[2] = - W.r * sb * FastSin(W.dih,tables);
+}
+
+/*****************************************************************************
   Cartesian coordinates of Z given A,B,C
 	  angles in degrees
  *****************************************************************************/
 struct vector Spherical2Cartesian(struct vector A, struct vector B,
                                   struct vector C, struct angles W, struct s_tables *tables, int *out)
 {
-  struct vector Z = {0.,0.,0.};				// returned (with *out=0) when the geometry is degenerate
-  double dumb[3],sb;
   double ZR[3];
+
+  SphericalOffsets(W,tables,ZR);
+  return Frame2Cartesian(A,B,C,ZR,tables,out);
+}
+
+/*****************************************************************************
+  Cartesian coordinates of Z given A,B,C and its offsets ZR in their frame
+  (SphericalOffsets)
+ *****************************************************************************/
+struct vector Frame2Cartesian(struct vector A, struct vector B,
+                              struct vector C, const double *ZR, struct s_tables *tables, int *out)
+{
+  struct vector Z = {0.,0.,0.};				// returned (with *out=0) when the geometry is degenerate
+  double dumb[3];
   double M[3][3];
   double l_ab,l_bc,l1,l2,inv_bc,inv_ab,inv_l;
   double l_ac;
@@ -377,12 +404,6 @@ struct vector Spherical2Cartesian(struct vector A, struct vector B,
 
   *out = 0;
   for (i=0;i<3;++i) dumb[i]=0.;
-
-  /* From angular internal coords to cartesian internal coords */
-  sb = FastSin(W.ang,tables);
-  ZR[0] = - W.r * FastCos(W.ang,tables);
-  ZR[1] = - W.r * sb * FastCos(W.dih,tables);
-  ZR[2] = - W.r * sb * FastSin(W.dih,tables);
 
   /* Bond lengths */
   l_ab = (B.x-A.x)*(B.x-A.x)+(B.y-A.y)*(B.y-A.y)+(B.z-A.z)*(B.z-A.z);
@@ -565,10 +586,10 @@ int PivotForward(struct s_polymer *p, int iw, double dw, int n, struct s_mc_parm
 int AddSidechain(struct s_polymer *p, int istart, int istop, int ch)
 {
 	struct vector b1,b2,b3;
-	struct angles ang;
+	struct s_rotamers *r;
 	int i,iside,irot,ib1,ib2,ib3,out;
 //	int flag;
-	//quite slow for a small system #pragma omp parallel for private(iside,irot,ib1,ib2,ib3,b1,b2,b3,ang,out) shared(flag)
+	//quite slow for a small system #pragma omp parallel for private(iside,irot,ib1,ib2,ib3,b1,b2,b3,r,out) shared(flag)
 	double e2,e2max;
 
 	if (istart < 0) istart = 0;
@@ -586,8 +607,13 @@ int AddSidechain(struct s_polymer *p, int istart, int istop, int ch)
 			b1 = *(*(((p+ch)->vback)+ib1));
 			b2 = *(*(((p+ch)->vback)+ib2));
 			b3 = *(*(((p+ch)->vback)+ib3));
-			ang = (((((((p+ch)->back)+i)->side)+iside)->rot)+irot)->ang;
- 			(((((p+ch)->back)+i)->side)+iside)->pos = Spherical2Cartesian(b1,b2,b3,ang,p->tables,&out);
+			r = (((((p+ch)->back)+i)->side)+iside)->rot+irot;
+			if (r->zang.ang != r->ang.ang || r->zang.dih != r->ang.dih || r->zang.r != r->ang.r)
+			{
+				SphericalOffsets(r->ang,p->tables,r->zr);			// the same for all the moves (the rotamers are fixed)
+				r->zang = r->ang;
+			}
+ 			(((((p+ch)->back)+i)->side)+iside)->pos = Frame2Cartesian(b1,b2,b3,r->zr,p->tables,&out);
 			//if (out==0) flag=0; 
 			if(out==0)	return 0;
 			e2 = Dist2( (((((p+ch)->back)+i)->side)+iside)->pos, (((p+ch)->back)+i)->pos );
@@ -970,6 +996,7 @@ void CopyPolymer(struct s_polymer *from, struct s_polymer *to, int cfrom, int ct
 		{
 			*(((((to+cto)->back)+i)->contacts)+j) = *(((((from+cfrom)->back)+i)->contacts)+j);
 			*(((((to+cto)->back)+i)->contacts_p)+j) = *(((((from+cfrom)->back)+i)->contacts_p)+j);
+			(((to+cto)->back)+i)->contacts_r[j] = (((from+cfrom)->back)+i)->contacts_r[j];
 			*(((((to+cto)->back)+i)->e)+j) = *(((((from+cfrom)->back)+i)->e)+j);
 		}
 		(((to+cto)->back)+i)->nshell = (((from+cfrom)->back)+i)->nshell;

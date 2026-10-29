@@ -833,13 +833,62 @@ void AddContact(struct s_polymer *p, int i, int j, int ci, int cj, double e)
 
 	bi->contacts[bi->ncontacts] = j;
 	bi->contacts_p[bi->ncontacts] = cj;
+	bi->contacts_r[bi->ncontacts] = bj->ncontacts;		// each entry knows where its partner is
 	bi->e[bi->ncontacts] = e;
-	bi->ncontacts ++;
 
 	bj->contacts[bj->ncontacts] = i;
 	bj->contacts_p[bj->ncontacts] = ci;
+	bj->contacts_r[bj->ncontacts] = bi->ncontacts;
 	bj->e[bj->ncontacts] = e;
+
+	bi->ncontacts ++;
 	bj->ncontacts ++;
+}
+
+/********************************************************************
+ Number of contact entries whose reverse index (contacts_r) does not
+ point back to them (for echeck)
+ ********************************************************************/
+int ContactsReverseErrors(struct s_polymer *p, int npol)
+{
+	int ci,i,k,nerr=0;
+	struct s_back *b,*m;
+
+	for (ci=0;ci<npol;++ci)
+		for (i=0;i<(p+ci)->nback;++i)
+		{
+			b = ((p+ci)->back)+i;
+			for (k=0;k<b->ncontacts;++k)
+			{
+				m = ((p+b->contacts_p[k])->back)+b->contacts[k];
+				if (b->contacts_r[k] < 0 || b->contacts_r[k] >= m->ncontacts || m->contacts[b->contacts_r[k]] != i ||
+				    m->contacts_p[b->contacts_r[k]] != ci || m->contacts_r[b->contacts_r[k]] != k) nerr++;
+			}
+		}
+	return nerr;
+}
+
+/********************************************************************
+ Remove entry l of the contact list of b (residue i of chain c),
+ moving the last one in its place (and telling its partner)
+ ********************************************************************/
+static inline void RemoveContactEntry(struct s_polymer *p, struct s_back *b, int c, int i, int l)
+{
+	int last = b->ncontacts-1;
+	struct s_back *m;
+
+	if (l != last)
+	{
+		b->contacts[l] = b->contacts[last];
+		b->contacts_p[l] = b->contacts_p[last];
+		b->contacts_r[l] = b->contacts_r[last];
+		b->e[l] = b->e[last];
+		m = ((p+b->contacts_p[l])->back)+b->contacts[l];
+		m->contacts_r[b->contacts_r[l]] = l;
+		Touch(m,b->contacts_p[l],b->contacts[l]);
+	}
+	b->ncontacts --;
+	Touch(b,c,i);
 }
 
 /********************************************************************
@@ -880,32 +929,16 @@ void AddShell(struct s_polymer *p, int i, int j, int ci, int cj)
  ********************************************************************/
 void ResetContactsMonomer(struct s_polymer *p, int i, int ci)
 {
-	int k,neigh,l,cn;
+	int k,neigh,cn;
+	struct s_back *bi = ((p+ci)->back)+i;
 
-	// remove i from its neighbours
-	//#pragma omp parallel for private(neigh,cn,l)
-	for (k=0;k<(((p+ci)->back)+i)->ncontacts;++k)
+	// remove i from its neighbours (the entry of i in the list of the k-th is contacts_r[k])
+	for (k=0;k<bi->ncontacts;++k)
 	{
-		neigh = ((((p+ci)->back)+i)->contacts)[k];					// neigh is the k-th contact of i
-		cn = ((((p+ci)->back)+i)->contacts_p)[k];					// ... its chain
-		for (l=0;l<(((p+cn)->back)+neigh)->ncontacts;++l)
-			if ( ((((p+cn)->back)+neigh)->contacts)[l] == i && ((((p+cn)->back)+neigh)->contacts_p)[l] ==ci )		// l is the position of i in the list of neigh
-			{								// overwrite l-th with the last (i.e., delete both contact and energy)
-				((((p+cn)->back)+neigh)->contacts)[l] = ((((p+cn)->back)+neigh)->contacts)[ (((p+cn)->back)+neigh)->ncontacts - 1 ];
-//FRANBOB
-				((((p+cn)->back)+neigh)->contacts_p)[l] = ((((p+cn)->back)+neigh)->contacts_p)[ (((p+cn)->back)+neigh)->ncontacts - 1 ];
-				((((p+cn)->back)+neigh)->e)[l] = ((((p+cn)->back)+neigh)->e)[ (((p+cn)->back)+neigh)->ncontacts - 1 ];
-				//fprintf(stderr,"ncontacts = %d\n",(((p+cn)->back)+neigh)->ncontacts);
-
-
-				(((p+cn)->back)+neigh)->ncontacts --;
-				Touch(((p+cn)->back)+neigh,cn,neigh);
-                                //fprintf(stderr,"ncontacts = %d\n",(((p+cn)->back)+neigh)->ncontacts);
-
-				l--;
-			}
-		//reset its energy
-		(((p+ci)->back)+i)->e[k] = 0;
+		neigh = bi->contacts[k];
+		cn = bi->contacts_p[k];
+		RemoveContactEntry(p,((p+cn)->back)+neigh,cn,neigh,bi->contacts_r[k]);
+		bi->e[k] = 0;								// reset its energy
 	}
 	// reset the neighbour list of i
 	if ((((p+ci)->back)+i)->ncontacts) Touch(((p+ci)->back)+i,ci,i);
@@ -919,31 +952,28 @@ void ResetContactsMonomer(struct s_polymer *p, int i, int ci)
 void ResetContactsMonomerOutside(struct s_polymer *p, int i, int ci, const char *rig)
 {
 	struct s_back *bi = ((p+ci)->back)+i, *bn;
-	int k,l,neigh,cn,nk=0;
+	int k,neigh,cn,nk=0;
 
 	for (k=0;k<bi->ncontacts;++k)
 	{
 		neigh = bi->contacts[k];
 		cn = bi->contacts_p[k];
+		bn = ((p+cn)->back)+neigh;
 		if (cn==ci && rig[neigh])						// kept, in the same order
 		{
-			bi->contacts[nk] = neigh;
-			bi->contacts_p[nk] = cn;
-			bi->e[nk] = bi->e[k];
+			if (nk != k)
+			{
+				bi->contacts[nk] = neigh;
+				bi->contacts_p[nk] = cn;
+				bi->contacts_r[nk] = bi->contacts_r[k];
+				bi->e[nk] = bi->e[k];
+				bn->contacts_r[bi->contacts_r[k]] = nk;			// i moved in its own list
+				Touch(bn,cn,neigh);
+			}
 			nk++;
 			continue;
 		}
-		bn = ((p+cn)->back)+neigh;						// remove i from the list of neigh
-		for (l=0;l<bn->ncontacts;++l)
-			if (bn->contacts[l]==i && bn->contacts_p[l]==ci)
-			{
-				bn->contacts[l] = bn->contacts[bn->ncontacts-1];
-				bn->contacts_p[l] = bn->contacts_p[bn->ncontacts-1];
-				bn->e[l] = bn->e[bn->ncontacts-1];
-				bn->ncontacts --;
-				Touch(bn,cn,neigh);
-				l--;
-			}
+		RemoveContactEntry(p,bn,cn,neigh,bi->contacts_r[k]);		// remove i from the list of neigh
 	}
 	for (k=nk;k<bi->ncontacts;++k) bi->e[k] = 0;
 	if (nk < bi->ncontacts) Touch(bi,ci,i);

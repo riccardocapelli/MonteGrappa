@@ -35,3 +35,6 @@ __pycache__/
 
 # objects of the mhistogram tool (built in its source directory)
 src/mhistogram/*.o
+
+# local case studies, not part of the repository
+examples/

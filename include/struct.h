@@ -426,6 +426,7 @@ struct s_tables
 /********************************************************************
  State of the MC loop saved in a checkpoint (see checkpoint.c)
  ********************************************************************/
+#define NCKPFILES 8
 struct s_checkpoint
 {
 	int restart;			// 1 = Do_MC continues from this state (not saved)
@@ -437,7 +438,14 @@ struct s_checkpoint
 	long long acc,mov;
 	int mcount[NMOVES];
 	long long macc[NMOVES],mdone[NMOVES];
-	long long off[4];		// lengths of the trajectory, energy, observables and exchange files (-1: not written)
+	long long off[NCKPFILES];	// lengths of the output files (-1: not written): trajectory, energy, observables,
+					// exchanges, temperatures and harvest of simulated tempering, frames of the optimization, chi2.dat
+	int ntypes;			// size of the matrix of the potential, saved when the optimization changes it (not saved)
+	double t;			// temperature of the MC loop (it changes with simulated tempering)
+	double etot;			// energy as updated by the moves (it differs by rounding from a recalculation)
+	int st_iprint,st_o,nconf;	// counters of simulated tempering in the MC loop
+	int op_icount;			// steps since the last frame recorded for the optimization
+	int exc,exa;			// exchanges with the next replica, tried and accepted
 };
 
 /********************************************************************

@@ -458,7 +458,7 @@ void GrappinoWelcome(FILE *fp) {
     fprintf(fp,"\n\n");
     fprintf(fp,"       [=]\n");
     fprintf(fp,"       | |\t*Grappino*\n");
-    fprintf(fp,"       }@{\t\tv1.3\n");
+    fprintf(fp,"       }@{\t\tv2.0\n");
     fprintf(fp,"      /   \\ \n");
     fprintf(fp,"     /     \\ \n");
     fprintf(fp,"    /       \\ \n");

@@ -62,3 +62,5 @@ double OP_functionDiff(int iw, double deltae, struct s_optimizepot *x, struct s_
 void OP_UndoDiff(int iw, double deltae, struct s_optimizepot *x, struct s_optimizepot_input *in, struct s_mc_parms *parms);
 void FreeOpt(struct s_optimizepot *x,struct s_mc_parms *parms,int nrestr);
 void FreeOptInput(struct s_optimizepot_input *x);
+long long OP_SaveFrames(struct s_optimizepot *x, int nrestr, char *fname);
+void OP_LoadFrames(struct s_optimizepot *x, int nrestr, char *fname);

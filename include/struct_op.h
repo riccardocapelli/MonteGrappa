@@ -78,6 +78,9 @@ struct s_optimizepot
 	int icount;
 
 	int record;		// 1= record the energy when calling EnergyPairs
+
+	FILE *fsave;		// frames saved with the checkpoints (see OP_SaveFrames)...
+	int nfsaved,ncsaved;	// ...up to this frame and contact
 };
 
 struct s_optimizepot_input

@@ -15,11 +15,12 @@ directory, whose path is printed.
 | `errors` | wrong input (no `Temp`, wrong `nchains`, unknown `op_minim`, `op_allreplicas` without MPI, too long file name, missing checkpoint, periodic box too small, shells with a periodic box) stops with a message |
 | `regression` | fixed-seed runs (CA Go model, full atom with rotamers, three chains with cluster moves, two chains with H fields and all moves, hydrogen bonds with splice, potential optimisation) against `tests/reference`, with a small numerical tolerance |
 | `echeck` | every move type on five systems with the keyword `echeck`, with the automatic and the forced cell list: the incremental energy, the backup copy `oldp`, the cell list and the sidechains (each where its rotamer puts it) must agree with a full recalculation after every move |
-| `restart` | a run restarted from its checkpoint gives the same energy file, observables, trajectory and final structure, bit by bit (also a dcd trajectory, whose last frame was cut by the interruption) |
+| `restart` | a run restarted from its checkpoint gives the same energy file, observables, trajectory and final structure, bit by bit (also a dcd trajectory, whose last frame was cut by the interruption); an optimization of the potential restarted in its second run gives the same files, potentials and chi2 |
 | `cells` | cell list on and off give identical trajectories |
 | `tools` | `grappino` reproduces the CA model of tutorial 1, builds the shared-type (`go_homo`) Go model of the TTR(105-115) protofilament, handles glycines with the three rotamer modes, splice, CACB models of many chains and multi-model pdbs, backbone hydrogen bonds with reduced types, pairs and dihedral tables from files; `mgp2pdb` converts a two-chain system; a dcd trajectory converted by `dcd2pdb` equals the pdb trajectory of the same run |
 | `mpi` | `montegrappa_mpi` on one rank: run and exact restart |
-| `mpi_multi` | parallel tempering on 4 ranks (only where `mpirun` works, e.g. the Linux CI): run, accepted exchanges, exact restart, and the lowest-temperature replica samples the same mean energy as plain runs at that temperature; `op_allreplicas`: rank 0 gathers the frames of all ranks (energies rebuilt from the sparse contacts equal the recorded ones) and MBAR at the temperature of rank 0 reproduces the averages of its own frames |
+| `stempering` | with `bin/montegrappa_st` (built by `make check` where `gsl-config` is found): exact restart of adaptive simulated tempering (tutorial 5), and of simulated tempering with the optimization of the potential in its second run (tutorial 6), whose frames are in the checkpoint |
+| `mpi_multi` | parallel tempering on 4 ranks (only where `mpirun` works, e.g. the Linux CI): run, accepted exchanges, exact restart (also of an optimization with `op_allreplicas` in its second run), and the lowest-temperature replica samples the same mean energy as plain runs at that temperature; `op_allreplicas`: rank 0 gathers the frames of all ranks (energies rebuilt from the sparse contacts equal the recorded ones) and MBAR at the temperature of rank 0 reproduces the averages of its own frames |
 | `observables` | `obs.dat` of three 4-chain sheets of known structure: parallel in register, antiparallel in register, parallel shifted by two residues |
 | `avbmc` | the aggregation-volume-bias move: refused without a periodic box or `avb_rin`; `echeck` on three periodic systems with and without the cell list; for non-interacting chains the fraction of pairs in the bonded region equals V_in/V |
 | `stat` | on a 30-residue Go fragment at T=0.6, the BGS local move gives the same mean energy as pivot moves within 3 sigma; three interacting chains in a periodic box give the same mean energy with and without `avbmc`; the Go fragment at T=1.2 and polyalanine give the same mean energy with and without `cbmc` |
@@ -46,6 +47,8 @@ library differs between platforms; a different trajectory still fails.
 | `three.pol`, `homo.pot` | three homopolymer chains |
 | `two.pol`, `two_hf.pot` | two polyalanine chains with angles and H fields |
 | `fragment.pol`, `fragment.pot` | first 30 residues of 1YPC, CA Go model |
+| `random_polymer.pol`, `random_polymer.pot` | 21-bead random heteropolymer (tutorial 5, simulated tempering) |
+| `dna.pol`, `dna.pot`, `dna.op` | 20-bead polymer and one restraint (tutorial 6, simulated tempering with optimization) |
 | `fragment.op` | five CA-CA distances of the fragment (restraints of the MBAR test) |
 | `chain1100.pol`, `chain1100.pot` | 1100-residue homopolymer (cell list) |
 | `many.pol` (with `homo.pot`) | 40 homopolymer chains |

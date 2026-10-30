@@ -31,18 +31,22 @@
  * checkpoint.c
  *
  * Exact restart: the checkpoint file contains the state of the MC loop at the
- * end of a step (step, run, counters, state of the random number generator)
- * and the coordinates of all backbone and sidechain atoms written with 17
- * significant digits, so that they are read back bit by bit. The file is
- * written to a temporary name and then renamed, so an interrupted write never
- * destroys the previous checkpoint.
+ * end of a step (step, run, counters, state of the random number generator),
+ * the matrix of the potential when the optimization changes it, the state of
+ * simulated tempering and the coordinates of all backbone and sidechain atoms,
+ * written with 17 significant digits, so that they are read back bit by bit.
+ * The file is written to a temporary name and then renamed, so an interrupted
+ * write never destroys the previous checkpoint. The frames recorded for the
+ * optimization of the potential, which can be many, are appended to a
+ * separate file at each checkpoint (OP_SaveFrames), whose length is in the
+ * checkpoint as that of the other output files.
  */
 
 #include "montegrappa.h"
 #include <errno.h>
 #include <unistd.h>
 
-#define CHECKPOINT_VERSION 3
+#define CHECKPOINT_VERSION 4
 
 /*****************************************************************************
  Name of the checkpoint file of a given rank
@@ -58,13 +62,27 @@ void CheckpointName(char *fname, size_t size, int my_rank)
 }
 
 /*****************************************************************************
- Write checkpoint c and the coordinates of the npol chains of p
+ Name of the file of the frames of the optimization of a given rank
  *****************************************************************************/
-void WriteCheckpoint(char *fname, struct s_checkpoint *c, struct s_polymer *p, int npol)
+void CheckpointOPName(char *fname, size_t size, int my_rank)
+{
+	#ifdef ACTIVE_MPI
+	snprintf(fname,size,"checkpoint_op_proc%d.dat",my_rank);
+	#else
+	snprintf(fname,size,"checkpoint_op.dat");
+	(void) my_rank;
+	#endif
+}
+
+/*****************************************************************************
+ Write checkpoint c, the matrix of the potential if it is optimized, the
+ state of simulated tempering and the coordinates of the chains of p
+ *****************************************************************************/
+void WriteCheckpoint(char *fname, struct s_checkpoint *c, struct s_polymer *p, struct s_mc_parms *parms, struct s_potential *pot)
 {
 	char tmpname[FNAMEMAX+10];
 	FILE *fp;
-	int ic,i,j;
+	int ic,i,j,npol=parms->npol;
 	struct s_back *b;
 
 	snprintf(tmpname,sizeof(tmpname),"%s.tmp",fname);
@@ -79,7 +97,26 @@ void WriteCheckpoint(char *fname, struct s_checkpoint *c, struct s_polymer *p, i
 	fprintf(fp,"counters %d %d %d %d %d %lld %lld\n",c->iprinttrj,c->iprintlog,c->iprinte,c->icheckpoint,c->ptcount,c->acc,c->mov);
 	fprintf(fp,"moves %d\n",NMOVES);
 	for (i=0;i<NMOVES;++i) fprintf(fp,"%d %lld %lld\n",c->mcount[i],c->macc[i],c->mdone[i]);
-	fprintf(fp,"files %lld %lld %lld %lld\n",c->off[0],c->off[1],c->off[2],c->off[3]);
+	fprintf(fp,"files %d",NCKPFILES);
+	for (i=0;i<NCKPFILES;++i) fprintf(fp," %lld",c->off[i]);
+	fprintf(fp,"\nstate %.17g %.17g %d %d %d %d %d %d\n",c->t,c->etot,c->st_iprint,c->st_o,c->nconf,c->op_icount,c->exc,c->exa);
+
+	// the optimization changes the matrix of the potential at the end of each run
+	if (strcmp(parms->op_minim,"none"))
+	{
+		fprintf(fp,"potential %d\n",c->ntypes);
+		for (i=0;i<c->ntypes;++i)
+			for (j=0;j<c->ntypes;++j)
+				fprintf(fp,"%.17g%c",pot->e[i][j],j==c->ntypes-1 ? '\n' : ' ');
+	}
+
+	#ifdef STEMPERING
+	if (parms->stempering)
+	{
+		fprintf(fp,"stempering\n");
+		STWriteState(fp,parms->p);
+	}
+	#endif
 
 	fprintf(fp,"chains %d\n",npol);
 	for (ic=0;ic<npol;++ic)
@@ -124,10 +161,68 @@ void ReadCheckpointHeader(char *fname, struct s_checkpoint *c)
 	for (i=0;i<NMOVES;++i)
 		if (fscanf(fp,"%d %lld %lld",&(c->mcount[i]),&(c->macc[i]),&(c->mdone[i]))!=3)
 			Error("Cannot read move counters in checkpoint");
-	if (fscanf(fp," files %lld %lld %lld %lld",&(c->off[0]),&(c->off[1]),&(c->off[2]),&(c->off[3]))!=4)
-		Error("Cannot read lengths of the output files in checkpoint");
+	if (fscanf(fp," files %d",&i)!=1 || i!=NCKPFILES) Error("Cannot read lengths of the output files in checkpoint");
+	for (i=0;i<NCKPFILES;++i)
+		if (fscanf(fp,"%lld",&(c->off[i]))!=1) Error("Cannot read lengths of the output files in checkpoint");
+	if (fscanf(fp," state %lf %lf %d %d %d %d %d %d",&(c->t),&(c->etot),&(c->st_iprint),&(c->st_o),&(c->nconf),&(c->op_icount),&(c->exc),&(c->exa))!=8)
+		Error("Cannot read state of the MC loop in checkpoint");
 	fclose(fp);
 }
+
+/*****************************************************************************
+ Open the checkpoint after the line that starts with key, which is copied to
+ line (NULL if there is no such line)
+ *****************************************************************************/
+static FILE *CheckpointSection(char *fname, char *key, char *line, int size)
+{
+	FILE *fp;
+	size_t n=strlen(key);
+
+	fp = fopen(fname,"r");
+	if (!fp) Error("Cannot open checkpoint file");
+	while (fgets(line,size,fp)!=NULL)
+	{
+		if (!strncmp(line,key,n) && (line[n]==' ' || line[n]=='\n')) return fp;
+		if (!strncmp(line,"chains ",7)) break;			// the sections come before the coordinates
+	}
+	fclose(fp);
+	return NULL;
+}
+
+/*****************************************************************************
+ Overwrite the matrix of the potential with the one in the checkpoint, if
+ there is one (the optimization changed it)
+ *****************************************************************************/
+void ReadCheckpointPotential(char *fname, struct s_potential *u, int ntypes)
+{
+	FILE *fp;
+	char aux[500];
+	int i,j,n;
+
+	fp = CheckpointSection(fname,"potential",aux,500);
+	if (!fp) return;
+	if (sscanf(aux,"potential %d",&n)!=1 || n!=ntypes) Error("Matrix of the potential in checkpoint differs from the potential file");
+	for (i=0;i<ntypes;++i)
+		for (j=0;j<ntypes;++j)
+			if (fscanf(fp,"%lf",&(u->e[i][j]))!=1) Error("Cannot read matrix of the potential in checkpoint");
+	fclose(fp);
+}
+
+#ifdef STEMPERING
+/*****************************************************************************
+ Overwrite the state of simulated tempering with the one in the checkpoint
+ *****************************************************************************/
+void ReadCheckpointST(char *fname, struct st_stuff *st)
+{
+	FILE *fp;
+	char aux[500];
+
+	fp = CheckpointSection(fname,"stempering",aux,500);
+	if (!fp) Error("No state of simulated tempering in checkpoint");
+	STReadState(fp,st);
+	fclose(fp);
+}
+#endif
 
 /*****************************************************************************
  Cut an output file to the length it had at the checkpoint (off<0: the file

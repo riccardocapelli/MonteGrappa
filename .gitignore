@@ -38,3 +38,16 @@ src/mhistogram/*.o
 
 # local case studies, not part of the repository
 examples/
+
+# macOS metadata
+._*
+.DS_Store
+
+# LaTeX build of the manual
+docs/*.aux
+docs/*.fdb_latexmk
+docs/*.fls
+docs/*.log
+docs/*.out
+docs/*.toc
+docs/*.pdf

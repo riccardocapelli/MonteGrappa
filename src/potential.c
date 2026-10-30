@@ -280,7 +280,8 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
 	else
 	{
 	#ifdef _OPENMP
-	#pragma omp parallel for private(cj,i,j,tooclose) reduction(+:etot)
+	int recording = (p->op && p->op->record);			// recording a frame adds to the shared contacts of the frame
+	#pragma omp parallel for private(cj,i,j,tooclose) reduction(+:etot) if(!recording)
 	#endif
 	for (ci=0;ci<npol;++ci)                                     // loops on polymers
             for (cj=ci;cj<npol;++cj)

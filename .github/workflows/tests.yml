@@ -13,7 +13,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libgsl-dev libopenmpi-dev openmpi-bin
       - name: Build
         run: |
-          make version=STEMPERING      # compile check only: it also writes bin/montegrappa
+          make version=STEMPERING MC_BIN=bin/montegrappa_st   # simulated tempering (group stempering)
           make                         # serial executable used by the tests
           make version=MPI
           make grappino mgp2pdb dcd2pdb mhistogram
@@ -47,7 +47,7 @@ jobs:
         run: brew install gsl
       - name: Build
         run: |
-          make version=STEMPERING
+          make version=STEMPERING MC_BIN=bin/montegrappa_st
           make
           make grappino mgp2pdb dcd2pdb mhistogram
       - name: Tests

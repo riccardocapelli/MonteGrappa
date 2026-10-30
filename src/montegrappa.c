@@ -307,13 +307,16 @@ int main(int argc, char *argv[])
 	#endif
 	   
 	#ifdef OPTIMIZEPOT
+	fp = NULL;
+	#ifdef OP_DEBUG							// log of the optimization, only to debug it
 	char fname_op[50];
 	#ifdef ACTIVE_MPI
-	snprintf(fname_op,sizeof(fname_op),"op_log_proc%d.pdb",my_rank);
+	snprintf(fname_op,sizeof(fname_op),"op_log_proc%d",my_rank);
 	#else
 	snprintf(fname_op,sizeof(fname_op),"op_log");
 	#endif
 	fp = fopen(fname_op,"w");
+	#endif
 	startp->op = InitializeOptimizePot(parms,ntypes,u,fproc,my_rank,fp,&nrestr);	
 
 	ematold = AlloDoubleMatrix(ntypes,ntypes);
@@ -399,13 +402,17 @@ int main(int argc, char *argv[])
 	#ifdef OPTIMIZEPOT
 	if(parms->chi2start==0 && !restart)
 		remove("chi2.dat");
+	if (restart && my_rank==0) TruncateOutput("chi2.dat",ckp.off[7]);	// a run completed after the checkpoint wrote it
 	#endif
+	ckp.ntypes = ntypes;
 	for (irun=(restart ? ckp.irun : parms->chi2start);irun<parms->nrun;++irun)
 	{
 		if (ckp.restart)						// continue the interrupted run from the checkpoint
 		{
 			CopyAllPolymers(startp,polymer,parms->npol,parms->nosidechains,parms->nosidechains);
 			ReadCheckpointCoordinates(ckpname,polymer,parms->npol);
+			ReadCheckpointPotential(ckpname,u,ntypes);		// as changed by the optimizations of the previous runs
+			if (u->pp) SetPairParameters(u,ntypes);
 			#ifdef ACTIVE_MPI
 			CopyAllPolymers(polymer,replica,parms->npol,parms->nosidechains,parms->nosidechains);
 			#endif
@@ -421,6 +428,13 @@ int main(int argc, char *argv[])
 		#ifdef ACTIVE_MPI
 		replica->etot = TotalEnergy(replica,u,parms,parms->npol,1,parms->nosidechains,parms->debug,my_rank);
 		#endif
+		if (ckp.restart)						// the energy as the moves updated it, not its recalculation
+		{
+			polymer->etot = ckp.etot;
+			#ifdef ACTIVE_MPI
+			replica->etot = ckp.etot;
+			#endif
+		}
 		if (polymer->etot >= LARGE)
 			fprintf(stderr,"WARNING: the structure has overlapping atoms (E=%g); the energy reported during the run keeps\n"
 				"         their hard-core terms also after they are resolved (use the keyword disentangle)\n",polymer->etot);
@@ -641,7 +655,7 @@ int main(int argc, char *argv[])
 	}
 	
 	#ifdef OPTIMIZEPOT
-	fclose(fp);
+	if (fp) fclose(fp);
 	#endif
 
 	

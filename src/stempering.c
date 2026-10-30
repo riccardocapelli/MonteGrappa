@@ -867,6 +867,7 @@ void Restart(struct st_stuff *p)
 		if (p->st_ntemp<2) FatalError("You need more than two tempering to make a stempering");
 		p->st_nm = 1;
 		p->st_temp = AlloDouble(p->st_ntemp);
+		p->st_nalloc = p->st_ntemp;
 		p->st_g = AlloDouble(p->st_ntemp);
 		p->st_prob_down = AlloDouble(p->st_ntemp);
 		p->st_prob_up = AlloDouble(p->st_ntemp);
@@ -879,6 +880,7 @@ void Restart(struct st_stuff *p)
 	{
 		p->st_nm = 2;
 		p->st_temp = AlloDouble(p->st_ntempmax);
+		p->st_nalloc = p->st_ntempmax;
 		p->st_g = AlloDouble(p->st_ntempmax);
 		p->st_prob_down = AlloDouble(p->st_ntempmax);
 		p->st_prob_up = AlloDouble(p->st_ntempmax);
@@ -1070,4 +1072,160 @@ void PrintStatistics(struct st_stuff *p, double step)
 	}
 	fprintf(stderr,"lp_tot/n=%lf\n",log(p_tot)/p->st_ntemp);
 	fflush(stderr);
+}
+
+/*************************************************************
+ * State of simulated tempering in the checkpoint (see
+ * checkpoint.c): everything that changes during the run,
+ * with 17 significant digits; the histograms are sparse.
+ * The structure must have been initialized from the same
+ * parameters, so that the arrays have the same sizes.
+ *************************************************************/
+static void STWriteVec(FILE *fp, const char *name, double *v, int n)
+{
+	int i;
+
+	fprintf(fp,"%s %d\n",name,v ? n : 0);
+	if (v) for (i=0;i<n;++i) fprintf(fp,"%.17g\n",v[i]);
+}
+
+static void STWriteIVec(FILE *fp, const char *name, int *v, int n)
+{
+	int i;
+
+	fprintf(fp,"%s %d\n",name,v ? n : 0);
+	if (v) for (i=0;i<n;++i) fprintf(fp,"%d\n",v[i]);
+}
+
+static void STWriteMat(FILE *fp, const char *name, double **m, int nr, int nc)
+{
+	int i,j,nnz=0;
+
+	if (m)
+		for (i=0;i<nr;++i)
+			for (j=0;j<nc;++j) if (m[i][j]!=0) nnz++;
+	fprintf(fp,"%s %d %d %d\n",name,m ? nr : 0,nc,nnz);
+	if (m)
+		for (i=0;i<nr;++i)
+			for (j=0;j<nc;++j)
+				if (m[i][j]!=0) fprintf(fp,"%d %d %.17g\n",i,j,m[i][j]);
+}
+
+static void STReadVec(FILE *fp, const char *name, double *v, int n)
+{
+	char key[50];
+	int i,m;
+
+	if (fscanf(fp," %49s %d",key,&m)!=2 || strcmp(key,name) || m!=(v ? n : 0))
+	{
+		fprintf(stderr,"Array %s of simulated tempering in checkpoint\n",name);
+		FatalError("Checkpoint written with other parameters of simulated tempering");
+	}
+	for (i=0;i<m;++i)
+		if (fscanf(fp,"%lf",v+i)!=1) FatalError("Cannot read simulated tempering in checkpoint");
+}
+
+static void STReadIVec(FILE *fp, const char *name, int *v, int n)
+{
+	char key[50];
+	int i,m;
+
+	if (fscanf(fp," %49s %d",key,&m)!=2 || strcmp(key,name) || m!=(v ? n : 0))
+	{
+		fprintf(stderr,"Array %s of simulated tempering in checkpoint\n",name);
+		FatalError("Checkpoint written with other parameters of simulated tempering");
+	}
+	for (i=0;i<m;++i)
+		if (fscanf(fp,"%d",v+i)!=1) FatalError("Cannot read simulated tempering in checkpoint");
+}
+
+static void STReadMat(FILE *fp, const char *name, double **m, int nr, int nc)
+{
+	char key[50];
+	int i,j,k,r,c,nnz;
+
+	if (fscanf(fp," %49s %d %d %d",key,&r,&c,&nnz)!=4 || strcmp(key,name) || r!=(m ? nr : 0) || c!=nc)
+	{
+		fprintf(stderr,"Matrix %s of simulated tempering in checkpoint\n",name);
+		FatalError("Checkpoint written with other parameters of simulated tempering");
+	}
+	for (i=0;i<r;++i)
+		for (j=0;j<c;++j) m[i][j] = 0;
+	for (k=0;k<nnz;++k)
+	{
+		if (fscanf(fp,"%d %d",&i,&j)!=2 || i<0 || i>=r || j<0 || j>=c) FatalError("Cannot read simulated tempering in checkpoint");
+		if (fscanf(fp,"%lf",&(m[i][j]))!=1) FatalError("Cannot read simulated tempering in checkpoint");
+	}
+}
+
+void STWriteState(FILE *fp, struct st_stuff *p)
+{
+	int i,nf=(p->st_ntempmax > NHISTOMAX ? p->st_ntempmax : NHISTOMAX);
+	struct st_restart *r;
+
+	fprintf(fp,"st %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\n",p->st_nalloc,p->st_nbin,p->st_nm,p->st_ntemp,p->st_itemp,
+		p->st_count_st,p->st_count_adj,p->st_count_print,p->st_count_printt,p->st_iter,p->st_failure,p->st_nreliable_t,
+		p->st_noldt,p->st_ttarget_harvest,p->st_noadjust);
+	STWriteVec(fp,"temp",p->st_temp,p->st_nalloc);
+	STWriteVec(fp,"g",p->st_g,p->st_nalloc);
+	STWriteVec(fp,"prob_up",p->st_prob_up,p->st_nalloc);
+	STWriteVec(fp,"prob_down",p->st_prob_down,p->st_nalloc);
+	STWriteIVec(fp,"counts",p->st_counts,p->st_nalloc);
+	STWriteMat(fp,"h",p->st_h,p->st_ntempmax,p->st_nbin);
+	STWriteVec(fp,"f",p->st_f,nf);
+	STWriteVec(fp,"current_lg",p->st_current_lg,p->st_nbin);
+	STWriteVec(fp,"reliable_lg",p->st_reliable_lg,p->st_nbin);
+	STWriteVec(fp,"reliable_t",p->st_reliable_t,p->st_ntempmax);
+	STWriteVec(fp,"reliable_g",p->st_reliable_g,p->st_ntempmax);
+	STWriteIVec(fp,"binok",p->st_binok,p->st_nbin);
+	STWriteMat(fp,"oldh",p->st_oldh,NHISTOMAX,p->st_nbin);
+	STWriteVec(fp,"oldt",p->st_oldh ? p->st_oldt : NULL,NHISTOMAX);
+	STWriteIVec(fp,"oldt_iter",p->st_oldh ? p->st_oldt_iter : NULL,NHISTOMAX);
+	fprintf(fp,"restarts %d\n",(p->st_restart>-1 && p->st_st_restart) ? NRESTARTS : 0);
+	if (p->st_restart>-1 && p->st_st_restart)
+		for (i=0;i<NRESTARTS;++i)
+		{
+			r = (p->st_st_restart)+i;
+			fprintf(fp,"%.17g %d\n",r->step,r->ntemp);
+			STWriteVec(fp,"rtemp",r->temp,NTEMPMAX);
+			STWriteVec(fp,"rg",r->g,NTEMPMAX);
+			STWriteVec(fp,"rlg",r->lg,p->st_nbin);
+		}
+}
+
+void STReadState(FILE *fp, struct st_stuff *p)
+{
+	int i,n,nalloc,nbin,nf=(p->st_ntempmax > NHISTOMAX ? p->st_ntempmax : NHISTOMAX);
+	struct st_restart *r;
+
+	if (fscanf(fp," st %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d",&nalloc,&nbin,&(p->st_nm),&(p->st_ntemp),&(p->st_itemp),
+		&(p->st_count_st),&(p->st_count_adj),&(p->st_count_print),&(p->st_count_printt),&(p->st_iter),&(p->st_failure),
+		&(p->st_nreliable_t),&(p->st_noldt),&(p->st_ttarget_harvest),&(p->st_noadjust))!=15)
+		FatalError("Cannot read simulated tempering in checkpoint");
+	if (nalloc!=p->st_nalloc || nbin!=p->st_nbin) FatalError("Checkpoint written with other parameters of simulated tempering");
+	STReadVec(fp,"temp",p->st_temp,p->st_nalloc);
+	STReadVec(fp,"g",p->st_g,p->st_nalloc);
+	STReadVec(fp,"prob_up",p->st_prob_up,p->st_nalloc);
+	STReadVec(fp,"prob_down",p->st_prob_down,p->st_nalloc);
+	STReadIVec(fp,"counts",p->st_counts,p->st_nalloc);
+	STReadMat(fp,"h",p->st_h,p->st_ntempmax,p->st_nbin);
+	STReadVec(fp,"f",p->st_f,nf);
+	STReadVec(fp,"current_lg",p->st_current_lg,p->st_nbin);
+	STReadVec(fp,"reliable_lg",p->st_reliable_lg,p->st_nbin);
+	STReadVec(fp,"reliable_t",p->st_reliable_t,p->st_ntempmax);
+	STReadVec(fp,"reliable_g",p->st_reliable_g,p->st_ntempmax);
+	STReadIVec(fp,"binok",p->st_binok,p->st_nbin);
+	STReadMat(fp,"oldh",p->st_oldh,NHISTOMAX,p->st_nbin);
+	STReadVec(fp,"oldt",p->st_oldh ? p->st_oldt : NULL,NHISTOMAX);
+	STReadIVec(fp,"oldt_iter",p->st_oldh ? p->st_oldt_iter : NULL,NHISTOMAX);
+	if (fscanf(fp," restarts %d",&n)!=1 || n!=((p->st_restart>-1 && p->st_st_restart) ? NRESTARTS : 0))
+		FatalError("Checkpoint written with other parameters of simulated tempering");
+	for (i=0;i<n;++i)
+	{
+		r = (p->st_st_restart)+i;
+		if (fscanf(fp,"%lf %d",&(r->step),&(r->ntemp))!=2) FatalError("Cannot read simulated tempering in checkpoint");
+		STReadVec(fp,"rtemp",r->temp,NTEMPMAX);
+		STReadVec(fp,"rg",r->g,NTEMPMAX);
+		STReadVec(fp,"rlg",r->lg,p->st_nbin);
+	}
 }

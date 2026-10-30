@@ -982,10 +982,10 @@ struct s_mc_parms *ReadMcParms(char *fname, int restart)
         if ((x->p)->st_ntempmax>NTEMPMAX) FatalError("ntmax should be smaller than NTEMPMAX");
         if ((x->p)->st_ntemp>(x->p)->st_ntempmax) FatalError("ntemp should be smaller than ntmax");
 
-        // Initialize common stuff
-        (x->p)->st_ftout = fopen((x->p)->st_nftout,"w");
+        // Initialize common stuff (a restart continues the file, cut back to the checkpoint by Do_MC)
+        (x->p)->st_ftout = fopen((x->p)->st_nftout,restart ? "a" : "w");
         if ((x->p)->st_ftout==NULL) FatalError("Error opening 'tfile' for writing");
-        fprintf((x->p)->st_ftout,"# STEP\tTEMP\tNTEMP\n");
+        if (!restart) fprintf((x->p)->st_ftout,"# STEP\tTEMP\tNTEMP\n");
         (x->p)->st_f = NULL;
         (x->p)->st_nbin = (int) (((x->p)->st_emax-(x->p)->st_emin)/(x->p)->st_ebin) + 1;
         
@@ -1003,6 +1003,7 @@ struct s_mc_parms *ReadMcParms(char *fname, int restart)
                 if ((x->p)->st_ntemp<2) FatalError("You need more than two tempering to make a stempering");
                 (x->p)->st_nm = 1;
                 (x->p)->st_temp = AlloDouble((x->p)->st_ntemp);
+                (x->p)->st_nalloc = (x->p)->st_ntemp;
                 (x->p)->st_g = AlloDouble((x->p)->st_ntemp);
                 (x->p)->st_prob_down = AlloDouble((x->p)->st_ntemp);
                 (x->p)->st_prob_up = AlloDouble((x->p)->st_ntemp);
@@ -1020,6 +1021,7 @@ struct s_mc_parms *ReadMcParms(char *fname, int restart)
         {
                 (x->p)->st_nm = 2;
                 (x->p)->st_temp = AlloDouble((x->p)->st_ntempmax);
+                (x->p)->st_nalloc = (x->p)->st_ntempmax;
                 (x->p)->st_g = AlloDouble((x->p)->st_ntempmax);
                 (x->p)->st_prob_down = AlloDouble((x->p)->st_ntempmax);
                 (x->p)->st_prob_up = AlloDouble((x->p)->st_ntempmax);
@@ -1389,6 +1391,7 @@ void ResetStStuff(struct s_mc_parms *x,char *fname){
                 if ((x->p)->st_ntemp<2) FatalError("You need more than two tempering to make a stempering");
                 (x->p)->st_nm = 1;
                 (x->p)->st_temp = AlloDouble((x->p)->st_ntemp);
+                (x->p)->st_nalloc = (x->p)->st_ntemp;
                 (x->p)->st_g = AlloDouble((x->p)->st_ntemp);
                 (x->p)->st_prob_down = AlloDouble((x->p)->st_ntemp);
                 (x->p)->st_prob_up = AlloDouble((x->p)->st_ntemp);
@@ -1406,6 +1409,7 @@ void ResetStStuff(struct s_mc_parms *x,char *fname){
         {
                 (x->p)->st_nm = 2;
                 (x->p)->st_temp = AlloDouble((x->p)->st_ntempmax);
+                (x->p)->st_nalloc = (x->p)->st_ntempmax;
                 (x->p)->st_g = AlloDouble((x->p)->st_ntempmax);
                 (x->p)->st_prob_down = AlloDouble((x->p)->st_ntempmax);
                 (x->p)->st_prob_up = AlloDouble((x->p)->st_ntempmax);

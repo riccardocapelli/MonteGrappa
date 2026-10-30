@@ -38,6 +38,7 @@
 
 
 #include "montegrappa.h"
+#include <sys/stat.h>
 /*****************************************************************************
  Monte Carlo loop
  *****************************************************************************/
@@ -55,9 +56,9 @@ static long long FileLength(FILE *fp)
  Write the checkpoint of the state at the end of step istep-1 of run irun,
  with the lengths of the output files the restart cuts them to
  *****************************************************************************/
-static void SaveCheckpoint(struct s_checkpoint *chk, char *fname, struct s_polymer *p, struct s_mc_parms *parms, int irun,
+static void SaveCheckpoint(struct s_checkpoint *chk, char *fname, struct s_polymer *p, struct s_potential *pot, struct s_mc_parms *parms, int irun,
 		unsigned long long istep, int iprinttrj, int iprintlog, int iprinte, int *mcount, long long *macc, long long *mdone,
-		int ptcount, FILE *ftrj, FILE *fe, FILE *fexchange)
+		int ptcount, FILE *ftrj, FILE *fe, FILE *fexchange, int my_rank)
 {
 	int i;
 
@@ -77,11 +78,51 @@ static void SaveCheckpoint(struct s_checkpoint *chk, char *fname, struct s_polym
 		chk->mdone[i] = mdone[i];
 	}
 	chk->ptcount = ptcount;
+	chk->etot = p->etot;
 	chk->off[0] = FileLength(ftrj);
 	chk->off[1] = strcmp(parms->fne,"") ? FileLength(fe) : -1;
 	chk->off[2] = FileLength(parms->fobs);
 	chk->off[3] = FileLength(fexchange);
-	WriteCheckpoint(fname,chk,p,parms->npol);
+	chk->off[4] = chk->off[5] = chk->off[6] = chk->off[7] = -1;
+	#ifdef STEMPERING
+	if (parms->stempering)
+	{
+		chk->off[4] = FileLength((parms->p)->st_ftout);
+		if ((parms->p)->st_ttarget_harvest) chk->off[5] = FileLength((parms->p)->st_pdbf);
+	}
+	#endif
+	if (strcmp(parms->op_minim,"none") && (my_rank==0 || parms->op_allreplicas))	// the frames first: the checkpoint refers to them
+	{
+		char fop[FNAMEMAX];
+
+		CheckpointOPName(fop,sizeof(fop),my_rank);
+		chk->off[6] = OP_SaveFrames(p->op,parms->op_input->ndata,fop);
+		if (my_rank==0)							// chi2.dat is written at the end of each run
+		{
+			struct stat sb;
+			chk->off[7] = stat("chi2.dat",&sb) ? 0 : (long long) sb.st_size;
+		}
+	}
+	WriteCheckpoint(fname,chk,p,parms,pot);
+}
+
+/*****************************************************************************
+ Variables of the MC loop that the checkpoint keeps
+ *****************************************************************************/
+static void SaveLoopState(struct s_checkpoint *chk, double t, int st_iprint, int st_o, int nconf, int op_icount,
+		int *ex_count, int *ex_acc, int my_rank, int ntemp)
+{
+	chk->t = t;
+	chk->st_iprint = st_iprint;
+	chk->st_o = st_o;
+	chk->nconf = nconf;
+	chk->op_icount = op_icount;
+	chk->exc = chk->exa = 0;
+	if (ex_count && my_rank<ntemp-1)
+	{
+		chk->exc = ex_count[my_rank];
+		chk->exa = ex_acc[my_rank];
+	}
 }
 
 /*****************************************************************************
@@ -169,11 +210,9 @@ int Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *rep
 	op->record = 0;
 	#endif
 
-	#ifdef STEMPERING
-	int st_iprint=0;
+	int st_iprint=0;		// simulated tempering
 	int st_o=0;
 	int nconf=0;
-	#endif
        
 
 	#ifdef ACTIVE_MPI
@@ -198,6 +237,7 @@ int Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *rep
 	#else
 	int my_rank=0;
 	FILE *fexchange=NULL;
+	int *ex_count=NULL,*ex_acc=NULL;
 	t=parms->T;
 	#endif
 	softexit =0;
@@ -228,6 +268,7 @@ int Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *rep
 	}
 
 	// continue from a checkpoint: restore the loop state saved at the end of a step
+	CheckpointName(fchkp,sizeof(fchkp),my_rank);
 	if (chk->restart)
 	{
 		istep = chk->istep;
@@ -245,16 +286,45 @@ int Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *rep
 		}
 		#ifdef ACTIVE_MPI
 		ptempering_count = chk->ptcount;
+		if (my_rank<parms->ntemp-1) { ex_count[my_rank] = chk->exc; ex_acc[my_rank] = chk->exa; }
 		#endif
 		SetRNGState(chk->rng);
+		t = chk->t;
+		#ifdef STEMPERING
+		st_iprint = chk->st_iprint;
+		st_o = chk->st_o;
+		nconf = chk->nconf;
+		if (parms->stempering)
+		{
+			ReadCheckpointST(fchkp,parms->p);
+			TruncateOutput((parms->p)->st_nftout,chk->off[4]);	// opened in append by ReadMcParms
+			if ((parms->p)->st_ttarget_harvest)
+			{
+				TruncateOutput((parms->p)->st_pdbnf,chk->off[5]);
+				(parms->p)->st_pdbf = fopen((parms->p)->st_pdbnf,"a");
+				if (!(parms->p)->st_pdbf) Error("Cannot open pdbnf file for harvesting");
+			}
+		}
+		#endif
+		op->icount = chk->op_icount;
+		if (strcmp(parms->op_minim,"none") && (my_rank==0 || parms->op_allreplicas))
+		{
+			char fop[FNAMEMAX];
+
+			CheckpointOPName(fop,sizeof(fop),my_rank);
+			TruncateOutput(fop,chk->off[6]);
+			OP_LoadFrames(op,parms->op_input->ndata,fop);
+		}
 	}
-	CheckpointName(fchkp,sizeof(fchkp),my_rank);
 	time_t tcheckpoint = time(NULL);
 	#ifndef ACTIVE_MPI
 	int ptempering_count=0;
 	#endif
 	if (!chk->restart)						// a restart of this run starts at least from here
-		SaveCheckpoint(chk,fchkp,p,parms,irun,istep,iprinttrj,iprintlog,iprinte,mcount,macc,mdone,ptempering_count,ftrj,fe,fexchange);
+	{
+		SaveLoopState(chk,t,st_iprint,st_o,nconf,op->icount,ex_count,ex_acc,my_rank,parms->ntemp);
+		SaveCheckpoint(chk,fchkp,p,pot,parms,irun,istep,iprinttrj,iprintlog,iprinte,mcount,macc,mdone,ptempering_count,ftrj,fe,fexchange,my_rank);
+	}
 	if (my_rank==0)
 	{
 		MGInfo_StartRun(parms,istep);
@@ -265,7 +335,7 @@ int Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *rep
 	#ifdef OPTIMIZEPOT
 	if(my_rank==0 || parms->op_allreplicas)				// op_allreplicas: every replica records its frames
 	{
-		if (strcmp(parms->op_minim,"none")  && ok>-1)
+		if (strcmp(parms->op_minim,"none")  && ok>-1 && !chk->restart)		// the frame of the start (a restart continues the loop)
 		{
 		#ifdef STEMPERING
 			if (parms->stempering)
@@ -305,7 +375,7 @@ int Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *rep
 	////////////////////
 	// MC LOOP        //
 	////////////////////
-	do
+	while (istep<parms->nstep && stop==0)			// a restart from the last step does nothing
 	{
 	
 
@@ -691,13 +761,14 @@ int Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *rep
 		{
 			tcheckpoint = time(NULL);
 			icheckpoint = 0;
-			SaveCheckpoint(chk,fchkp,p,parms,irun,istep,iprinttrj,iprintlog,iprinte,mcount,macc,mdone,ptempering_count,ftrj,fe,fexchange);
+			SaveLoopState(chk,t,st_iprint,st_o,nconf,op->icount,ex_count,ex_acc,my_rank,parms->ntemp);
+			SaveCheckpoint(chk,fchkp,p,pot,parms,irun,istep,iprinttrj,iprintlog,iprinte,mcount,macc,mdone,ptempering_count,ftrj,fe,fexchange,my_rank);
 		}
 
 		// progress in the file mginfo (every tmginfo seconds)
 		if (my_rank==0 && istep%1000==0) MGInfo_MC(parms,irun,istep,p->etot,t,0);
 
-	} while (istep<parms->nstep && stop==0);	
+	}
 	///////////////////////////////////////// end MC LOOP
 	if (my_rank==0) MGInfo_EndMC(parms,irun);
 		

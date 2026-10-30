@@ -128,6 +128,7 @@ all:
 check:
 	$(MAKE) montegrappa grappino mgp2pdb dcd2pdb
 	if command -v $(MPICC) >/dev/null 2>&1; then $(MAKE) version=MPI; fi
+	if command -v gsl-config >/dev/null 2>&1; then $(MAKE) version=STEMPERING MC_BIN=$(BINDIR)/montegrappa_st; fi
 	tests/run_tests.sh
 
 check-asan:
@@ -143,7 +144,7 @@ cleanobj:
 	rm -f src/mhistogram/*.o
 
 clean: cleanobj
-	rm -f $(BINDIR)/montegrappa $(BINDIR)/montegrappa_mpi $(BINDIR)/montegrappa_asan \
+	rm -f $(BINDIR)/montegrappa $(BINDIR)/montegrappa_mpi $(BINDIR)/montegrappa_asan $(BINDIR)/montegrappa_st \
 	      $(BINDIR)/grappino $(BINDIR)/grappino_asan $(BINDIR)/mgp2pdb $(BINDIR)/mgp2pdb_asan \
 	      $(BINDIR)/dcd2pdb $(BINDIR)/dcd2pdb_asan $(BINDIR)/mhistogram
 

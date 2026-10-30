@@ -43,8 +43,8 @@
 #include <signal.h>
 #include <stdbool.h>
 
-        #define NVER		1
-        #define NSUBVER	 	3	
+        #define NVER		2
+        #define NSUBVER	 	0	
 
         #define NRESMAX		3000		// maximum number of backbone atoms
         #define NATOMMAX	60000		// maximum number of atoms
@@ -271,9 +271,14 @@ int irand(int r);
 double frand(void);
 long Randomize(long n, int stream);
 void CheckpointName(char *fname, size_t size, int my_rank);
-void WriteCheckpoint(char *fname, struct s_checkpoint *c, struct s_polymer *p, int npol);
+void CheckpointOPName(char *fname, size_t size, int my_rank);
+void WriteCheckpoint(char *fname, struct s_checkpoint *c, struct s_polymer *p, struct s_mc_parms *parms, struct s_potential *pot);
 void ReadCheckpointHeader(char *fname, struct s_checkpoint *c);
 void ReadCheckpointCoordinates(char *fname, struct s_polymer *p, int npol);
+void ReadCheckpointPotential(char *fname, struct s_potential *u, int ntypes);
+#ifdef STEMPERING
+void ReadCheckpointST(char *fname, struct st_stuff *st);
+#endif
 void TruncateOutput(char *fname, long long off);
 long TimeSeed(void);
 void SeedRNG(long seed, int stream);

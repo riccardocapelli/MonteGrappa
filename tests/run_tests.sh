@@ -12,6 +12,7 @@
 #               incremental energy, the backup copy and the cell list must always
 #               agree with a full recalculation
 #   restart     a run restarted from its checkpoint must give identical files
+#               (also in the second iteration of an optimization of the potential)
 #   cells       cell list on and off must give identical trajectories
 #   tools       grappino and mgp2pdb
 #   mpi         MPI executable run on a single rank (if it was built)
@@ -21,6 +22,8 @@
 #   mpi_multi   parallel tempering with 4 ranks (only where mpirun works): run,
 #               exact restart, and the replica at the lowest temperature must
 #               sample the same mean energy as plain runs at that temperature
+#   stempering  exact restart of simulated tempering, also with the optimization of
+#               the potential (needs bin/montegrappa_st)
 #   stat        (slow, not in the default) detailed balance: the BGS local move
 #               must sample the same mean energy as pivot moves, and so must
 #               interacting chains with and without the avbmc move, and chains
@@ -50,7 +53,7 @@ for a in "$@"; do
 		*) TGROUPS="$TGROUPS $a" ;;
 	esac
 done
-[ -z "$TGROUPS" ] && TGROUPS="errors regression echeck restart cells tools mpi observables avbmc mpi_multi"
+[ -z "$TGROUPS" ] && TGROUPS="errors regression echeck restart cells tools mpi observables avbmc mpi_multi stempering"
 
 [ -x "$MG" ] || { echo "executable $MG not found: build it first"; exit 1; }
 
@@ -262,8 +265,31 @@ restart_case() {
 	if [ "$res" = ok ]; then pass "restart $name"; else fail "restart $name" "$res"; fi
 }
 
+# restart from the last checkpoint of a whole run, taken in the middle of its last
+# iteration: the restart cuts every output file back to it, and must write them
+# again identical (also the potential optimized in the earlier iterations, the frames
+# recorded for the optimization and the state of simulated tempering)
+# restart_full_case <name> <executable> <pol> <pot> <other data files> <parameter lines>
+restart_full_case() {
+	local name=$1 exe=$2 pol=$3 pot=$4 extra=$5 lines=$6
+	local a=$WORK/rstf_$name b=$WORK/rstf_${name}_b f res=ok
+	rm -rf $a; mkdir -p $a
+	for f in $pol $pot $extra; do cp $DATA/$f $a/; done
+	par $a/run.par "$lines"
+	if ! ( cd $a && "$exe" $pol $pot run.par > stdout.log 2> stderr.log ); then fail "restart $name" "run failed"; return; fi
+	rm -rf $b; cp -r $a $b
+	( cd $b && "$exe" checkpoint $pot run.par > stdout.log 2> stderr.log ) || res="restart failed"
+	grep -q "Restart from checkpoint.dat at run $7" $b/stderr.log || res="checkpoint not in run $7"
+	for f in $(cd $a && ls | grep -v -e '^checkpoint' -e '\.log$' -e '^mginfo$'); do
+		cmp -s $a/$f $b/$f || res="$f differs"
+	done
+	sanitizer_ok $b || res="sanitizer report"
+	if [ "$res" = ok ]; then pass "restart $name"; else fail "restart $name" "$res"; fi
+}
+
 group_restart() {
 	echo "restart"
+	restart_full_case optim "$MG" polyala.pol polyala.pot polyala.op "nchains 1\nTemp 1.0\nmpivot 1\npivot 4\nnrun 2\nnstep 60000\nalways_restart\nrecord_native\nop_file polyala.op\nop_minim sample\nop_itermax 200\nop_step 0.2\nop_T 1.0\nop_deltat 5000\nop_wait 10000\nop_rw 3.5\nop_r0 1.0\nseed 3\nncheckpoint 25000\nnprinte 1000\nnprinttrj 5000\n" "1, step 50000"
 	restart_case polyala polyala.pol polyala.pot "nchains 1\nTemp 1.0\nmpivot 1\npivot 4\nsidechain 2\nflip 3\nmovebias 5\nnmul_local 5\n"
 	restart_case three three.pol homo.pot "nchains 3\nnosidechain\nnodihpot\nnoangpot\nTemp 1.0\nflip 1\npivot 5\ncomcluster 5\nrotcluster 5\nmovecom 7\nmoverot 7\n"
 	restart_case two two.pol two_hf.pot "nchains 2\nTemp 2.0\nflip 1\npivot 5\nmovecom 5\nmoverot 5\nsidechain 3\nbackrub 5\nmflip 7\nlpivot 7\nmovebias 4\nnmul_local 5\n"
@@ -577,6 +603,18 @@ group_mpi_multi() {
 	for r in 0 1 2; do cmp -s $d/exchange_proc$r.dat $d.b/exchange_proc$r.dat || ok=0; done
 	if [ $ok = 1 ]; then pass "pt restart (4 ranks)"; else fail "pt restart (4 ranks)" "files differ (see $d.b)"; fi
 
+	# exact restart in the second of two runs of an optimization with op_allreplicas: the frames of every
+	# rank and the potential optimized in the first run come from the checkpoints
+	d=$WORK/pt_rst_op; rm -rf $d $d.b; mkdir -p $d; cp $DATA/fragment.pol $DATA/fragment.pot $DATA/fragment.op $d/
+	par $d/run.par "nchains 1\nnprinttrj 100000000\nnprintlog 100000000\npivot 1\nmpivot 1\nntemp 4\ntemperatures\n1.5\n1.4\n1.3\n1.2\nstep_exchange 1000\nseed 7\nnrun 2\nnstep 200000\nnprinte 1000\nop_file fragment.op\nop_minim sample\nop_itermax 100\nop_T 1.5\nop_deltat 1000\nop_wait 10000\nop_allreplicas\nncheckpoint 150000\n"
+	( cd $d && mpirun4 $MPI fragment.pol fragment.pot run.par > stdout.log 2> stderr.log )
+	cp -r $d $d.b
+	( cd $d.b && mpirun4 $MPI checkpoint fragment.pot run.par > stdout.log 2> stderr.log )
+	ok=1
+	grep -q "at run 1, step 150000" $d.b/stderr.log || ok=0
+	for f in $(cd $d && ls | grep -v -e '^checkpoint' -e '\.log$' -e '^mginfo$'); do cmp -s $d/$f $d.b/$f || ok=0; done
+	if [ $ok = 1 ]; then pass "pt restart of an optimization with op_allreplicas"; else fail "pt restart of an optimization with op_allreplicas" "files differ (see $d.b)"; fi
+
 	# two runs: the exchanges of each run in their own file
 	d=$WORK/pt_nrun; mkdir -p $d; cp $DATA/fragment.pol $DATA/fragment.pot $d/
 	par $d/run.par "${PT_PAR}seed 9\nnstep 20000\nnprinte 1000\nnrun 2\n"
@@ -632,11 +670,24 @@ group_mpi_multi() {
 }
 
 ######################################################################
+# simulated tempering (bin/montegrappa_st, built by make check where GSL is found)
+group_stempering() {
+	echo "stempering"
+	local MGST=$ROOT/bin/montegrappa_st$([ $ASAN = 1 ] && echo _asan)
+	if [ ! -x "$MGST" ]; then echo "  (skipped: $MGST not built)"; return; fi
+	local st="stempering\nst_method adaptive\nst_nstep 1000\nst_nprint 1000\nst_preamble 100000\nst_emin -500\nst_emax 50\nst_ebin 0.5\nst_anneal prob\nst_lp_new -1.\nst_lpthresh 9\nst_keepall\nst_sumoldhisto 1\nst_hthresh 0.1\nst_ntemp 1\nst_temperatures\n"
+	restart_full_case st "$MGST" random_polymer.pol random_polymer.pot "" "nchains 1\nnstep 3000000\nnprinttrj 200000\nnprinte 100000\nnprintlog 1000000\nflip 1\npivot 10\nseed 42\ntraj random_polymer\nnosidechain\nnodihpot\nnoangpot\nTemp 1.0\nncheckpoint 2000000\nst_nsadj 200000\n${st}2.0\nst_ttarget 0.6\nst_printpdb 10000\n" "0, step 2000000"
+	restart_full_case st_optim "$MGST" dna.pol dna.pot dna.op "nchains 1\nnrun 2\nTemp 1.5\nnstep 3000000\nnprinttrj 100000\nnprinte 100000\nnprintlog 1000000\nflip 1\npivot 10\nnosidechain\nnodihpot\nnoangpot\nop_minim sample\nop_file dna.op\nop_deltat 20000\nop_itermax 300\nop_step 0.1\nop_T 1.5\nseed 42\nncheckpoint 2500000\nst_nsadj 150000\n${st}5.0\nst_ttarget 1.5\nst_printpdb 20000\n" "1, step 2500000"
+	if [ -s $WORK/rstf_st_optim/checkpoint_op.dat ]; then pass "stempering frames of the optimization in the checkpoint"
+	else fail "stempering frames of the optimization in the checkpoint" "no frame saved"; fi
+}
+
+######################################################################
 echo "MonteGrappa tests with $MG"
 echo "working directory $WORK"
 for g in $TGROUPS; do
 	case $g in
-		errors|regression|echeck|restart|cells|tools|mpi|observables|avbmc|mpi_multi|stat) group_$g ;;
+		errors|regression|echeck|restart|cells|tools|mpi|observables|avbmc|mpi_multi|stempering|stat) group_$g ;;
 		*) echo "unknown group $g"; NFAIL=$((NFAIL+1)) ;;
 	esac
 done

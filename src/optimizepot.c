@@ -181,6 +181,9 @@ void OP_Reset(struct s_optimizepot *x)
 	x->nframes = 0;
 	x->nftouched = 0;
 	if (x->fstart) x->fstart[0] = 0;
+	if (x->fsave) fclose(x->fsave);			// the next checkpoint starts a new file of frames
+	x->fsave = NULL;
+	x->nfsaved = x->ncsaved = 0;
 	free(x->cstart); free(x->cfr); free(x->cmc);		// the copy by pair of types of the last reweighting
 	x->cstart = NULL; x->cfr = NULL; x->cmc = NULL;
 }
@@ -198,6 +201,7 @@ void FreeOpt(struct s_optimizepot *x,struct s_mc_parms *parms,int nrestr){
 	free(x->it2);
 	free(x->fmul);
 	free(x->ftouched);
+	if (x->fsave) fclose(x->fsave);
 	free(x->fstart);
 	free(x->cidx);
 	free(x->cmul);
@@ -518,6 +522,104 @@ void OP_RecordFrame(struct s_polymer *p, struct s_potential *pot, struct s_mc_pa
 	OP_GetRestrain(op->nframes,p,0,parms->op_input);            // record restrains
 	op->t[op->nframes] = t;						// record temperature (the current one with simulated tempering)
 	op->nframes ++;
+}
+
+/***************************************************
+ Frames for the checkpoint: append to fname the
+ contacts and frames recorded since the last call
+ (a contact as 'C' it1 it2, a frame as 'F' eold efix
+ t, n entries (contact, factor), the restraints) and
+ return its length. OP_Reset starts a new file
+ ***************************************************/
+long long OP_SaveFrames(struct s_optimizepot *x, int nrestr, char *fname)
+{
+	int i;
+	long long k,n;
+	char c;
+
+	if (!x->fsave)
+	{
+		x->fsave = fopen(fname,"wb");
+		if (!x->fsave) Error("Cannot open the file of the frames of the checkpoint");
+	}
+	for (i=x->ncsaved;i<x->ncontacts;++i)
+	{
+		c = 'C';
+		fwrite(&c,1,1,x->fsave);
+		fwrite(x->it1+i,sizeof(int),1,x->fsave);
+		fwrite(x->it2+i,sizeof(int),1,x->fsave);
+	}
+	for (i=x->nfsaved;i<x->nframes;++i)
+	{
+		c = 'F';
+		n = x->fstart[i+1]-x->fstart[i];
+		fwrite(&c,1,1,x->fsave);
+		fwrite(x->eold+i,sizeof(double),1,x->fsave);
+		fwrite(x->efix+i,sizeof(double),1,x->fsave);
+		fwrite(x->t+i,sizeof(double),1,x->fsave);
+		fwrite(&n,sizeof(long long),1,x->fsave);
+		for (k=x->fstart[i];k<x->fstart[i+1];++k)
+		{
+			fwrite(x->cidx+k,sizeof(int),1,x->fsave);
+			fwrite(x->cmul+k,sizeof(double),1,x->fsave);
+		}
+		fwrite(x->restrain[i],sizeof(double),nrestr,x->fsave);
+	}
+	x->ncsaved = x->ncontacts;
+	x->nfsaved = x->nframes;
+	if (fflush(x->fsave) || ferror(x->fsave)) Error("Cannot write the file of the frames of the checkpoint");
+	return (long long) ftell(x->fsave);
+}
+
+/***************************************************
+ Restart: record again the contacts and frames of
+ fname (cut to its length at the checkpoint), in the
+ same order, so with the same indices, and continue
+ the file
+ ***************************************************/
+void OP_LoadFrames(struct s_optimizepot *x, int nrestr, char *fname)
+{
+	FILE *fp;
+	char c;
+	int a1,a2,ci;
+	long long k,n;
+	double cm;
+
+	fp = fopen(fname,"rb");
+	if (!fp) Error("Cannot open the file of the frames of the checkpoint");
+	while (fread(&c,1,1,fp)==1)
+	{
+		if (c=='C')
+		{
+			if (fread(&a1,sizeof(int),1,fp)!=1 || fread(&a2,sizeof(int),1,fp)!=1 || a1<0 || a2<0 || a1>=x->ntypes || a2>=x->ntypes)
+				Error("Cannot read a contact in the file of the frames of the checkpoint");
+			if (OP_ContactIndex(x,a1,a2) != x->ncontacts-1) Error("Contact repeated in the file of the frames of the checkpoint");
+		}
+		else if (c=='F')
+		{
+			if (x->nframes >= x->nframesmax) Error("Too many frames in the file of the frames of the checkpoint");
+			if (fread(x->eold+x->nframes,sizeof(double),1,fp)!=1 || fread(x->efix+x->nframes,sizeof(double),1,fp)!=1 ||
+					fread(x->t+x->nframes,sizeof(double),1,fp)!=1 || fread(&n,sizeof(long long),1,fp)!=1 || n<0 || n>x->ncontacts)
+				Error("Cannot read a frame in the file of the frames of the checkpoint");
+			for (k=0;k<n;++k)
+			{
+				if (fread(&ci,sizeof(int),1,fp)!=1 || fread(&cm,sizeof(double),1,fp)!=1 || ci<0 || ci>=x->ncontacts)
+					Error("Cannot read a frame in the file of the frames of the checkpoint");
+				x->ftouched[x->nftouched++] = ci;
+				x->fmul[ci] = cm;
+			}
+			OP_EndFrame(x);
+			if (fread(x->restrain[x->nframes],sizeof(double),nrestr,fp)!=(size_t)nrestr)
+				Error("Cannot read a frame in the file of the frames of the checkpoint");
+			x->nframes ++;
+		}
+		else Error("Wrong record in the file of the frames of the checkpoint");
+	}
+	fclose(fp);
+	x->ncsaved = x->ncontacts;
+	x->nfsaved = x->nframes;
+	x->fsave = fopen(fname,"ab");
+	if (!x->fsave) Error("Cannot open the file of the frames of the checkpoint");
 }
 
 #ifdef ACTIVE_MPI

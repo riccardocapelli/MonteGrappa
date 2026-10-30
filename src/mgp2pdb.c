@@ -25,6 +25,7 @@ int main(int argc, char *argv[])
 	mgp2pdbHeader();
 	
 	logfile = fopen("mgp2pdb.log","w");
+	if (!logfile) Error("Cannot open mgp2pdb.log");
 	if (argc == 1)
 	{
 		fprintf(stderr,"usage: mgp2pdb -i polfile -o pdbfile\n");
@@ -76,6 +77,7 @@ int main(int argc, char *argv[])
 
 	
 	pdbout = fopen(pdb_file,"w");
+	if (!pdbout) Error("Cannot open the pdb file for writing");
 	
 	
 	// Polymer allocation
@@ -127,8 +129,9 @@ int polymercounter(char* filename){
 	FILE *fp = NULL;
 	
 	fp = fopen(filename,"r");
+	if (!fp) Error("Cannot open polymer file");
 	while(fgets(aux,500,fp)!=NULL){
-		if(sscanf( aux, "%d %d %s %d %s %d %d %lf %lf %lf %d", \
+		if(sscanf( aux, "%d %d %9s %d %9s %d %d %lf %lf %lf %d", \
 				  &dummy_d,&dummy_d,dummy_s,&dummy_d,dummy_s,&dummy_d,&chain,&dummy_lf,&dummy_lf,&dummy_lf,&dummy_d) == 11 )
 		{
 			if (old_chain == chain)

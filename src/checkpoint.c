@@ -39,8 +39,10 @@
  */
 
 #include "montegrappa.h"
+#include <errno.h>
+#include <unistd.h>
 
-#define CHECKPOINT_VERSION 2
+#define CHECKPOINT_VERSION 3
 
 /*****************************************************************************
  Name of the checkpoint file of a given rank
@@ -77,6 +79,7 @@ void WriteCheckpoint(char *fname, struct s_checkpoint *c, struct s_polymer *p, i
 	fprintf(fp,"counters %d %d %d %d %d %lld %lld\n",c->iprinttrj,c->iprintlog,c->iprinte,c->icheckpoint,c->ptcount,c->acc,c->mov);
 	fprintf(fp,"moves %d\n",NMOVES);
 	for (i=0;i<NMOVES;++i) fprintf(fp,"%d %lld %lld\n",c->mcount[i],c->macc[i],c->mdone[i]);
+	fprintf(fp,"files %lld %lld %lld %lld\n",c->off[0],c->off[1],c->off[2],c->off[3]);
 
 	fprintf(fp,"chains %d\n",npol);
 	for (ic=0;ic<npol;++ic)
@@ -121,7 +124,24 @@ void ReadCheckpointHeader(char *fname, struct s_checkpoint *c)
 	for (i=0;i<NMOVES;++i)
 		if (fscanf(fp,"%d %lld %lld",&(c->mcount[i]),&(c->macc[i]),&(c->mdone[i]))!=3)
 			Error("Cannot read move counters in checkpoint");
+	if (fscanf(fp," files %lld %lld %lld %lld",&(c->off[0]),&(c->off[1]),&(c->off[2]),&(c->off[3]))!=4)
+		Error("Cannot read lengths of the output files in checkpoint");
 	fclose(fp);
+}
+
+/*****************************************************************************
+ Cut an output file to the length it had at the checkpoint (off<0: the file
+ was not written), so that what was written after it is not repeated
+ *****************************************************************************/
+void TruncateOutput(char *fname, long long off)
+{
+	if (off < 0) return;
+	if (truncate(fname,(off_t) off))
+	{
+		if (errno==ENOENT && off==0) return;
+		fprintf(stderr,"Cannot cut %s to %lld bytes: %s\n",fname,off,strerror(errno));
+		Error("Cannot restart the output files");
+	}
 }
 
 /*****************************************************************************
@@ -150,7 +170,8 @@ void ReadCheckpointCoordinates(char *fname, struct s_polymer *p, int npol)
 		for (i=0;i<nback;++i)
 		{
 			b = ((p+ic)->back)+i;
-			if (fscanf(fp,"%d %d %lf %lf %lf",&(b->irot),&nside,&(b->pos.x),&(b->pos.y),&(b->pos.z))!=5 || nside!=b->nside)
+			if (fscanf(fp,"%d %d %lf %lf %lf",&(b->irot),&nside,&(b->pos.x),&(b->pos.y),&(b->pos.z))!=5 || nside!=b->nside ||
+					(nside>0 && (b->irot<0 || b->irot>=b->nrot)))
 				Error("Residue in checkpoint differs from polymer file");
 			for (j=0;j<nside;++j)
 				if (fscanf(fp,"%lf %lf %lf",&(((b->side)+j)->pos.x),&(((b->side)+j)->pos.y),&(((b->side)+j)->pos.z))!=3)

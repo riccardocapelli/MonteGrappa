@@ -81,6 +81,10 @@ struct s_optimizepot *InitializeOptimizePot(struct s_mc_parms *parms, int ntypes
 	#endif
 	// frames of this rank; with op_allreplicas rank 0 also keeps those of the others
 	nframes = (parms->nstep / parms->op_deltat) + 2;
+	#ifdef STEMPERING
+	if (parms->stempering && (parms->p)->st_printpdb > 0 && (parms->p)->st_printpdb < parms->op_deltat)	// harvested every st_printpdb steps
+		nframes = (parms->nstep / (parms->p)->st_printpdb) + 2;
+	#endif
 	#ifdef ACTIVE_MPI
 	if (parms->op_allreplicas && iproc==0) nframes *= parms->ntemp;
 	#else
@@ -494,7 +498,7 @@ static double OP_Mul(struct s_optimizepot *x, int ifr, int iw)
 /***************************************************
  Record the present conformation as a frame
  ***************************************************/
-void OP_RecordFrame(struct s_polymer *p, struct s_potential *pot, struct s_mc_parms *parms, int my_rank)
+void OP_RecordFrame(struct s_polymer *p, struct s_potential *pot, struct s_mc_parms *parms, int my_rank, double t)
 {
 	struct s_optimizepot *op = p->op;
 
@@ -512,11 +516,7 @@ void OP_RecordFrame(struct s_polymer *p, struct s_potential *pot, struct s_mc_pa
 	fclose(fp);
 	#endif
 	OP_GetRestrain(op->nframes,p,0,parms->op_input);            // record restrains
-	#ifdef ACTIVE_MPI
-	op->t[op->nframes] = parms->T[my_rank];				// record temperature
-	#else
-	op->t[op->nframes] = parms->T;
-	#endif
+	op->t[op->nframes] = t;						// record temperature (the current one with simulated tempering)
 	op->nframes ++;
 }
 

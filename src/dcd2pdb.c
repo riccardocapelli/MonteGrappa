@@ -32,10 +32,21 @@ static int Record(FILE *fp, void *buf, int n, int maxn)
 	return a;
 }
 
+// the 8 columns of a coordinate (buf of 9 chars): 3 decimals, fewer if they do not fit
+static char *Coord(double x, char *buf)
+{
+	int d;
+
+	for (d=3;d>0;--d)
+		if (snprintf(buf,9,"%8.*f",d,x) <= 8) return buf;
+	snprintf(buf,9,"%8.0f",x);
+	return buf;
+}
+
 int main(int argc, char *argv[])
 {
 	FILE *ft,*fd;
-	char (*lines)[LINEMAX],aux[LINEMAX],head[84],*title;
+	char (*lines)[LINEMAX],aux[LINEMAX],head[84],*title,bx[9],by[9],bz[9];
 	int nat=0,nmax=1000,natdcd,icntrl[20],cell,ntitle,iframe,first=0,last=-1,stride=1,i;
 	float *x;
 	double uc[6];
@@ -95,7 +106,7 @@ int main(int argc, char *argv[])
 		printf("MODEL %8d\n",iframe);
 		if (cell) printf("CRYST1%9.3f%9.3f%9.3f%7.2f%7.2f%7.2f P 1           1\n",uc[0],uc[2],uc[5],uc[4],uc[3],uc[1]);
 		for (i=0;i<nat;++i)
-			printf("%.30s%8.3f%8.3f%8.3f%s",lines[i],x[i],x[nat+i],x[2*nat+i],strlen(lines[i])>54 ? lines[i]+54 : "\n");
+			printf("%.30s%s%s%s%s",lines[i],Coord(x[i],bx),Coord(x[nat+i],by),Coord(x[2*nat+i],bz),strlen(lines[i])>54 ? lines[i]+54 : "\n");
 		printf("ENDMDL\n");
 	}
 	fclose(fd);

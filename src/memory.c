@@ -337,6 +337,7 @@ void FreePotential(struct s_potential *x, int ntypes, int noangpot, int nodihpot
 	}
 	free(x->hc_type);
 	free(x->hc_r0);
+	free(x->h_values);
 
 
 

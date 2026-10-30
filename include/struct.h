@@ -437,6 +437,7 @@ struct s_checkpoint
 	long long acc,mov;
 	int mcount[NMOVES];
 	long long macc[NMOVES],mdone[NMOVES];
+	long long off[4];		// lengths of the trajectory, energy, observables and exchange files (-1: not written)
 };
 
 /********************************************************************

@@ -542,6 +542,7 @@ int STempering(double energy, double step, struct st_stuff *p)
     	{
             // if energy within range
 		ie = (int)( (double) (energy - p->st_emin) / p->st_ebin + 0.5); 	//NB: since (energy - p->emin) / p->st_ebin > 0 to round properly I just have to add 0.5
+		if (ie > p->st_nbin-1) ie = p->st_nbin-1;			// the last half bin below emax rounds up to nbin
 			p->st_h[p->st_itemp][ie] ++;
 	}
 
@@ -882,7 +883,7 @@ void Restart(struct st_stuff *p)
 		p->st_prob_down = AlloDouble(p->st_ntempmax);
 		p->st_prob_up = AlloDouble(p->st_ntempmax);
 		p->st_counts = AlloInt(p->st_ntempmax);
-		p->st_f = AlloDouble(p->st_ntempmax);
+		p->st_f = AlloDouble(p->st_ntempmax > NHISTOMAX ? p->st_ntempmax : NHISTOMAX);		// also f of the pile of old histograms
 		p->st_reliable_t = AlloDouble(p->st_ntempmax);
 		p->st_reliable_g = AlloDouble(p->st_ntempmax);
 

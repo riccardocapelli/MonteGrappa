@@ -47,7 +47,7 @@ int main(int argc, char *argv[])
 	int i,nat,ntypes,irun,ci,out,nrestr;
 	struct s_checkpoint ckp;
 	char ckpname[FNAMEMAX];
-	int restart=0;
+	int restart=0,stopped=0;
 	int nbackmax,nsidemax,nrotmax,natommax;
 
 	FILE *ftrj=NULL,*fe=NULL,*fproc=NULL,*fp=NULL;
@@ -117,7 +117,7 @@ int main(int argc, char *argv[])
 
 
 		fprintf(stderr,"Simulation parameters:\n");
-		parms = ReadMcParms(argv[3]);
+		parms = ReadMcParms(argv[3],restart);
 		if (parms->seed==-1) parms->seed = TimeSeed();			// decided once, before it is sent to the other ranks
 		//speedup calculation
 		parms->r2shell=(parms->r2shell)*(parms->r2shell);
@@ -163,7 +163,7 @@ int main(int argc, char *argv[])
 	if (strcmp(parms->fnproc,""))
 	{
             snprintf(fname,sizeof(fname),"%s_%d.log",parms->fnproc,my_rank);
-            fproc = fopen(fname,"w");
+            fproc = fopen(fname,restart ? "a" : "w");
             if (!fproc)
 		      Error("Cannot open log-process file for writing");
 	}
@@ -423,7 +423,7 @@ int main(int argc, char *argv[])
 		#endif
 		if (polymer->etot >= LARGE)
 			fprintf(stderr,"WARNING: the structure has overlapping atoms (E=%g); the energy reported during the run keeps\n"
-				"         their hard-core terms also after they are resolved (consider the keyword disentangle)\n",polymer->etot);
+				"         their hard-core terms also after they are resolved (use the keyword disentangle)\n",polymer->etot);
 		if(my_rank==0)
 		{
 			fprintf(stderr,"\nPolymer energy=%lf\tstep=%d\n",polymer->etot,irun);
@@ -468,7 +468,13 @@ int main(int argc, char *argv[])
 		else
 			snprintf(fname,sizeof(fname),"%s",parms->fntrj);
 		#endif
-		ftrj = OpenTrajectory(fname,polymer,parms,u,ckp.restart);	// a restart continues the files of the run
+		if (ckp.restart)						// a restart continues the files of the run from the checkpoint
+		{
+			char fext[FNAMEMAX+50];
+			snprintf(fext,sizeof(fext),"%s.%s",fname,parms->trjdcd ? "dcd" : "pdb");
+			TruncateOutput(fext,ckp.off[0]);
+		}
+		ftrj = OpenTrajectory(fname,polymer,parms,u,ckp.restart);
 		if (!ftrj)
 			Error("Cannot open trajectory file for writing");
 		if (!ckp.restart)
@@ -491,6 +497,7 @@ int main(int argc, char *argv[])
 			else
 				snprintf(fname,sizeof(fname),"%s.ene",parms->fne);
 			#endif
+			if (ckp.restart) TruncateOutput(fname,ckp.off[1]);
 			fe = fopen(fname,ckp.restart ? "a" : "w");
 			if (!fe) 
 				Error("Cannot open energy file for writing");
@@ -508,6 +515,7 @@ int main(int argc, char *argv[])
 			if (parms->nrun>1) snprintf(fname,sizeof(fname),"obs_run%d.dat",irun);
 			else snprintf(fname,sizeof(fname),"obs.dat");
 			#endif
+			if (ckp.restart) TruncateOutput(fname,ckp.off[2]);
 			parms->fobs = fopen(fname,ckp.restart ? "a" : "w");
 			if (!parms->fobs) Error("Cannot open the file of observables");
 			if (!ckp.restart) PrintObservablesHeader(parms->fobs);
@@ -543,11 +551,19 @@ int main(int argc, char *argv[])
 	
 		// MAKE MONTE CARLO
 		#ifdef ACTIVE_MPI		
-		Do_MC(polymer,fragment,replica,startp,u,parms,ftrj,fe,oldp,fproc,irun,&ckp,mpiparms);
+		stopped = Do_MC(polymer,fragment,replica,startp,u,parms,ftrj,fe,oldp,fproc,irun,&ckp,mpiparms);
 		#else
-		Do_MC(polymer,fragment,replica,startp,u,parms,ftrj,fe,oldp,fproc,irun,&ckp,0);
+		stopped = Do_MC(polymer,fragment,replica,startp,u,parms,ftrj,fe,oldp,fproc,irun,&ckp,0);
 		#endif
 		ckp.restart = 0;						// the following runs start normally
+		if (stopped)							// soft exit: the checkpoint has the state, nothing else is done
+		{
+			fclose(ftrj);
+			if (strcmp(parms->fne,"")) fclose(fe);
+			if (parms->fobs) { fclose(parms->fobs); parms->fobs = NULL; }
+			if (my_rank==0) fprintf(stderr,"Soft exit in run %d at step %llu: restart from %s\n",irun,ckp.istep,ckpname);
+			break;
+		}
 
 		// check the energy before the optimisation of the potential changes it
 		CheckOverlaps(polymer,u,parms,parms->npol,parms->nosidechains,1,fproc);

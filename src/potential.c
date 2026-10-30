@@ -366,7 +366,8 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
  Hard core and square well of two atoms of types a1, a2 at square
  distance r2 (a hydrogen bond multiplies the well by hbmul, -1 if none).
  Returns 1 if the hard core is hit without disentangle (the pair
- energy is then LARGE).
+ energy is then LARGE); with disentangle the overlap costs EOVERLAP,
+ kept in the contact of the pair so that removing it lowers the energy.
  ********************************************************************/
 static inline int AtomPairEnergy(struct s_polymer *p, struct s_potential *u, int a1, int a2, double r2, int tooclose, int disentangle,
 		int record, double *etot, double *econt, int *incontact)
@@ -377,7 +378,9 @@ static inline int AtomPairEnergy(struct s_polymer *p, struct s_potential *u, int
 	if ( r2 < (tooclose ? u->g_r0hard * u->g_r0hard : q->r02) )
 	{
 		if (!disentangle) return 1;
-		else *etot += LARGE;
+		*etot += EOVERLAP;
+		*econt += EOVERLAP;
+		*incontact = 1;
 	}
 	if (tooclose) return 0;
 	rw2 = q->rw2;
@@ -462,7 +465,9 @@ static double EnergyPairAtoms(struct s_polymer *p, struct s_potential *u, int i,
 			if ( r2 < r02 )
 			{
 				if (!disentangle) return LARGE;
-				else etot += LARGE;
+				etot += EOVERLAP;
+				*econt += EOVERLAP;
+				*incontact = 1;
 			}
 			if ( r2 < (u->r_2)[a1][a2] && !tooclose)				// if they are close in space anbd not in sequence (the element is defined)
 			{

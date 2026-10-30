@@ -358,15 +358,15 @@ struct s_polymer *send_pol(int iproc, int nprocs, int nback, MPI_Datatype Backty
         {
 		if(iproc==0)
 		{
-			for(i=1; i<nprocs; ++i) for(j=0; j<nback;++j) for(k=0; k<((startp->back)+j)->nside;++k) 
+			for(i=1; i<nprocs; ++i) for(j=0; j<nback;++j) for(k=0; k<(((startp+npol)->back)+j)->nside;++k) 
 					MPI_Send(((((startp+npol)->back)+j)->side)+k, 1, Sidetype, i, 2000+100*i+10*j+k, MPI_COMM_WORLD);
 		}	
 
-	if(iproc!=0) for(j=0; j<nback;++j) for(k=0; k<((startp->back)+j)->nside;++k)
+	if(iproc!=0) for(j=0; j<nback;++j) for(k=0; k<(((startp+npol)->back)+j)->nside;++k)
 					MPI_Recv(((((startp+npol)->back)+j)->side)+k, 1, Sidetype, 0, 2000+100*iproc+10*j+k, MPI_COMM_WORLD, &astatus);
-		if(iproc==0) for(i=1; i<nprocs; ++i) for(j=0; j<nback;++j) for(k=0; k<((startp->back)+j)->nside;++k) for(l=0; l<((startp->back)+j)->nrot; ++l)
+		if(iproc==0) for(i=1; i<nprocs; ++i) for(j=0; j<nback;++j) for(k=0; k<(((startp+npol)->back)+j)->nside;++k) for(l=0; l<(((startp+npol)->back)+j)->nrot; ++l)
 					MPI_Send(((((((startp+npol)->back)+j)->side)+k)->rot)+l, 1, Rottype, i, 10000+1000*i+100*j+10*k+l, MPI_COMM_WORLD);
-		if(iproc!=0) for(j=0; j<nback;++j) for(k=0; k<((startp->back)+j)->nside;++k) for(l=0; l<((startp->back)+j)->nrot; ++l)
+		if(iproc!=0) for(j=0; j<nback;++j) for(k=0; k<(((startp+npol)->back)+j)->nside;++k) for(l=0; l<(((startp+npol)->back)+j)->nrot; ++l)
 					MPI_Recv(((((((startp+npol)->back)+j)->side)+k)->rot)+l, 1, Rottype, 0, 10000+1000*iproc+100*j+10*k+l , MPI_COMM_WORLD, &astatus);	
 	}
 
@@ -419,15 +419,15 @@ struct s_polymer *send_pol_to_proc(int iproc,int jproc, int nprocs, int nback, M
         {
                 if(iproc==0)
                 {
-                        for(j=0; j<nback;++j) for(k=0; k<((startp->back)+j)->nside;++k)
+                        for(j=0; j<nback;++j) for(k=0; k<(((startp+npol)->back)+j)->nside;++k)
                                         MPI_Send(((((startp+npol)->back)+j)->side)+k, 1, Sidetype, jproc, 2000+100*jproc+10*j+k, MPI_COMM_WORLD);
                 }
 
-        if(iproc==jproc) for(j=0; j<nback;++j) for(k=0; k<((startp->back)+j)->nside;++k)
+        if(iproc==jproc) for(j=0; j<nback;++j) for(k=0; k<(((startp+npol)->back)+j)->nside;++k)
                                         MPI_Recv(((((startp+npol)->back)+j)->side)+k, 1, Sidetype, 0, 2000+100*iproc+10*j+k, MPI_COMM_WORLD, &astatus);
-                if(iproc==0) for(j=0; j<nback;++j) for(k=0; k<((startp->back)+j)->nside;++k) for(l=0; l<((startp->back)+j)->nrot; ++l)
+                if(iproc==0) for(j=0; j<nback;++j) for(k=0; k<(((startp+npol)->back)+j)->nside;++k) for(l=0; l<(((startp+npol)->back)+j)->nrot; ++l)
                                         MPI_Send(((((((startp+npol)->back)+j)->side)+k)->rot)+l, 1, Rottype, jproc, 10000+1000*jproc+100*j+10*k+l, MPI_COMM_WORLD);
-                if(iproc==jproc) for(j=0; j<nback;++j) for(k=0; k<((startp->back)+j)->nside;++k) for(l=0; l<((startp->back)+j)->nrot; ++l)
+                if(iproc==jproc) for(j=0; j<nback;++j) for(k=0; k<(((startp+npol)->back)+j)->nside;++k) for(l=0; l<(((startp+npol)->back)+j)->nrot; ++l)
                                         MPI_Recv(((((((startp+npol)->back)+j)->side)+k)->rot)+l, 1, Rottype, 0, 10000+1000*iproc+100*j+10*k+l , MPI_COMM_WORLD, &astatus);
         }
 
@@ -455,12 +455,12 @@ struct s_potential *send_pot(int nat, int ntypes, int noangpot, int nodihpot, in
 		}
 	}
 
-	MPI_Barrier(MPI_COMM_WORLD);
-
-	if(iproc!=0)
+	if(iproc!=0)							// (before the barrier: the sends of rank 0 may wait for it)
 	{
 		MPI_Recv(u, 1, Pottype, 0, 30000+iproc, MPI_COMM_WORLD, &astatus);
 	}
+
+	MPI_Barrier(MPI_COMM_WORLD);
 	
 	send_double_matrix(ntypes, ntypes, iproc, u->e, 0);
 	send_double_matrix(ntypes, ntypes, iproc, u->r_2, 0);

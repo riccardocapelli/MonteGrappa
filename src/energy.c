@@ -292,7 +292,7 @@ double **ContactMap(struct s_parms *parms, struct s_polymer *p, int nchains, int
 		for (c2=c1;c2<nchains;++c2)
 			for (ib1=0;ib1<(p+c1)->nback;++ib1)
 				for (ib2=0;ib2<(p+c2)->nback;++ib2)
-					if (c1!=c2 || ib1<=ib2-parms->imin)
+					if (c1!=c2 || ib1<ib2-parms->imin)		// as in the simulation, atoms imin apart do not interact
 					{
 						// backbone-backbone interactions
 						d = Dist( (((p+c1)->back)+ib1)->pos, (((p+c2)->back)+ib2)->pos );
@@ -610,7 +610,7 @@ void PrintOpGoFile(char *nfile, double **cm, struct s_polymer *p, int nchains, c
                             // counts CA atoms to check imin condition
                             if  (!strcmp((((p+jc)->back)+j)->type,"CA") )
                                 nCA++;
-                            if ( !strcmp((((p+ic)->back)+i)->type,"CA") && !strcmp((((p+jc)->back)+j)->type,"CA") && ( nCA >= imin ) )
+                            if ( !strcmp((((p+ic)->back)+i)->type,"CA") && !strcmp((((p+jc)->back)+j)->type,"CA") && ( nCA > imin ) )
                                 nrest++;
                         }
                     }
@@ -633,7 +633,7 @@ void PrintOpGoFile(char *nfile, double **cm, struct s_polymer *p, int nchains, c
                         for (j=i+1;j<(p+jc)->nback;++j) {
                             if  (!strcmp((((p+jc)->back)+j)->type,"CA") )
                                 nCA++;
-                            if ( !strcmp((((p+ic)->back)+i)->type,"CA") && !strcmp((((p+jc)->back)+j)->type,"CA") && ( nCA >= imin ) )
+                            if ( !strcmp((((p+ic)->back)+i)->type,"CA") && !strcmp((((p+jc)->back)+j)->type,"CA") && ( nCA > imin ) )
                                 fprintf(fp,"%d\t%d\t\t1\t%lf\t0.5\n",(((p+ic)->back)+i)->ia,(((p+jc)->back)+j)->ia,
                                         Dist( (((p+ic)->back)+i)->pos, (((p+jc)->back)+j)->pos ) );
                         }
@@ -663,7 +663,7 @@ void PrintOpGoFile(char *nfile, double **cm, struct s_polymer *p, int nchains, c
                             if ((jaa-iaa)%2 == 0) { // only counts restraints between even aa and between even aa
                                 if  (!strcmp((((p+jc)->back)+j)->type,"CA") ) // counts CA atoms to check imin condition
                                     nCA++;
-                                if ( !strcmp((((p+ic)->back)+i)->type,"CA") && !strcmp((((p+jc)->back)+j)->type,"CA") && ( nCA >= imin ) ){
+                                if ( !strcmp((((p+ic)->back)+i)->type,"CA") && !strcmp((((p+jc)->back)+j)->type,"CA") && ( nCA > imin ) ){
                                     if( strcmp(((((p+ic)->back)+i)->aa),"GLY") && strcmp(((((p+jc)->back)+j)->aa),"GLY") )
                                         nrest+=4;   // one for CA-CA, one for sidechain/sidechain and two for CA/sidechain
                                     if( strcmp(((((p+ic)->back)+i)->aa),"GLY") && !strcmp(((((p+jc)->back)+j)->aa),"GLY") )
@@ -710,7 +710,7 @@ void PrintOpGoFile(char *nfile, double **cm, struct s_polymer *p, int nchains, c
                             if (abs((iaa-jaa))%2 == 0) { // only counts restraints between even aa and between even aa
                                 if  (!strcmp((((p+jc)->back)+j)->type,"CA") ) // counts CA atoms to check imin condition
                                     nCA++;
-                                if ( !strcmp((((p+ic)->back)+i)->type,"CA") && !strcmp((((p+jc)->back)+j)->type,"CA") && ( nCA >= imin ) ) {
+                                if ( !strcmp((((p+ic)->back)+i)->type,"CA") && !strcmp((((p+jc)->back)+j)->type,"CA") && ( nCA > imin ) ) {
                                     fprintf(fp,"%d\t%d\t\t1\t%lf\t0.5\n",(((p+ic)->back)+i)->ia,(((p+jc)->back)+j)->ia,
                                             Dist( (((p+ic)->back)+i)->pos, (((p+jc)->back)+j)->pos ) );   // Backbone-Backbone
                                     iside = ((((p+ic)->back)+i)->nside)-1;

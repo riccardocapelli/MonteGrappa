@@ -316,7 +316,7 @@ group_tools() {
 		( cd $d && $GRAPPINO ttr.in > g.log 2>&1 )
 		par $d/run.par "nchains 16\nseed 1\nnstep 300\nTemp 0.5\nsidechain 1\nflip 2\necheck\nnprinttrj 1000\nnprinte 1000\nnprintlog 1000\n"
 		( cd $d && "$MG" ttr.pol ttr.pot run.par > o.log 2> e.log )
-		if [ $? -eq 0 ] && grep -q "Found 358 Go contacts" $d/g.log && ! grep -q ECHECK $d/e.log && ! grep -q "WARNING: overlap" $d/e.log
+		if [ $? -eq 0 ] && grep -q "Found 344 Go contacts" $d/g.log && ! grep -q ECHECK $d/e.log && ! grep -q "WARNING: overlap" $d/e.log
 		then pass "grappino all-atom rotamers, 16 chains"; else fail "grappino all-atom rotamers, 16 chains" "see $d"; fi
 
 		# rotamers of a protein with glycines (not in the library): with the pdb rotamer and the CB of the pdb
@@ -506,7 +506,7 @@ group_avbmc() {
 
 	# non-interacting chains: the centres are independent and uniform in the box, so a pair
 	# is in the bonded region with probability V_in/V (0.03351 for R=6, L=30); a missing
-	# or wrong bias factor gives several times that
+	# or wrong bias factor gives several times that (the four runs give about +-0.0004)
 	[ $ASAN = 1 ] && { echo "  SKIP  distribution test not with --asan"; return; }
 	for seed in 1 2 3 4; do
 		( mg avb_free_$seed three.pol free_pbc.pot "nchains 3\nnosidechain\nnodihpot\nnoangpot\nTemp 1.0\nseed $seed\nnstep 1000000\navbmc 1\navb_rin 6\navb_pin 0.3\nnprinttrj 100\nnprinte 1000000\nnprintlog 1000000\n" ) &
@@ -515,7 +515,7 @@ group_avbmc() {
 	for seed in 1 2 3 4; do awk -v L=30 -v R=6 "$PAIRS_IN_AWK" $WORK/avb_free_$seed/traj.pdb; done | \
 		awk '{m+=$1; m2+=$1*$1; n++} END{mu=m/n; printf "%f %f\n", mu, sqrt((m2/n-mu*mu)/(n-1))}' > $WORK/avb_free_summary
 	sed 's/^/        pairs in the bonded region (exact 0.033510): /' $WORK/avb_free_summary
-	if awk '{d=$1-0.033510; if(d<0)d=-d; exit !(d < 4*$2+0.002)}' $WORK/avb_free_summary
+	if awk '{d=$1-0.033510; if(d<0)d=-d; exit !(d < 4*$2+0.0005)}' $WORK/avb_free_summary
 	then pass "avbmc distribution of non-interacting chains"; else fail "avbmc distribution of non-interacting chains" "$(cat $WORK/avb_free_summary)"; fi
 }
 

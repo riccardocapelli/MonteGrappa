@@ -179,7 +179,7 @@ int main(int argc, char *argv[])
 	
 	//if you want a file.op to optimize the potential
 	if(strcmp(p->op_file,""))
-        PrintOpGoFile(p->op_file,cm,polymer,nchain,p->op_kind,p->imin/3); // imin in aa
+        PrintOpGoFile(p->op_file,cm,polymer,nchain,p->op_kind,p->imin/p->n_back_a); // imin in aa
 
 	exit(0);
 }
@@ -332,12 +332,13 @@ void Parse(FILE *fp, struct s_parms *p)
         //locked atoms: only backbone atoms can be locked, allowed moves of side chain atoms are in rotamers libraries
         if (!strncmp(aux,"locked_atoms",12)) {
             char locked_a[100][100];
-            if ( sscanf(aux,"locked_atoms %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s",
+            int nlocked;
+            if ( (nlocked=sscanf(aux,"locked_atoms %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s",
                 locked_a[0],locked_a[1],locked_a[2],locked_a[3],locked_a[4],locked_a[5],
                 locked_a[6],locked_a[7], locked_a[8],locked_a[9],locked_a[10],locked_a[11],
                 locked_a[12],locked_a[13],locked_a[14],locked_a[15],locked_a[16],locked_a[17],
-                locked_a[18],locked_a[19])>=1 ) {
-                    for (j=0;j<(p->n_back_a);++j)
+                locked_a[18],locked_a[19]))>=1 ) {
+                    for (j=0;j<nlocked;++j)
                         for (i=0;i<(p->n_back_a);++i)
                             if (!strcmp(locked_a[j],p->back_a[i])) p->move_a[i]=0;
             }

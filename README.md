@@ -14,7 +14,7 @@
 
 
 This file will help you to compile and install Montegrappa v1.3 .
-The package contains three programs:
+The package contains five programs:
 
 	- "montegrappa", the main Monte Carlo engine 
 	- "grappino", a tool to create the input files for montegrappa.
@@ -38,8 +38,8 @@ The whole distribution can be compiled typing
 	$ make all
 
 The binary files "montegrappa" (with STEMPERING), "montegrappa_mpi",
-"grappino", "mhistogram" and "mgp2pdb" will be created in the ./bin
-directory.
+"grappino", "mhistogram", "mgp2pdb" and "dcd2pdb" will be created in
+the ./bin directory.
 
 
 OPENMP (experimental): compile with
@@ -103,7 +103,7 @@ The tools can be compiled alone, with the commands
 
 (6) Tests
 
-	$ make check          (about 20 s)
+	$ make check          (about 1 min; also rebuilds montegrappa_mpi if mpicc is found)
 	$ make check-asan     (memory errors, about 1.5 min)
 	$ make check-stat     (detailed balance, a few minutes)
 
@@ -122,6 +122,19 @@ Results:
    with several chains, cluster moves, H fields with several chains).
    Simulations using them should be repeated.
  - A missing Temp keyword is now an error (it silently ran at T=0).
+ - The multiple-histogram equations (simulated tempering and mhistogram)
+   used the number of samples of one temperature for all of them: the
+   free energies were wrong whenever the temperatures had different
+   numbers of samples. With keepall, the number of temperatures was
+   overwritten by the number of stored histograms.
+ - disentangle did not work: the energy of an overlap was not kept in
+   the contacts, so a move removing some overlaps but not all was always
+   rejected and the energy kept the overlaps after they were removed. An
+   overlap now costs 1E4 (EOVERLAP), kept like any pair energy.
+ - grappino counted as native the contacts at exactly imin along the
+   chain, which montegrappa excludes (they never interacted).
+ - Pivot moves in a periodic box could skip pairs whose minimum image
+   changed with the rotation (chains longer than about half the box).
 
 Speed:
  - Optimization of the potential: a step changes one element of the
@@ -179,10 +192,15 @@ Restart:
 	$ montegrappa checkpoint potential.pot parameters.par
 
    in the same directory: the run continues exactly as if it had not
-   been interrupted, appending to its trajectory and energy files. The
-   original polymer file must still be there. Simulated tempering state
-   and frames recorded for the optimization of the potential are not
-   saved.
+   been interrupted. The checkpoint holds the length of the trajectory,
+   energy, observables and exchange files, which are cut back to it, so
+   nothing written after the checkpoint is repeated; the log is
+   continued. Each run writes a checkpoint when it starts, so with nrun>1
+   a restart never goes back to the previous run. The original polymer
+   file must still be there. Simulated tempering state and frames
+   recorded for the optimization of the potential are not saved.
+ - kill -USR1 (soft exit) writes a checkpoint at the end of the current
+   step and stops the program.
 
 Periodic box:
  - In the [ global ] chapter of the potential file,

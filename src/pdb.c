@@ -175,6 +175,7 @@ int ReadPDB(struct atom_s *x, char *pdbfile, int hydrogens, int *nchain, int *nb
 
    fclose(fp);
    (*nchain)++;
+   if (*nchain > NPOLMAX) Error("Too many chains in pdb file (NPOLMAX)");
 
    fprintf(stderr,"Read %d atoms in %d chains (nbackmax=%d)\n",iatom,*nchain,*nbackmax);
 

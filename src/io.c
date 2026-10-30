@@ -189,6 +189,7 @@ void ReadPolymer(char *fname, struct s_polymer *p, FILE *flog, int npol, int deb
 	    		 if (irot < 0 || irot >= NROTMAX) Error("Rotamer index out of range (NROTMAX too small?)");
 	    		 if (iat < 0 || iat >= NATOMMAX) Error("Atom index out of range (NATOMMAX too small?)");
 	    		 if (itype < 0) Error("Negative atom type in polymer file");
+	    		 if ((((p+ch)->back)+iab)->side == NULL) continue;			// nosidechains: the sidechains are not used
 	    		 (((((p+ch)->back)+iab)->side)+iar)->ia = iat;
 	    		 (((((p+ch)->back)+iab)->side)+iar)->itype = itype;
 	    		 if ( itype > *itypemax ) *itypemax = itype;
@@ -222,6 +223,16 @@ void ReadPolymer(char *fname, struct s_polymer *p, FILE *flog, int npol, int deb
 
 	// check number of chains
 	if (ichmax+1 != npol) Error("Number of chains contained in polymer file is different from that indicated in parameter file");
+
+	// the rotameric states must exist
+	for (ch=0;ch<=ichmax;++ch)
+		for (iab=0;iab<(p+ch)->nback;++iab)
+			if ((((p+ch)->back)+iab)->nside > 0 && (((p+ch)->back)+iab)->irot >= (((p+ch)->back)+iab)->nrot)
+			{
+				fprintf(stderr,"Chain %d, residue %d: rotamer %d, but only %d rotamers are defined\n",ch,iab,
+					(((p+ch)->back)+iab)->irot,(((p+ch)->back)+iab)->nrot);
+				Error("Rotameric state of a sidechain not defined in polymer file");
+			}
 
 	// assign addresses of sidechain position to lookback table
 	for (ch=0;ch<=ichmax;++ch)
@@ -350,33 +361,49 @@ void PrintPolymer(char *fname, struct s_polymer *p, int nchains)
 }
 
 /********************************************************************
- Print pdb to stream
+ The 8 columns of a coordinate in a pdb file (buf of 9 chars): 3
+ decimals, fewer far from the origin, where they would not fit
+ ********************************************************************/
+char *PDBCoord(double x, char *buf)
+{
+	int d;
+
+	for (d=3;d>0;--d)
+		if (snprintf(buf,9,"%8.*f",d,x) <= 8) return buf;
+	snprintf(buf,9,"%8.0f",x);
+	return buf;
+}
+
+/********************************************************************
+ Print pdb to stream (chains A, B, ... separated by TER from the
+ 25th chain on, as their names repeat)
  ********************************************************************/
 void PrintPDBStream(struct s_polymer *p, int npol, FILE *fp)
 {
 	int i,j,ch;
-	char cc;
+	char cc,bx[9],by[9],bz[9];
+	struct s_back *b;
+	struct s_side *s;
 
 	fprintf(fp,"TITLE %s\n",p->title);
 
 	for (ch=0;ch<npol;++ch)
 	{
+		cc = 'A' + ch%26;
 		for (i=0;i<(p+ch)->nback;++i)
 	      {
-			  if (npol<24) cc = ch+65;
-			  else cc=' ';
+			  b = ((p+ch)->back)+i;
+	          fprintf(fp,"ATOM  %5d  %-4s%3s %c%4d    %s%s%s\n",b->ia,b->type,b->aa,cc,b->iaa,
+	        		  PDBCoord(b->pos.x,bx),PDBCoord(b->pos.y,by),PDBCoord(b->pos.z,bz));
 
-	          fprintf(fp,"ATOM  %5d  %-4s%3s %c%4d    %8.3lf%8.3lf%8.3lf\n",(((p+ch)->back)+i)->ia,(((p+ch)->back)+i)->type,
-	        		  (((p+ch)->back)+i)->aa,cc,(((p+ch)->back)+i)->iaa,((((p+ch)->back)+i)->pos).x,((((p+ch)->back)+i)->pos).y,
-	        		  ((((p+ch)->back)+i)->pos).z );
-
-	          for (j=0;j<(((p+ch)->back)+i)->nside;++j)
-	        	  fprintf(fp,"ATOM  %5d  %-4s%3s %c%4d    %8.3lf%8.3lf%8.3lf\n", (((((p+ch)->back)+i)->side)+j)->ia,
-	        			  (((((p+ch)->back)+i)->side)+j)->type, (((p+ch)->back)+i)->aa,cc,(((p+ch)->back)+i)->iaa,
-	        			  ((((((p+ch)->back)+i)->side)+j)->pos).x,((((((p+ch)->back)+i)->side)+j)->pos).y,
-	        			  ((((((p+ch)->back)+i)->side)+j)->pos).z);
+	          for (j=0;j<b->nside;++j)
+	          {
+	        	  s = (b->side)+j;
+	        	  fprintf(fp,"ATOM  %5d  %-4s%3s %c%4d    %s%s%s\n",s->ia,s->type,b->aa,cc,b->iaa,
+	        			  PDBCoord(s->pos.x,bx),PDBCoord(s->pos.y,by),PDBCoord(s->pos.z,bz));
+	          }
 	      }
-        if (npol>=24) fprintf(fp,"ENDMDL\n");
+        if (npol>=24) fprintf(fp,"TER\n");
 	}
 	fprintf(fp,"ENDMDL\n");
 
@@ -388,7 +415,7 @@ void PrintPDBStream(struct s_polymer *p, int npol, FILE *fp)
 /********************************************************************
  Allocate structure and read MC parameters
  ********************************************************************/
-struct s_mc_parms *ReadMcParms(char *fname)
+struct s_mc_parms *ReadMcParms(char *fname, int restart)
 {
 	int i,chk;
 	struct s_mc_parms *x;
@@ -829,6 +856,7 @@ struct s_mc_parms *ReadMcParms(char *fname)
 	
 		#endif
 	}
+	fclose(fp);
 //	#ifndef ACTIVE_MPI
 //	if((x->ntemp)!=1) Error("ntemp must be 1");
 //	#endif
@@ -855,6 +883,7 @@ struct s_mc_parms *ReadMcParms(char *fname)
 	else if (strcmp(trjformat,"pdb")) Error("trjformat must be pdb or dcd");
 	#ifdef ACTIVE_MPI
 	if (x->ncheckpoint<=0) x->ncheckpoint = 100000;		// replicas must write their checkpoints at the same step
+	if (x->ntemp>1 && x->nstep_exchange<2) Error("step_exchange must be at least 2 (even and odd pairs exchange in turn)");
 	if (x->ntemp<1) Error("ntemp and temperatures must be defined");
 	for (i=0;i<x->ntemp;++i)
 		if (x->T[i] <= 0) Error("Temperatures must be positive");
@@ -863,7 +892,7 @@ struct s_mc_parms *ReadMcParms(char *fname)
 	#endif
 
 
-	x->flog=fopen(nlog,"w");
+	x->flog=fopen(nlog,restart ? "a" : "w");				// a restart continues the log
 	if (!x->flog) Error("Cannot open log file");
 	
 
@@ -995,7 +1024,7 @@ struct s_mc_parms *ReadMcParms(char *fname)
                 (x->p)->st_prob_down = AlloDouble((x->p)->st_ntempmax);
                 (x->p)->st_prob_up = AlloDouble((x->p)->st_ntempmax);
                 (x->p)->st_counts = AlloInt((x->p)->st_ntempmax);
-                (x->p)->st_f = AlloDouble((x->p)->st_ntempmax);
+                (x->p)->st_f = AlloDouble((x->p)->st_ntempmax > NHISTOMAX ? (x->p)->st_ntempmax : NHISTOMAX);		// also f of the pile of old histograms
                 (x->p)->st_reliable_lg = AlloDouble((x->p)->st_nbin);
                 (x->p)->st_current_lg = AlloDouble((x->p)->st_nbin);
                 (x->p)->st_reliable_t = AlloDouble((x->p)->st_ntempmax);
@@ -1381,7 +1410,7 @@ void ResetStStuff(struct s_mc_parms *x,char *fname){
                 (x->p)->st_prob_down = AlloDouble((x->p)->st_ntempmax);
                 (x->p)->st_prob_up = AlloDouble((x->p)->st_ntempmax);
                 (x->p)->st_counts = AlloInt((x->p)->st_ntempmax);
-                (x->p)->st_f = AlloDouble((x->p)->st_ntempmax);
+                (x->p)->st_f = AlloDouble((x->p)->st_ntempmax > NHISTOMAX ? (x->p)->st_ntempmax : NHISTOMAX);		// also f of the pile of old histograms
                 (x->p)->st_reliable_lg = AlloDouble((x->p)->st_nbin);
                 (x->p)->st_current_lg = AlloDouble((x->p)->st_nbin);
                 (x->p)->st_reliable_t = AlloDouble((x->p)->st_ntempmax);
@@ -1652,7 +1681,7 @@ int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, 
 	    	if (sscanf(aux,"%d %lf %lf",&i,&k0,&r0)==3)
 	    	{
 
-			if (i>na-1) { fprintf(stderr,"* ERROR: found atom %d in ReadPotential where natom=%d\n",i,na); exit(1); }
+			if (i<0 || i>na-1) { fprintf(stderr,"* ERROR: found atom %d in ReadPotential where natom=%d\n",i,na); exit(1); }
 	    		(u->e_ang)[i] = k0;
 	    		(u->ang0)[i] = r0;
 	    	}
@@ -1666,7 +1695,7 @@ int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, 
 	    	if (sscanf(aux,"%d %lf %lf %lf %lf",&i,&d1,&d01,&d3,&d03)==5)
 	    	{
 			
-				if (i>na-1) { fprintf(stderr,"* ERROR: found atom %d in ReadPotential where natom=%d\n",i,na); exit(1); }
+				if (i<0 || i>na-1) { fprintf(stderr,"* ERROR: found atom %d in ReadPotential where natom=%d\n",i,na); exit(1); }
 	    		(u->e_dih1)[i] = d1;
 	    		(u->dih01)[i] = d01;
 	    		(u->e_dih3)[i] = d3;
@@ -1726,7 +1755,7 @@ int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, 
 	    	// angular potential
 	    	if (sscanf(aux,"angle %lf %lf",&(u->g_anglek),&(u->g_angle0))==2)
 	    	{
-	    	    for (i=0;i<na;++i)
+	    	    if (!parms->noangpot) for (i=0;i<na;++i)
 	    	    {
 	    	    	(u->e_ang)[i] = u->g_anglek;
 	    	    	(u->ang0)[i] = u->g_angle0;
@@ -1737,7 +1766,7 @@ int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, 
 	    	// dihedral potential
 	    	if (sscanf(aux,"dihedral1 %lf %lf",&(u->g_dihk1),&(u->g_dih01))==2)
 	    	{
-	    		for (i=0;i<na;++i)
+	    		if (!parms->nodihpot) for (i=0;i<na;++i)
 	    		{
 	    			(u->e_dih1)[i] = u->g_dihk1;
 	    	    	(u->dih01)[i] = u->g_dih01;
@@ -1746,7 +1775,7 @@ int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, 
 	    	}
 	    	if (sscanf(aux,"dihedral3 %lf %lf",&(u->g_dihk3),&(u->g_dih03))==2)
 	    	{
-	    		for (i=0;i<na;++i)
+	    		if (!parms->nodihpot) for (i=0;i<na;++i)
 	    		{
 	    			(u->e_dih3)[i] = u->g_dihk3;
 	    			(u->dih03)[i] = u->g_dih03;
@@ -1799,7 +1828,7 @@ int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, 
 	    {
 	    	if (sscanf(aux,"%d %lf %lf %d",&i,&d1,&d3,&j)==4)   //last int is 0 if phi (ia CA) and 1 if psi (ia C)
 	    	{
-	    				if (i>na-1) { fprintf(stderr,"* ERROR: found atom %d in ReadPotential where natom=%d\n",i,na); exit(1); }
+	    				if (i<0 || i>na-1) { fprintf(stderr,"* ERROR: found atom %d in ReadPotential where natom=%d\n",i,na); exit(1); }
 	    	    		(u->dih_pa)[i] = d1;
 	    	    		(u->dih_pb)[i] = d3;
 	    	    		(u->dih_which)[i] = j;
@@ -1811,7 +1840,7 @@ int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, 
 	    {
 	    	if (sscanf(aux,"%d %lf %lf %lf %lf",&i,&d1,&d3,&d01,&d03)==5)		//phi alpha..
 	    	{
-				if (i>=NDIHFMAX) Error("NDIHFMAX too small when reading dihedral tables ");
+				if (i<0 || i>=NDIHFMAX) Error("Dihedral table index out of range (NDIHFMAX too small?)");
 	    	    		(u->dih_f_phi_a)[i] = d1;
 	    	    		(u->dih_f_phi_b)[i] = d3;
 	    	    		(u->dih_f_psi_a)[i] = d01;
@@ -1864,6 +1893,7 @@ int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, 
             u->dih_ram = 1;
 	    	if (sscanf(aux,"%d %lf %lf",&iaa,&pa,&pb)==3)
 	    	{
+				if (iaa<0 || iaa>=NAAMAX) Error("Amino acid index out of range in Alfa/Beta_propensity (NAAMAX)");
                 (u->ab_propensity)[0][iaa] = pa;
 				(u->ab_propensity)[1][iaa] = pb;
 	    	}
@@ -1876,7 +1906,8 @@ int ReadPotential(char *fname, struct s_potential *u, struct s_mc_parms *parms, 
 		{
 			if (sscanf(aux,"%d %lf",&idtype,&h_value)==2)
 			{
-				(u->h_values)[idtype] = h_value;
+				if (idtype<0) Error("Negative atom type in hfields");
+				if (idtype<ntype) (u->h_values)[idtype] = h_value;		// as in pairs, types not in the polymer are skipped
 			}
 		}
 	}
@@ -1925,8 +1956,9 @@ void ReadPropensity(char *fname, struct s_potential *u)
 	
 	while(fgets(aux,500,fp)!=NULL)
 	{
-		if(sscanf(aux,"%d %s %s %f %f %f",&i,n,t,&coil,&alfa,&beta)==6)
+		if(sscanf(aux,"%d %4s %4s %f %f %f",&i,n,t,&coil,&alfa,&beta)==6)
 		{
+			if (naa>=NAAMAX) Error("Too many amino acids in propensity file (NAAMAX)");
 			u->ab_propensity[0][naa]=u->dih_ka*alfa;
 			u->ab_propensity[1][naa]=u->dih_kb*beta;
 			naa++;
@@ -2086,7 +2118,7 @@ void PrintPotential(struct s_potential *u, char *eoutfile, int nat, int ntypes, 
 	else fout = stdout;
 
 	// print globals
-	if (u->g_r0hard>0 || u->g_rhomo>0 || u->g_anglek || u->g_dihk1 || u->g_dihk3 || (u->splice>0) || u->g_imin || u->dih_ram || u->dih_tabled)
+	if (u->g_r0hard>0 || u->g_rhomo>0 || u->g_anglek || u->g_dihk1 || u->g_dihk3 || (u->splice>0) || u->g_imin || u->dih_ram || u->dih_tabled || u->boxtype!='n')
 	{
 		fprintf(fout,"[ global ]\n");
 		if (u->g_r0hard>0) fprintf(fout,"hardcore %lf\n",u->g_r0hard);

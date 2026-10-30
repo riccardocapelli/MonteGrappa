@@ -20,7 +20,7 @@ CC       ?= cc
 MPICC    ?= mpicc
 OPTFLAG  ?= -O2
 WARN     ?= -Wall
-CFLAGS   ?= $(OPTFLAG) -g -ffp-contract=off $(WARN)		# no fused multiply-add: same arithmetic on all platforms
+CFLAGS   ?= $(OPTFLAG) -g $(WARN)
 LDLIBS   ?= -lm
 
 GSL_PREFIX ?= $(shell gsl-config --prefix 2>/dev/null || echo /usr/local)
@@ -54,7 +54,7 @@ else ifeq ($(version),STEMPERING)
   MC_BIN    = $(BINDIR)/montegrappa
 else ifeq ($(version),ASAN)
   CCV       = $(CC)
-  CFLAGS    = -O1 -g -ffp-contract=off -fno-omit-frame-pointer -fsanitize=address,undefined $(WARN)
+  CFLAGS    = -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined $(WARN)
   LDLIBS   += -fsanitize=address,undefined
   MC_BIN    = $(BINDIR)/montegrappa_asan
 else
@@ -62,21 +62,27 @@ else
   MC_BIN    = $(BINDIR)/montegrappa
 endif
 
+# no fused multiply-add: the same arithmetic on all platforms (also with CFLAGS from the environment)
+override CFLAGS += -ffp-contract=off
+
 OBJDIR = obj/$(version)
 MC_OBJ = $(MC_SRC:%=$(OBJDIR)/%.o)
 
-# grappino is built with the sanitizers too in the ASAN version
+# the tools are built with the sanitizers too in the ASAN version (objects and names of their own)
 ifeq ($(version),ASAN)
-  GRAPPINO_BIN = $(BINDIR)/grappino_asan
-  GRAPPINO_DIR = $(OBJDIR)
+  TOOLDIR = $(OBJDIR)
+  TOOLSUF = _asan
 else
-  GRAPPINO_BIN = $(BINDIR)/grappino
-  GRAPPINO_DIR = obj/TOOLS
+  TOOLDIR = obj/TOOLS
+  TOOLSUF =
 endif
+GRAPPINO_BIN = $(BINDIR)/grappino$(TOOLSUF)
 GRAPPINO_SRC = geometry io memory misc potential energy pdb rotamers grappino optimizepot cells mginfo
-GRAPPINO_OBJ = $(GRAPPINO_SRC:%=$(GRAPPINO_DIR)/%.o)
+GRAPPINO_OBJ = $(GRAPPINO_SRC:%=$(TOOLDIR)/%.o)
+MGP2PDB_BIN  = $(BINDIR)/mgp2pdb$(TOOLSUF)
 MGP2PDB_SRC  = mgp2pdb io memory geometry misc cells
-MGP2PDB_OBJ  = $(MGP2PDB_SRC:%=obj/TOOLS/%.o)
+MGP2PDB_OBJ  = $(MGP2PDB_SRC:%=$(TOOLDIR)/%.o)
+DCD2PDB_BIN  = $(BINDIR)/dcd2pdb$(TOOLSUF)
 
 .PHONY: montegrappa grappino mgp2pdb dcd2pdb mhistogram all clean cleanobj check check-asan check-stat FORCE
 
@@ -84,7 +90,7 @@ montegrappa: $(MC_BIN)
 
 # always relinked: SERIAL and STEMPERING both produce bin/montegrappa
 $(MC_BIN): $(MC_OBJ) FORCE | $(BINDIR)
-	$(CCV) $(CFLAGS) $(MC_OBJ) -o $@ $(LDLIBS)
+	$(CCV) $(CFLAGS) $(LDFLAGS) $(MC_OBJ) -o $@ $(LDLIBS)
 
 FORCE:
 
@@ -92,17 +98,17 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
 	$(CCV) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 
 grappino: $(GRAPPINO_BIN)
-mgp2pdb:  $(BINDIR)/mgp2pdb
-dcd2pdb:  $(BINDIR)/dcd2pdb
+mgp2pdb:  $(MGP2PDB_BIN)
+dcd2pdb:  $(DCD2PDB_BIN)
 
 $(GRAPPINO_BIN): $(GRAPPINO_OBJ) | $(BINDIR)
-	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
+	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
-$(BINDIR)/mgp2pdb: $(MGP2PDB_OBJ) | $(BINDIR)
-	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
+$(MGP2PDB_BIN): $(MGP2PDB_OBJ) | $(BINDIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
-$(BINDIR)/dcd2pdb: obj/TOOLS/dcd2pdb.o | $(BINDIR)
-	$(CC) $(CFLAGS) $^ -o $@
+$(DCD2PDB_BIN): $(TOOLDIR)/dcd2pdb.o | $(BINDIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 obj/TOOLS/%.o: $(SRCDIR)/%.c | obj/TOOLS
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
@@ -121,6 +127,7 @@ all:
 # tests (see tests/run_tests.sh)
 check:
 	$(MAKE) montegrappa grappino mgp2pdb dcd2pdb
+	if command -v $(MPICC) >/dev/null 2>&1; then $(MAKE) version=MPI; fi
 	tests/run_tests.sh
 
 check-asan:
@@ -137,6 +144,7 @@ cleanobj:
 
 clean: cleanobj
 	rm -f $(BINDIR)/montegrappa $(BINDIR)/montegrappa_mpi $(BINDIR)/montegrappa_asan \
-	      $(BINDIR)/grappino $(BINDIR)/grappino_asan $(BINDIR)/mgp2pdb $(BINDIR)/dcd2pdb $(BINDIR)/mhistogram
+	      $(BINDIR)/grappino $(BINDIR)/grappino_asan $(BINDIR)/mgp2pdb $(BINDIR)/mgp2pdb_asan \
+	      $(BINDIR)/dcd2pdb $(BINDIR)/dcd2pdb_asan $(BINDIR)/mhistogram
 
 -include $(wildcard obj/*/*.d)

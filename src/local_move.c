@@ -288,7 +288,7 @@ int localpivot(int ip,int iw,struct s_polymer *p, struct s_polymer *oldp,struct 
 
   int nang,i,m,ok=1,ra,rb;
 
-  if (iw < nmul+3)
+  if (iw < nmul+3 && iw < (p+ip)->nback-1)			// (the last atom of a short chain is moved forward)
   {
     if ( (((p+ip)->back)+iw+1)->move == 0 ) { return 0;}
 
@@ -545,6 +545,7 @@ static int BackRubMove(struct s_polymer *p, struct s_polymer *oldp,struct s_pote
   if (ok)
     if( DAbs( Angle( (((p+ip)->back)+iw+2)->pos, (((p+ip)->back)+iw+3)->pos, (((p+ip)->back)+iw+4)->pos,p->tables,&out)-(((p+ip)->back)+iw+3)->a_next) > 5.0)
       ok=0;
+  if (ok) ok = CheckLockedDihedralRange(p,ip,iw-3,iw+4,parms->d_cloose);		// locked dihedrals stay (only iw-3, iw-2, iw+3, iw+4 change)
 
   if (ok)
   {

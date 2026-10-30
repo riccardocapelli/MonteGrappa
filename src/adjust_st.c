@@ -174,7 +174,7 @@ int AdjustSTempering(struct st_stuff *p, double step)
 	}
 	else									// uses all past histograms
 	{
-		p->st_ntemp = OrderTemperatures(p->st_noldt,p->st_oldt,NULL,NULL,NULL,p->st_oldh,p->st_nbin,p->st_debug,p->st_oldt_iter);
+		p->st_noldt = OrderTemperatures(p->st_noldt,p->st_oldt,NULL,NULL,NULL,p->st_oldh,p->st_nbin,p->st_debug,p->st_oldt_iter);
 		FilterHistograms(p->st_oldh,p->st_htmp,p->st_noldt,p->st_nbin,p->st_binthresh);
 		p->st_current_lg = MHistogram(p->st_htmp,p->st_oldt,p->st_noldt,p->st_nbin,p->st_emin,p->st_ebin,p->st_debug,KB,p->st_current_lg,p->st_f,
 				p->st_paranoid,p->st_ignoreb,NULL,p->st_deltat,p->st_binok);

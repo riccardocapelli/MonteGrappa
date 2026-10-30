@@ -41,7 +41,48 @@
 /*****************************************************************************
  Monte Carlo loop
  *****************************************************************************/
-int softexit;
+volatile sig_atomic_t softexit;
+
+// current length of an output file (-1 if it is not open)
+static long long FileLength(FILE *fp)
+{
+	if (!fp) return -1;
+	if (fflush(fp)) Error("Cannot write output file");
+	return (long long) ftell(fp);
+}
+
+/*****************************************************************************
+ Write the checkpoint of the state at the end of step istep-1 of run irun,
+ with the lengths of the output files the restart cuts them to
+ *****************************************************************************/
+static void SaveCheckpoint(struct s_checkpoint *chk, char *fname, struct s_polymer *p, struct s_mc_parms *parms, int irun,
+		unsigned long long istep, int iprinttrj, int iprintlog, int iprinte, int *mcount, long long *macc, long long *mdone,
+		int ptcount, FILE *ftrj, FILE *fe, FILE *fexchange)
+{
+	int i;
+
+	chk->istep = istep;
+	chk->irun = irun;
+	GetRNGState(chk->rng);
+	chk->iprinttrj = iprinttrj;
+	chk->iprintlog = iprintlog;
+	chk->iprinte = iprinte;
+	chk->icheckpoint = 0;
+	chk->acc = parms->acc;
+	chk->mov = parms->mov;
+	for(i=0;i<NMOVES;++i)
+	{
+		chk->mcount[i] = mcount[i];
+		chk->macc[i] = macc[i];
+		chk->mdone[i] = mdone[i];
+	}
+	chk->ptcount = ptcount;
+	chk->off[0] = FileLength(ftrj);
+	chk->off[1] = strcmp(parms->fne,"") ? FileLength(fe) : -1;
+	chk->off[2] = FileLength(parms->fobs);
+	chk->off[3] = FileLength(fexchange);
+	WriteCheckpoint(fname,chk,p,parms->npol);
+}
 
 /*****************************************************************************
  Debug aid (keyword echeck): compare the incrementally updated energy with a
@@ -108,7 +149,7 @@ static void CheckEnergyDrift(struct s_polymer *p, struct s_polymer *oldp, struct
 }
 
 
-void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *replica, struct s_polymer *native, struct s_potential *pot, struct s_mc_parms *parms, FILE *ftrj, FILE *fe, struct s_polymer *oldp, FILE *fproc,int irun, struct s_checkpoint *chk, struct s_mpi_parms *mpiparms)
+int Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *replica, struct s_polymer *native, struct s_potential *pot, struct s_mc_parms *parms, FILE *ftrj, FILE *fe, struct s_polymer *oldp, FILE *fproc,int irun, struct s_checkpoint *chk, struct s_mpi_parms *mpiparms)
 {
 	int i,ok=0,iprinttrj=0,iprintlog=0,iprinte=0,icheckpoint=0,ntm=0,ci,mcount[NMOVES];
 	long long macc[NMOVES],mdone[NMOVES];
@@ -123,7 +164,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 	
 	#ifdef OPTIMIZEPOT
 	struct s_optimizepot *op = p->op;
-	op->icount = (parms->record_native && !chk->restart) ? parms->op_deltat : 0;	// record_native: the starting structure is the first frame
+	op->icount = (parms->record_native && !(chk->restart && chk->istep>0)) ? parms->op_deltat : 0;	// record_native: the starting structure is the first frame
 	OP_Reset(op);
 	op->record = 0;
 	#endif
@@ -151,10 +192,12 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 	// one file per rank (they would overwrite each other) and per run, as the energy files
 	if (parms->nrun>1) snprintf(fexname,sizeof(fexname),"exchange_run%d_proc%d.dat",irun,my_rank);
 	else snprintf(fexname,sizeof(fexname),"exchange_proc%d.dat",my_rank);
+	if (chk->restart) TruncateOutput(fexname,chk->off[3]);
 	FILE *fexchange=fopen(fexname,chk->restart ? "a" : "w");		// a restart continues the file of the run
 	if (!fexchange) Error("Cannot open exchange file");
 	#else
 	int my_rank=0;
+	FILE *fexchange=NULL;
 	t=parms->T;
 	#endif
 	softexit =0;
@@ -207,6 +250,11 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 	}
 	CheckpointName(fchkp,sizeof(fchkp),my_rank);
 	time_t tcheckpoint = time(NULL);
+	#ifndef ACTIVE_MPI
+	int ptempering_count=0;
+	#endif
+	if (!chk->restart)						// a restart of this run starts at least from here
+		SaveCheckpoint(chk,fchkp,p,parms,irun,istep,iprinttrj,iprintlog,iprinte,mcount,macc,mdone,ptempering_count,ftrj,fe,fexchange);
 	if (my_rank==0)
 	{
 		MGInfo_StartRun(parms,istep);
@@ -224,7 +272,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 			{
 				if ((parms->p)->st_ttarget_harvest==1 && st_iprint>=(parms->p)->st_printpdb && t <= (parms->p)->st_ttarget + EPSILON && (parms->p)->st_nm==1)
 				{
-					OP_RecordFrame(p,pot,parms,my_rank);
+					OP_RecordFrame(p,pot,parms,my_rank,t);
 					st_iprint = 0;
 				}
 			if ((parms->p)->st_ttarget_harvest>0 && ok>-1 && t <= (parms->p)->st_ttarget + EPSILON )
@@ -244,7 +292,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 				fprintf(stderr,"> recording polymer %d/%llu\tE=%lf\tT=%lf\n",op->nframes,
 						(parms->nstep-parms->op_wait)/parms->op_deltat,p->etot,parms->T);
 				#endif
-				OP_RecordFrame(p,pot,parms,my_rank);
+				OP_RecordFrame(p,pot,parms,my_rank,t);
 				op->icount=0;
 			}
 			if (istep >= parms->op_wait)
@@ -526,7 +574,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
                                         //#endif
                                         
 
-                                        OP_RecordFrame(p,pot,parms,my_rank);
+                                        OP_RecordFrame(p,pot,parms,my_rank,t);
 
 					 st_iprint = 0;
 
@@ -558,7 +606,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
                                         #endif
                                         
 
-                                        OP_RecordFrame(p,pot,parms,my_rank);
+                                        OP_RecordFrame(p,pot,parms,my_rank,t);
                                         op->icount=0;
                                 }
                                 if (istep >= parms->op_wait)
@@ -602,7 +650,7 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 		// a soft exit (SIGUSR1) must stop all ranks at the same step, or the others hang in the next exchange
 		if (parms->ntemp>1)
 		{
-			if (ptempering_count==1) MPI_Allreduce(&softexit,&stop,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD);
+			if (ptempering_count==1) { int se=softexit; MPI_Allreduce(&se,&stop,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD); }
 		}
 		else stop = softexit;
                 
@@ -636,33 +684,14 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 		if (p->cells && istep%10000==0) CellsBuild(p,pot->rcut,pot->boxtype=='p' ? pot->lbox : 0.);
 
 		// checkpoint at the end of a step, so that a restart continues exactly from here
-		// (by default on wall-clock time: writing a checkpoint does not change the trajectory)
-		if (parms->ncheckpoint>0 ? icheckpoint >= parms->ncheckpoint :
-				(icheckpoint % 1000 == 0 && difftime(time(NULL),tcheckpoint) >= parms->tcheckpoint))
+		// (by default on wall-clock time: writing a checkpoint does not change the trajectory);
+		// a soft exit writes one before stopping
+		if (stop || (parms->ncheckpoint>0 ? icheckpoint >= parms->ncheckpoint :
+				(icheckpoint % 1000 == 0 && difftime(time(NULL),tcheckpoint) >= parms->tcheckpoint)))
 		{
 			tcheckpoint = time(NULL);
 			icheckpoint = 0;
-			chk->istep = istep;
-			chk->irun = irun;
-			GetRNGState(chk->rng);
-			chk->iprinttrj = iprinttrj;
-			chk->iprintlog = iprintlog;
-			chk->iprinte = iprinte;
-			chk->icheckpoint = icheckpoint;
-			chk->acc = parms->acc;
-			chk->mov = parms->mov;
-			for(i=0;i<NMOVES;++i)
-			{
-				chk->mcount[i] = mcount[i];
-				chk->macc[i] = macc[i];
-				chk->mdone[i] = mdone[i];
-			}
-			#ifdef ACTIVE_MPI
-			chk->ptcount = ptempering_count;
-			#else
-			chk->ptcount = 0;
-			#endif
-			WriteCheckpoint(fchkp,chk,p,parms->npol);
+			SaveCheckpoint(chk,fchkp,p,parms,irun,istep,iprinttrj,iprintlog,iprinte,mcount,macc,mdone,ptempering_count,ftrj,fe,fexchange);
 		}
 
 		// progress in the file mginfo (every tmginfo seconds)
@@ -690,10 +719,11 @@ void Do_MC(struct s_polymer *p, struct s_polymer *fragment, struct s_polymer *re
 	}
 
 	fprintf(stderr,"\n");
+	if (stop) return 1;
 	snprintf(p->title,sizeof(p->title),"final");
 	PrintTrajectory(ftrj,p,parms,pot);
 
-
+	return 0;
 }
 
 /*****************************************************************************
@@ -939,6 +969,19 @@ static int RigidSame(struct vector x, struct vector ao, double fo[3][3], struct 
 	return (an.x+z[0]-y.x)*(an.x+z[0]-y.x) + (an.y+z[1]-y.y)*(an.y+z[1]-y.y) + (an.z+z[2]-y.z)*(an.z+z[2]-y.z) < RIGID_TOL2;
 }
 
+// widen the bounding box lo,hi to contain x
+static void RigidGrow(struct vector x, double lo[3], double hi[3])
+{
+	double v[3]={x.x,x.y,x.z};
+	int k;
+
+	for (k=0;k<3;++k)
+	{
+		if (v[k]<lo[k]) lo[k] = v[k];
+		if (v[k]>hi[k]) hi[k] = v[k];
+	}
+}
+
 /*****************************************************************************
  After a pivot move, the residues [from,to] of chain ip were rotated
  rigidly with their backbone (from and to farther than parms->rigid from
@@ -991,6 +1034,33 @@ static char *RigidFlags(struct s_polymer *p, struct s_polymer *oldp, struct s_po
 				if (pot->hb[ia]) rig[i] = RigidSame(*((oldp+ip)->vback[pot->hb_iam[ia]]),ao,fo,an,fn,*((p+ip)->vback[pot->hb_iam[ia]]));
 			}
 		}
+	}
+
+	// in a periodic box the image of a pair can change with the rotation, unless
+	// the rigid atoms fit in a box whose diagonal is shorter than half a side
+	if (pot->boxtype=='p')
+	{
+		double lo[3]={1e30,1e30,1e30},hi[3]={-1e30,-1e30,-1e30},d2=0;
+		int k;
+
+		for (i=from;i<=to;++i)
+			if (rig[i])
+			{
+				RigidGrow(bo[i].pos,lo,hi);
+				if (!parms->nosidechains)
+					for (is=0;is<bo[i].nside;++is) RigidGrow(bo[i].side[is].pos,lo,hi);
+				if (parms->hb)
+				{
+					if (pot->hb[b[i].ia]) RigidGrow(*((oldp+ip)->vback[pot->hb_iam[b[i].ia]]),lo,hi);
+					for (is=0;is<b[i].nside;++is)
+					{
+						ia = b[i].side[is].ia;
+						if (pot->hb[ia]) RigidGrow(*((oldp+ip)->vback[pot->hb_iam[ia]]),lo,hi);
+					}
+				}
+			}
+		for (k=0;k<3;++k) if (hi[k]>lo[k]) d2 += (hi[k]-lo[k])*(hi[k]-lo[k]);
+		if (4.*d2 >= pot->lbox*pot->lbox) return NULL;
 	}
 	return rig;
 }
@@ -2278,6 +2348,20 @@ static double CBMCEnergy(struct s_polymer *p, struct s_potential *pot, struct s_
 	return etot;
 }
 
+// log of the sum of exp(-u_k/T) over the trials with u_k < LARGE, summed relative to
+// the lowest of them (umin, LARGE if none) so that it neither overflows nor underflows
+static double CBMCLogWeight(double *u, int nt, double t, double *umin)
+{
+	double w=0;
+	int k;
+
+	*umin = LARGE;
+	for (k=0;k<nt;++k) if (u[k] < *umin) *umin = u[k];
+	if (*umin >= LARGE) return 0;
+	for (k=0;k<nt;++k) if (u[k] < LARGE) w += exp(-(u[k]-*umin)/t);
+	return log(w) - *umin/t;
+}
+
 /*****************************************************************************
  Configurational-bias regrowth of an end of a chain (Siepmann and Frenkel,
  Mol. Phys. 75, 59 (1992)): the last n backbone atoms of one end (n uniform
@@ -2294,7 +2378,7 @@ static double CBMCEnergy(struct s_polymer *p, struct s_potential *pot, struct s_
 int MoveCBMC(struct s_polymer *p, struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *pot, double t)
 {
 	int ip,nb,n,dir,m0,m1,ra,rb,kd0,kd1,k,i,j,nt,ok=1,out,K=parms->cbmc_k;
-	double deltaE,usel_old=0,usel_new=0,lnw_old=0,lnw_new=0,w,r,u[K];
+	double deltaE,usel_old=0,usel_new=0,lnw_old=0,lnw_new=0,lnw,umin,r,u[K];
 	struct vector x[K],xold;
 	struct s_back *bk;
 
@@ -2338,9 +2422,8 @@ int MoveCBMC(struct s_polymer *p, struct s_polymer *oldp, struct s_mc_parms *par
 			u[k] = out ? CBMCEnergy(p,pot,parms,ip,j,dir) : LARGE;
 		}
 		(bk+j)->pos = xold;
-		for (w=0,k=0;k<nt;++k) if (u[k] < LARGE) w += exp(-u[k]/t);
-		if (w <= 0) ok = 0;
-		else { lnw_old += log(w); usel_old += u[0]; }
+		if (u[0] >= LARGE) ok = 0;
+		else { lnw_old += CBMCLogWeight(u,nt,t,&umin); usel_old += u[0]; }
 	}
 
 	// grow the new conformation
@@ -2357,17 +2440,17 @@ int MoveCBMC(struct s_polymer *p, struct s_polymer *oldp, struct s_mc_parms *par
 			(bk+j)->pos = x[k];
 			u[k] = out ? CBMCEnergy(p,pot,parms,ip,j,dir) : LARGE;
 		}
-		for (w=0,k=0;k<nt;++k) if (u[k] < LARGE) w += exp(-u[k]/t);
-		if (w <= 0) { ok = 0; break; }
-		r = frand() * w;						// trial k with probability exp(-u_k/T)/w
+		lnw = CBMCLogWeight(u,nt,t,&umin);
+		if (umin >= LARGE) { ok = 0; break; }
+		r = frand() * exp(lnw + umin/t);				// trial k with probability exp(-u_k/T)/w (weights relative to the lowest u)
 		for (k=0;k<nt-1;++k)
 		{
-			if (u[k] < LARGE) r -= exp(-u[k]/t);
+			if (u[k] < LARGE) r -= exp(-(u[k]-umin)/t);
 			if (r < 0) break;
 		}
 		while (u[k] >= LARGE) k--;					// (only if rounding left r>=0 past the last allowed trial)
 		(bk+j)->pos = x[k];
-		lnw_new += log(w);
+		lnw_new += lnw;
 		usel_new += u[k];
 	}
 

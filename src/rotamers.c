@@ -84,6 +84,7 @@ int ReadRotamers(char *fname, struct rot_input_s *x, int debug)
 
   while (fscanf(fp,"%9s %d %d",aa,&nrot,&nat)==3)
     {
+       if (strlen(aa)>4) { fprintf(stderr,"%s\n",aa); Error("Amino acid name longer than 4 characters in rotamer file"); }
        if (nrot<0 || nrot>ROTMAX || nrot+1>NROTMAX) { fprintf(stderr,"%s: %d rotamers\n",aa,nrot); Error("Too many rotamers in rotamer file (ROTMAX, NROTMAX)"); }
        if (nat<0 || nat>ROT_ATMAX || nat+1>NSIDEMAX) { fprintf(stderr,"%s: %d atoms\n",aa,nat); Error("Too many atoms in a rotamer (ROT_ATMAX, NSIDEMAX)"); }
        (x+naa)->nrot = nrot;

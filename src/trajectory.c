@@ -74,7 +74,7 @@ static long DCDFrameSize(int natoms, int cell)
 static void PrintPDBTopology(char *fname, struct s_polymer *p, int npol)
 {
 	int ic,i,j,n=0;
-	char cc;
+	char cc,bx[9],by[9],bz[9];
 	FILE *fp;
 	struct s_back *b;
 	struct s_side *s;
@@ -88,13 +88,13 @@ static void PrintPDBTopology(char *fname, struct s_polymer *p, int npol)
 		for (i=0;i<(p+ic)->nback;++i)
 		{
 			b = ((p+ic)->back)+i;
-			fprintf(fp,"ATOM  %5d  %-4s%3s %c%4d    %8.3lf%8.3lf%8.3lf  1.00  0.00      %4d %c\n",(++n)%100000,b->type,
-					b->aa,cc,b->iaa%10000,(b->pos).x,(b->pos).y,(b->pos).z,ic%10000,b->type[0]);
+			fprintf(fp,"ATOM  %5d  %-4s%3s %c%4d    %s%s%s  1.00  0.00      %4d %c\n",(++n)%100000,b->type,
+					b->aa,cc,b->iaa%10000,PDBCoord(b->pos.x,bx),PDBCoord(b->pos.y,by),PDBCoord(b->pos.z,bz),ic%10000,b->type[0]);
 			for (j=0;j<b->nside;++j)
 			{
 				s = (b->side)+j;
-				fprintf(fp,"ATOM  %5d  %-4s%3s %c%4d    %8.3lf%8.3lf%8.3lf  1.00  0.00      %4d %c\n",(++n)%100000,s->type,
-						b->aa,cc,b->iaa%10000,(s->pos).x,(s->pos).y,(s->pos).z,ic%10000,s->type[0]);
+				fprintf(fp,"ATOM  %5d  %-4s%3s %c%4d    %s%s%s  1.00  0.00      %4d %c\n",(++n)%100000,s->type,
+						b->aa,cc,b->iaa%10000,PDBCoord(s->pos.x,bx),PDBCoord(s->pos.y,by),PDBCoord(s->pos.z,bz),ic%10000,s->type[0]);
 			}
 		}
 		fprintf(fp,"TER\n");

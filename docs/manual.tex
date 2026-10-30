@@ -1,0 +1,742 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{fancyvrb}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black,citecolor=blue!50!black]{hyperref}
+
+\usepackage{url}
+% a keyword or file name (underscores allowed; long ones break after _ , / .)
+\urlstyle{tt}
+\makeatletter
+\g@addto@macro{\UrlBreaks}{\do\_\do\,}
+\makeatother
+\DeclareUrlCommand\kw{}
+% table of keywords: keyword, argument, default, description
+\newenvironment{keywords}
+ {\begin{longtable}{>{\raggedright}p{0.2\textwidth}>{\raggedright}p{0.12\textwidth}>{\raggedright}p{0.14\textwidth}p{0.41\textwidth}}
+  \toprule keyword & argument & default & meaning \\ \midrule \endhead
+  \bottomrule \endfoot}
+ {\end{longtable}}
+\newcommand{\key}[4]{\kw{#1} & #2 & #3 & #4 \\}
+
+\title{\textbf{MonteGrappa}\\[2mm]\large Reference manual}
+\author{G. Tiana, F. Villa, Y. Zhan, R. Capelli, C. Paissoni, P. Sormanni, R. Meloni}
+\date{Version 2.0, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+MonteGrappa is a Monte Carlo program for the simulation of polymers and
+proteins described by simplified, structure-based or statistical
+potentials, from C$_\alpha$ models to all-atom models with rotamers. It
+supports simulated and parallel tempering, periodic boxes with many chains,
+and the iterative optimization of the potential against experimental
+restraints. This manual describes the programs of the package, their input
+files and every keyword they read. Please cite G.~Tiana \emph{et al.},
+Comp.\ Phys.\ Comm.\ \textbf{186}, 93--104 (2015),
+doi:\href{https://doi.org/10.1016/j.cpc.2014.09.012}{10.1016/j.cpc.2014.09.012}.
+\end{abstract}
+
+\tableofcontents
+
+%======================================================================
+\section{Overview}
+
+The package contains five programs:
+\begin{itemize}
+\item \kw{montegrappa}, the Monte Carlo engine (serial, with simulated
+  tempering, or with parallel tempering over MPI as \kw{montegrappa_mpi});
+\item \kw{grappino}, which builds the input files of \kw{montegrappa} (polymer
+  and potential) from a PDB structure;
+\item \kw{mhistogram}, which computes thermodynamic quantities from energy
+  histograms at several temperatures with the multiple-histogram method;
+\item \kw{mgp2pdb}, which converts a polymer file into a PDB file;
+\item \kw{dcd2pdb}, which converts a binary dcd trajectory into PDB frames.
+\end{itemize}
+
+A typical workflow is: prepare a PDB file, run \kw{grappino} to obtain the
+polymer file (\kw{.pol}) and the potential file (\kw{.pot}), write a
+parameter file (\kw{.par}) and run
+\begin{Verbatim}
+  montegrappa polymer.pol potential.pot parameters.par
+\end{Verbatim}
+The tutorials in \kw{tutorial/}, described in section~\ref{sec:tutorials},
+go through these steps from a C$_\alpha$ Go model to parallel tempering,
+simulated tempering and the optimization of the potential.
+
+\paragraph{Units.} Lengths are in \AA{}ngstrom, angles in degrees.
+Energies are in arbitrary units and the Boltzmann constant is 1, so
+temperatures are in the same units as energies.
+
+\paragraph{Input syntax.} All input files are plain text. In the parameter
+files of \kw{montegrappa} and \kw{grappino} each line starts with a keyword
+followed by its arguments; anything after them (e.g.\ a comment after
+\kw{#}) is ignored. A keyword is recognized when the line \emph{starts}
+with it, so keywords must begin at the first column; unknown keywords are
+ignored silently, so check the log (each recognized keyword is echoed on
+standard error). \emph{Flag} keywords switch an option on when they appear
+alone and off when followed by \kw{0} (e.g.\ \kw{shell 0}). Polymer and
+potential files are divided in chapters introduced by a line
+\kw{[ name ]}.
+
+%======================================================================
+\section{Installation}
+
+The code is written in C99 and needs only the math library; simulated
+tempering and \kw{mhistogram} need GSL, parallel tempering needs MPI.
+\begin{Verbatim}
+  make                      serial montegrappa         -> bin/montegrappa
+  make version=STEMPERING   with simulated tempering   -> bin/montegrappa
+  make version=MPI          parallel tempering         -> bin/montegrappa_mpi
+  make version=ASAN         AddressSanitizer + UBSan   -> bin/montegrappa_asan
+  make grappino | mgp2pdb | dcd2pdb | mhistogram
+  make all                  everything except ASAN
+\end{Verbatim}
+GSL is found with \kw{gsl-config}, MPI with the \kw{mpicc} wrapper; both can
+be set on the command line, e.g.
+\begin{Verbatim}
+  make version=STEMPERING GSL_PREFIX=/opt/local
+  make version=MPI MPICC=/path/to/mpicc
+\end{Verbatim}
+Each
+version is compiled in its own directory \kw{obj/<version>}. The code is
+always compiled with \kw{-ffp-contract=off}, so that the arithmetic (and
+hence a trajectory with a given seed) is the same on all platforms.
+\kw{make OPENMP=1} enables an experimental OpenMP parallelization of the
+total energy (with the same results as the serial version).
+
+\kw{make check} runs the test suite (about one minute): errors on wrong
+input, bitwise regression of trajectories, consistency of the incremental
+energy after every move, exact restart (also of simulated tempering, with
+\kw{bin/montegrappa_st}, which it builds when GSL is found), cell list,
+tools, MPI, observables and the distribution of the AVB move. \kw{make check-asan} runs it with the
+sanitizers, \kw{make check-stat} tests detailed balance statistically (see
+\kw{tests/README.md}).
+
+%======================================================================
+\section{Running montegrappa}
+
+\begin{Verbatim}
+  montegrappa  polymer.pol  potential.pot  parameters.par
+  mpirun -np N  montegrappa_mpi  polymer.pol  potential.pot  parameters.par
+  montegrappa  checkpoint  potential.pot  parameters.par      (restart)
+\end{Verbatim}
+With MPI, the number of processes must equal \kw{ntemp}: each rank
+simulates one replica at one temperature.
+
+\subsection{Monte Carlo steps and moves}
+At each step, every move type whose counter has reached its frequency is
+attempted once (see the move keywords in section~\ref{sec:moves}): a move
+with frequency $N$ is attempted every $N$ steps. A move is accepted with the
+Metropolis criterion $\min[1, e^{-\Delta E/T}]$, corrected by the ratio of
+the proposal probabilities for the biased moves (\kw{movebias}, \kw{avbmc},
+\kw{cbmc}). Moves that would break a constraint (locked dihedrals, bond
+angles, box walls, overlaps) are rejected.
+
+\subsection{Several runs}
+\kw{nrun} $>1$ repeats the simulation; each run continues from the last
+conformation of the previous one (from the initial one with
+\kw{always_restart}). It is used together with the optimization of the
+potential (section~\ref{sec:optim}), which changes the potential between
+runs. Output files of run $r$ carry \kw{_run}$r$ in their name.
+
+\subsection{Restart}
+A checkpoint file (\kw{checkpoint.dat}, \kw{checkpoint_proc<rank>.dat}
+with MPI) is written every \kw{tcheckpoint} seconds of wall-clock time
+(default 600) or every \kw{ncheckpoint} steps; with MPI every 100000 steps
+by default, so that all replicas write it at the same step. Each run also
+writes one when it starts. It contains the state of the random number
+generator, all counters, the energy, the coordinates with 17 significant
+digits, the matrix of the potential when the optimization changes it, the
+state of simulated tempering (temperatures, weights, histograms, density of
+states), and the length of the output files at that moment. The frames
+recorded for the optimization of the potential are appended at each
+checkpoint to \kw{checkpoint_op.dat} (\kw{checkpoint_op_proc<rank>.dat}
+with MPI), a binary file of the same machine. The command
+\begin{Verbatim}
+  montegrappa checkpoint potential.pot parameters.par
+\end{Verbatim}
+in the same directory continues the simulation exactly (bit by bit) as if
+it had not been interrupted, also in a later run of an optimization of the
+potential and with simulated tempering: the trajectory, energy,
+observables, exchange, temperature (\kw{st_tfile}), harvest
+(\kw{st_pdbnf}) and \kw{chi2.dat} files are cut back to their length at
+the checkpoint, so nothing is written twice, and the log is continued. The
+original polymer file must still be there, and the potential file given is
+the original one (its matrix is replaced by that of the checkpoint).
+\kw{kill -USR1} stops the program cleanly at the end of the current step
+after writing a checkpoint.
+
+\subsection{Output files}
+\begin{longtable}{>{\raggedright}p{0.32\textwidth}p{0.6\textwidth}}
+\toprule file & content \\ \midrule
+\kw{traj.pdb} (keyword \kw{traj}) & trajectory in PDB format every \kw{nprinttrj} steps, with the initial and final conformations; with \kw{trjformat dcd} a binary \kw{traj.dcd} and its topology \kw{traj_top.pdb} \\
+\kw{energy.ene} (\kw{efile}) & every \kw{nprinte} steps: step, total energy, pair energy, angle energy, dihedral energy, H-field energy \\
+\kw{last.pol} (\kw{lastp}) & last conformation, as a polymer file \\
+\kw{montegrappa.log} (\kw{logfile}) & log of the input and of the run \\
+\kw{obs.dat} & aggregation observables every \kw{nprintobs} steps \\
+\kw{mginfo} & progress of the simulation (as Amber's \kw{mdinfo}) every \kw{tmginfo} seconds \\
+\kw{checkpoint.dat}, \kw{checkpoint_op.dat} & checkpoint for the restart, frames of the optimization recorded up to it \\
+\kw{proc_<rank>.log} (\kw{procfile}) & with MPI, log of each rank \\
+\kw{exchange_proc<rank>.dat} & with MPI, accepted exchanges (\kw{[EX] step i i+1}) \\
+\kw{newpot_<run>.pot}, \kw{chi2.dat} & optimized potential of each run and $\chi^2$ (section~\ref{sec:optim}) \\
+\bottomrule
+\end{longtable}
+With MPI the names carry \kw{_proc<rank>}, with \kw{nrun}$>1$
+\kw{_run<run>}. The PDB trajectory has one \kw{TITLE} line and one
+\kw{ENDMDL} per frame; chains are named A, B, \dots{} (and separated by
+\kw{TER} from the 25th chain on). Coordinates are not wrapped into a
+periodic box; far from the origin they keep their 8 columns with fewer
+decimals.
+
+%======================================================================
+\section{The polymer file}
+\label{sec:pol}
+
+The polymer file describes the chains: the backbone atoms with their
+coordinates, the rotamers of the sidechains and the current rotameric
+state. It is normally written by \kw{grappino}.
+
+\paragraph{\texttt{[ backbone ]}} One line per backbone atom:
+\begin{Verbatim}
+  back  ia  type  itype  aa  iaa  ch  x  y  z  tomove
+\end{Verbatim}
+\kw{back} is the index of the atom along the backbone of its chain (from
+0), \kw{ia} a global atom identifier (unique over the whole system),
+\kw{type} the atom name, \kw{itype} the atom type used by the potential,
+\kw{aa} and \kw{iaa} the residue name and number, \kw{ch} the chain (from
+0), \kw{x y z} the coordinates and \kw{tomove} 1 if the dihedral around
+this atom can change, 0 if it is locked (e.g.\ the peptide bond).
+
+\paragraph{\texttt{[ rotamers ]}} The sidechain atoms attached to each backbone
+atom, for each rotamer:
+\begin{Verbatim}
+  back  ch  rot  at   b1  b2  b3   ia  type  itype   ang  dih  r
+\end{Verbatim}
+Sidechain atom \kw{at} of backbone atom \kw{back} of chain \kw{ch}, in
+rotamer \kw{rot}, is placed at distance \kw{r}, angle \kw{ang} and
+dihedral \kw{dih} from the atoms with identifiers \kw{b1 b2 b3} (internal
+coordinates). \kw{ia}, \kw{type} and \kw{itype} are as in the backbone.
+
+\paragraph{\texttt{[ sidechains ]}} The current rotamer of each residue:
+\kw{back ch irot}. A residue whose rotamer is not listed is in rotamer 0;
+the rotamer must exist.
+
+%======================================================================
+\section{The potential file}
+\label{sec:pot}
+
+The energy is the sum of pair interactions between atoms of different
+residues, and of angular, dihedral and H-field terms:
+\begin{multline*}
+E = \sum_{\text{pairs}} \epsilon_{ab}\,\theta(r_{w,ab} - r)
+ + \sum_i k_i(\vartheta_i-\vartheta_i^0)^2 \\
+ + \sum_i \left[ k^{(1)}_i\left(1-\cos(\phi_i-\phi^{(1)}_i)\right)
+               + k^{(3)}_i\left(1-\cos 3(\phi_i-\phi^{(3)}_i)\right)\right]
+ + E_{\text{HF}}
+\end{multline*}
+A pair of atoms of types $a,b$ at distance $r$ has energy
+$\epsilon_{ab}$ if $r<r_{w,ab}$ (square well), and infinite energy if
+$r<r_{0,ab}$ (hard core). Atoms of residues closer than \kw{imin} along
+the same chain do not interact, except through the global hard core.
+
+\paragraph{\texttt{[ pairs ]}} \texttt{i j e rw r0}: atom types $i$, $j$, well
+depth $\epsilon$, well radius $r_w$, hard-core radius $r_0$. The matrix is
+symmetric. Types that no atom of the polymer has are ignored, so a general
+potential can be used for any polymer.
+
+\paragraph{\texttt{[ angles ]}} \texttt{ia k ang0}: harmonic bond-angle term
+centred on the backbone atom with identifier \kw{ia}.
+
+\paragraph{\texttt{[ dihedrals ]}} \texttt{ia k1 phi01 k3 phi03}: periodic dihedral
+term (see above) on the dihedral around backbone atom \kw{ia}.
+
+\paragraph{\texttt{[ global ]}} Keywords applying to all atoms:
+\begin{keywords}
+\key{hardcore}{r0}{0}{hard-core radius of all pairs (also those closer than \kw{imin})}
+\key{homopolymeric}{e r}{--}{square well of depth $e$ and radius $r$ between all types}
+\key{imin}{n}{0}{atoms whose backbone indices along the same chain differ by $n$ or less do not interact (only the global hard core)}
+\key{angle}{k ang0}{--}{the same angular term for all atoms}
+\key{dihedral1}{k phi0}{--}{the same $n=1$ dihedral term for all atoms}
+\key{dihedral3}{k phi0}{--}{the same $n=3$ dihedral term for all atoms}
+\key{splice}{kr ke}{off}{beyond $kr\cdot r_w$ ($kr<1$) the well has depth $ke\cdot\epsilon$ (two-step well); with hydrogen bonds, donor--acceptor pairs have no outer step}
+\key{e_dih}{e}{--}{strength of the tabulated dihedral potential}
+\key{g_dihbin}{bin}{--}{bin (degrees) of the tabulated dihedrals}
+\key{e_dihram}{e}{1}{strength of the Ramachandran dihedral potential}
+\key{boxtype}{c, s, p}{none}{cubic box with walls, spherical box, periodic cubic box}
+\key{boxsize}{L}{--}{side of the cubic box, diameter of the spherical one (\AA)}
+\end{keywords}
+In a box with walls (\kw{c}: cube of side $L$ centred in the origin;
+\kw{s}: sphere of diameter $L$) backbone atoms cannot leave the box. In a
+periodic box (\kw{p}) pairs interact through the minimum image; $L$ must
+exceed twice the range of interaction of two residues, and shells
+(\kw{shell}) cannot be used.
+
+\paragraph{\texttt{[ hydrogen\_bonds ]}} \texttt{ia d|a ib}: atom \texttt{ia} is a donor
+(\kw{d}) or an acceptor (\kw{a}) and \kw{ib} is the atom bonded to it that
+defines its direction. With \kw{hb} in the parameter file, the well of a
+donor--acceptor pair is multiplied by
+$\sqrt{|\cos\vartheta_1\cos\vartheta_2|}$, where $\vartheta_{1,2}$ are the
+angles between the bonds and the donor--acceptor vector.
+
+\paragraph{\texttt{[ dihedral\_weight ]}, \texttt{[ dihedral\_table ]}} Tabulated
+dihedral potential: \kw{ia pa pb which} assigns to atom \kw{ia} the weights
+of the $\alpha$ and $\beta$ tables (\kw{which} 0 for $\phi$, 1 for $\psi$);
+the table has lines \kw{bin phi_a phi_b psi_a psi_b}.
+
+\paragraph{\texttt{[ Ramachandran\_Dihedrals ]}, \texttt{[ Alfa/Beta\_propensity ]}}
+Gaussian Ramachandran potential: lines \kw{a|b f|p sigma dih0} give width
+and centre for $\alpha$/$\beta$ and $\phi$/$\psi$; lines \kw{iaa pa pb} the
+propensities of each amino acid.
+
+\paragraph{\texttt{[ hfields ]}} \texttt{itype h}: H-field energy $h$ of a residue
+whose first sidechain atom has type \kw{itype}, multiplied by its number of
+contacts. A potential without this chapter switches H fields off.
+
+\paragraph{\texttt{[ comments ]}} Free text, printed on standard error.
+
+%======================================================================
+\section{The parameter file of montegrappa}
+\label{sec:par}
+
+\subsection{System and run}
+\begin{keywords}
+\key{nchains}{n}{required}{number of chains in the polymer file}
+\key{nstep}{n}{100000}{Monte Carlo steps of each run}
+\key{Temp}{T}{required}{temperature (serial and simulated tempering)}
+\key{seed}{n}{clock}{seed of the random number generator (xoshiro256**)}
+\key{nrun}{n}{1}{number of runs (iterations of the optimization)}
+\key{always_restart}{flag}{off}{every run starts from the initial conformation}
+\key{nosidechain}{flag}{off}{ignore the sidechains}
+\key{noangpot}{flag}{off}{no angular potential}
+\key{nodihpot}{flag}{off}{no dihedral potential}
+\key{nohfields}{flag}{off}{no H fields}
+\key{r_contact}{r}{5}{contact distance (\AA) for the H fields}
+\key{hb}{flag}{off}{hydrogen bonds (chapter \kw{[ hydrogen_bonds ]} of the potential)}
+\key{disentangle}{flag}{off}{overlapping atoms are allowed with an energy of $10^4$ per pair (kept as a pair energy), so that a structure with overlaps can relax; for preparing structures, not for production}
+\key{shell}{flag}{off}{use a neighbour list of radius \kw{r2shell}}
+\key{r2shell}{r}{6}{radius (\AA) of the neighbour list (increased if shorter than the interactions)}
+\key{nshell}{n}{10}{steps between updates of the neighbour list}
+\key{cells}{1, 0, -1}{-1}{cell list for the energy: always, never, automatic (for large systems)}
+\end{keywords}
+
+\subsection{Moves}
+\label{sec:moves}
+The value of each move keyword is its frequency: the move is attempted
+every $n$ steps. Moves not listed are not used; at least one is required.
+\begin{keywords}
+\key{flip}{n}{--}{rotate a backbone atom around the axis of its two neighbours, by up to $\pm$\kw{dw_flip}}
+\key{pivot}{n}{--}{rotate one end of a chain around a random backbone bond, by up to $\pm$\kw{dw_pivot}/2}
+\key{mpivot}{n}{--}{\kw{nmul_mpivot} consecutive pivots, by up to $\pm$\kw{dw_mpivot}/2}
+\key{lpivot}{n}{--}{local (loose) pivot: \kw{nmul_lpivot} consecutive pivots by up to $\pm$\kw{dw_lpivot}/2 with the rest of the chain fixed; the squared length of the bond that closes the moved segment may change by up to \kw{r_cloose}$^2$}
+\key{mflip}{n}{--}{flip of a piece of chain up to \kw{nmul_mflip} atoms long, by up to $\pm$\kw{dw_mflip}}
+\key{sidechain}{n}{--}{change the rotamer of a residue}
+\key{movebias}{n}{--}{biased Gaussian local move (Favrin \emph{et al.}) on \kw{nmul_local} atoms, with \kw{bgs_a}, \kw{bgs_b}}
+\key{backrub}{n}{--}{rotate a segment of five backbone atoms around the axis of the C$_\alpha$ at its ends}
+\key{backsiderub}{n}{--}{backrub with a new rotamer of the central residue}
+\key{movecom}{n}{--}{translate a chain by up to $\pm$\kw{dx_com}/2 per axis}
+\key{moverot}{n}{--}{rotate a chain by up to $\pm$\kw{dtheta}/2}
+\key{comcluster}{n}{--}{translate a cluster of chains in contact by up to $\pm$\kw{dx_clm}/2 per axis}
+\key{rotcluster}{n}{--}{rotate a cluster of chains by up to $\pm$\kw{dtheta}/2}
+\key{avbmc}{n}{--}{aggregation-volume-bias move (Chen and Siepmann, J.\ Phys.\ Chem.\ B \textbf{105}, 11275 (2001)): a chain is moved, with a random orientation, into or out of the region within \kw{avb_rin} of another chain; periodic box only}
+\key{cbmc}{n}{--}{configurational-bias regrowth of the last 1..\kw{nmax_cbmc} backbone atoms of a chain end with \kw{ntrial_cbmc} trials per dihedral (Siepmann and Frenkel, Mol.\ Phys.\ \textbf{75}, 59 (1992))}
+\end{keywords}
+
+\noindent Parameters of the moves:
+\begin{keywords}
+\key{dw_flip}{deg}{30}{amplitude of \kw{flip}}
+\key{dw_pivot}{deg}{10}{amplitude of \kw{pivot}}
+\key{dw_mpivot}{deg}{1}{amplitude of \kw{mpivot}}
+\key{dw_lpivot}{deg}{1}{amplitude of \kw{lpivot}}
+\key{dw_mflip}{deg}{30}{amplitude of \kw{mflip}}
+\key{randdw}{1, 2}{1}{pivot angles uniform (1) or Gaussian of that width (2)}
+\key{nmul_mpivot}{n}{3}{pivots of \kw{mpivot}}
+\key{nmul_lpivot}{n}{3}{pivots of \kw{lpivot} (negative: random between 2 and $|n|$)}
+\key{nmul_mflip}{n}{100}{largest length of \kw{mflip}}
+\key{nmul_local}{n}{required}{atoms moved by \kw{movebias} (at least 3)}
+\key{bgs_a, bgs_b}{a b}{2, 1}{parameters of the Gaussian of \kw{movebias}}
+\key{dx_com}{\AA}{1}{amplitude of \kw{movecom}}
+\key{dx_clm}{\AA}{1}{amplitude of \kw{comcluster}}
+\key{dtheta}{deg}{1}{amplitude of \kw{moverot} and \kw{rotcluster}}
+\key{avb_rin}{\AA}{required}{radius of the bonded region of \kw{avbmc} (box side $>2\cdot$\kw{avb_rin})}
+\key{avb_pin}{p}{0.5}{probability of a move into the bonded region}
+\key{nmax_cbmc}{n}{6}{largest number of atoms regrown by \kw{cbmc}}
+\key{ntrial_cbmc}{n}{8}{trials per dihedral of \kw{cbmc}}
+\key{r_cloose}{\AA}{0.5}{tolerance on the closing bond of \kw{lpivot}: $|d^2-d_0^2|<$\kw{r_cloose}$^2$}
+\key{a_cloose}{deg}{off}{largest change of a bond angle allowed to \kw{flip}, \kw{lpivot}}
+\key{d_cloose}{deg}{off}{largest change of a locked dihedral (\kw{tomove 0}) allowed to flips, \kw{lpivot}, \kw{mflip}, \kw{backrub}}
+\end{keywords}
+
+\subsection{Output}
+\begin{keywords}
+\key{nprinttrj}{n}{1000}{steps between frames of the trajectory}
+\key{nprinte}{n}{1000}{steps between lines of the energy file}
+\key{nprintlog}{n}{1000}{steps between lines of the log}
+\key{nprintobs}{n}{0}{steps between aggregation observables (0: none)}
+\key{traj}{name}{traj}{base name of the trajectory}
+\key{trjformat}{pdb, dcd}{pdb}{format of the trajectory}
+\key{efile}{name}{energy}{base name of the energy file}
+\key{lastp}{name}{last}{base name of the last conformation}
+\key{logfile}{name}{\kw{montegrappa.log}}{log file}
+\key{procfile}{name}{proc}{base name of the logs of the MPI ranks}
+\key{ncheckpoint}{n}{0}{steps between checkpoints (0: by time)}
+\key{tcheckpoint}{s}{600}{seconds between checkpoints}
+\key{tmginfo}{s}{60}{seconds between updates of \kw{mginfo} (0: not written)}
+\key{echeck}{flag}{off}{after every move compare the energy, contacts, cell list and sidechains with a full recalculation (slow; to test moves)}
+\key{debug}{n}{0}{verbosity (needs compilation with \kw{-DDEBUG})}
+\end{keywords}
+The aggregation observables are: number of clusters of chains in contact,
+largest and mean cluster size, pairs of chains in contact, parallel and
+antiparallel pairs (cosine of the end-to-end vectors above 0.8), pairs in
+register and mean register, nematic order parameter.
+
+\subsection{Parallel tempering (montegrappa\_mpi)}
+\begin{keywords}
+\key{ntemp}{n}{required}{number of replicas (= MPI processes)}
+\key{temperatures}{}{required}{followed by \kw{ntemp} lines, the temperature of each rank}
+\key{step_exchange}{n}{10000}{steps between exchanges (at least 2): even pairs at half the interval, odd pairs at its end}
+\key{models}{n}{1}{1: all replicas start from the polymer file; \kw{ntemp}: each from its own file}
+\key{replicas}{}{--}{followed by \kw{ntemp} lines, the polymer file of each rank (with \kw{models ntemp})}
+\key{iT_bias}{n}{--}{with shells, ranks from $n$ on do not use \kw{movebias}}
+\end{keywords}
+Exchanges between ranks $i$ and $i+1$ are accepted with
+$\min\{1,\exp[(1/T_i-1/T_{i+1})(E_i-E_{i+1})]\}$. Each rank has its own
+independent stream of random numbers.
+
+\subsection{Simulated tempering (version STEMPERING)}
+Simulated tempering is switched on with \kw{stempering}. The temperature
+changes among a ladder with weights $g$; with \kw{st_method adaptive} the
+ladder and weights are adjusted during the run from the density of states
+computed with the multiple-histogram method.
+\begin{keywords}
+\key{stempering}{flag}{off}{switch on simulated tempering}
+\key{st_method}{stempering, adaptive}{--}{fixed or adaptive ladder}
+\key{st_ntemp}{n}{1}{number of temperatures}
+\key{st_temperatures}{}{--}{followed by \kw{st_ntemp} lines \kw{T [g]}}
+\key{st_ntmax}{n}{30}{largest number of temperatures}
+\key{st_nstep}{n}{--}{steps between attempts to change temperature}
+\key{st_nsadj}{n}{100000}{steps between adjustments of the ladder}
+\key{st_preamble}{n}{0}{steps before the histograms are collected}
+\key{st_emin, st_emax, st_ebin}{E}{--}{range and bin of the energy histograms}
+\key{st_keepall}{flag}{off}{use all past histograms in the multiple-histogram method}
+\key{st_nkeepold, st_sumoldhisto}{n}{0}{how many old histograms to keep and whether to sum them}
+\key{st_hthresh, st_binthresh, st_phthresh}{x}{0.7, 0, 0.1}{thresholds on histogram overlap, bin counts and probabilities}
+\key{st_k_new, st_lp_new, st_anneal}{}{1, 1, --}{how new temperatures are added (\kw{st_anneal sigma} or \kw{prob})}
+\key{st_lpthresh, st_t_only_add, st_removet}{}{0, 0, 99}{when temperatures are added or removed}
+\key{st_tstop, st_ttarget, st_tnorm}{T}{0}{stop / target / normalization temperatures}
+\key{st_ignoreb, st_deltat, st_gmethod}{}{0, 0, 0}{as \kw{ignoreb} and \kw{deltat} of \kw{mhistogram}; method for the weights}
+\key{st_nfail1, st_nfail2}{n}{0, 20}{tolerated failures of the adjustment}
+\key{st_paranoid}{flag}{off}{stop on warnings}
+\key{st_restart}{n}{-1}{write a restart of the ladder}
+\key{st_nprint, st_nprntt, st_printpdb}{n}{1, 500000, 1000}{output intervals}
+\key{st_tfile}{name}{\kw{temperatures.dat}}{temperatures visited}
+\key{st_thefile}{name}{\kw{thermdodyn.dat}}{thermodynamics}
+\key{st_dosfile}{name}{\kw{dos.dat}}{density of states}
+\key{st_histofile}{name}{--}{histograms}
+\key{st_dumbfile}{name}{\kw{dumb.dat}}{average energies at each temperature}
+\key{st_pdbnf}{name}{\kw{harvest.pdb}}{structures harvested at \kw{st_ttarget}}
+\key{st_debug}{n}{0}{verbosity}
+\end{keywords}
+
+\subsection{Optimization of the potential}
+\label{sec:optim}
+With \kw{op_minim sample}, at the end of each run the matrix of the pair
+energies $\epsilon_{ab}$ is optimized so that the averages of the
+restraints in \kw{op_file}, reweighted from the frames recorded during the
+run, match their experimental values; the new potential is written to
+\kw{newpot_<run>.pot} and used in the next run (\kw{nrun}). The frames are
+reweighted to temperature \kw{op_T}; a step changes one element by a
+random amount up to $\pm$\kw{op_step}/2 within
+[\kw{op_emin},\kw{op_emax}] and is accepted if it lowers $\chi^2$ (or with
+the Metropolis criterion at \kw{op_tchi2}).
+\begin{keywords}
+\key{op_minim}{none, sample}{none}{switch on the optimization}
+\key{op_file}{name}{--}{restraints (see below)}
+\key{op_T}{T}{1}{temperature of the reweighting}
+\key{op_deltat}{n}{10000}{steps between recorded frames}
+\key{op_wait}{n}{0}{steps before the first frame}
+\key{op_itermax}{n}{1000}{steps of the optimization}
+\key{op_step}{e}{1}{largest change of an element}
+\key{op_stop}{$\chi^2$}{0.1}{stop when $\chi^2$ is lower}
+\key{op_emin, op_emax}{e}{$\mp9\cdot10^{19}$}{bounds of the elements}
+\key{op_tchi2}{T}{0}{fictitious temperature of the search on the reduced $\chi^2$ (0: only steps lowering it); the best matrix is returned}
+\key{op_neff}{F}{0}{smallest effective fraction of frames allowed in the reweighting, relative to its initial value}
+\key{op_allreplicas}{flag}{off}{with MPI, all replicas record frames and rank 0 reweights them with MBAR}
+\key{op_rw, op_r0}{\AA}{3, 1}{well and hard-core radius of pairs not defined in the potential}
+\key{op_print}{n}{100}{steps between lines of the log}
+\key{record_native}{flag}{off}{the starting structure is the first frame}
+\end{keywords}
+The \kw{op_file} starts with \kw{ndata n} followed by $n$ restraints
+\begin{Verbatim}
+  i1 i2 type value sigma            or   i1 i2 i3 i4 type value sigma
+\end{Verbatim}
+with \kw{type} 0: contact between residues \kw{i1} and \kw{i2}; 1:
+distance between atoms \kw{i1} and \kw{i2}; 2: $1/r^6$ between them; 3:
+contact between the blocks of residues \kw{i1..i2} and \kw{i3..i4}.
+Restraints with negative \kw{sigma} are not fitted: their $\chi^2$ is a
+validation, written in the third column of \kw{chi2.dat}.
+
+%======================================================================
+\section{grappino}
+\label{sec:grappino}
+
+\begin{Verbatim}
+  grappino input.in
+\end{Verbatim}
+reads a PDB file and writes the polymer and potential files (and
+optionally a restraint file for the optimization). The model is defined by
+the backbone atoms kept, the sidechains (from the PDB, from a rotamer
+library, or none), the atom types and the potential.
+
+\begin{keywords}
+\key{pdbfile}{name}{required}{input structure}
+\key{polfile}{name}{\kw{polymer.pol}}{output polymer file}
+\key{potfile}{name}{\kw{potential.pot}}{output potential file}
+\key{model}{CA, CACB, NCAC, BackCB}{all}{simplify the PDB to these atoms}
+\key{backbone_atoms}{n names}{3 N CA C}{backbone atoms (e.g.\ \kw{1 CA})}
+\key{locked_atoms}{names}{--}{backbone atoms whose dihedral is locked (after \kw{backbone_atoms})}
+\key{hydrogens}{flag}{off}{keep the hydrogens of the PDB}
+\key{nosidechain}{flag}{off}{no sidechains}
+\key{rotamers}{flag}{off}{sidechains from the rotamer library \kw{rotfile}}
+\key{rotfile}{name}{--}{rotamer library (e.g.\ \kw{lib/rotamers.lib})}
+\key{pdb_rot}{flag}{off}{add the rotamer of the PDB to the library ones}
+\key{cb_pdb}{flag}{on}{keep the C$_\beta$ of the PDB (0: pseudo-C$_\beta$ in the backbone plane)}
+\key{sidescratch}{flag}{off}{build all sidechains from the library}
+\key{atomtypes}{\kw{go}, \kw{go_aa}, \kw{go_homo}, file}{required}{\kw{go}: one type per atom; \kw{go_aa}: one type per residue; \kw{go_homo}: types shared by identical chains (e.g.\ fibrils); a file: types from a library}
+\key{potential}{go, coevo, pairs}{go}{native-centric Go potential, from coevolution data (\kw{coevofile}), or from a matrix of pairs (\kw{pairsfile})}
+\key{go-energy}{e}{-1}{well depth of native contacts}
+\key{r_native}{\AA}{3.5}{atoms closer than this in the PDB are in native contact}
+\key{r_hardcore}{\AA}{2}{hard-core radius}
+\key{imin}{n}{9}{backbone atoms of the same chain whose indices differ by $n$ or less are not in contact (as in montegrappa)}
+\key{r_bonded}{\AA}{2}{threshold for bonded atoms}
+\key{use_nativedist}{flag}{off}{well radius from the native distance: \kw{k_native_r} times it, hard core \kw{k_native_hc} times it}
+\key{k_native_r, k_native_hc}{x}{1, 0.5}{factors of \kw{use_nativedist}}
+\key{e_homo, r_homo}{e r}{0, 0}{global homopolymeric well}
+\key{splice}{kr ke}{off}{two-step well (see \kw{[ global ]})}
+\key{go_dihedrals}{flag}{off}{dihedral terms centred on the native dihedrals with \kw{e_dih1}, \kw{e_dih3}}
+\key{go_angles}{flag}{off}{angular terms centred on the native angles with \kw{e_ang}}
+\key{dihfile, e_dihtab}{name e}{--, 1}{tabulated statistical dihedrals}
+\key{dih_ram}{flag}{off}{Ramachandran dihedrals (\kw{e_dihram}, \kw{sig_*}, \kw{phi_0_*}, \kw{psi_0_*}, \kw{dih_ka}, \kw{dih_kb}, \kw{propensityfile})}
+\key{hb_backbone}{flag}{off}{backbone hydrogen bonds, with amide hydrogens built at \kw{hb_dist}}
+\key{h_fields}{flag}{off}{H fields from \kw{h_fieldsfile} and \kw{maxcontfile}, scaled by \kw{hfs_alpha}}
+\key{cys_e, cys_r}{e r}{0}{disulphide bridges}
+\key{go_noise, go_nsigma}{n s}{0, 1}{random noise on the Go energies}
+\key{pairsfile}{name}{--}{matrix of pairs of \kw{potential pairs}}
+\key{coevofile}{name}{--}{coevolution data of \kw{potential coevo} (\kw{coevo_allatom}, \kw{contactfile}, \kw{maxcontpairsfile})}
+\key{op_file, op_kind}{name kind}{--, \kw{GO_DIST_CA}}{write a restraint file (native C$_\alpha$ distances, or all atoms with \kw{GO_DIST_ALLATOM})}
+\key{debug}{n}{0}{verbosity}
+\end{keywords}
+
+%======================================================================
+\section{Other tools}
+
+\paragraph{mhistogram.} \texttt{mhistogram input} computes the density of
+states and the thermodynamics (average energy, specific heat, free energy)
+from energy histograms (or energy series with \kw{nohisto}) at several
+temperatures, solving the multiple-histogram equations (G.~Tiana and
+L.~Sutto, Phys.\ Rev.\ E \textbf{84}, 061910 (2011)). The input lists
+\kw{ntemp}, then after \kw{files} one line per temperature
+(\kw{file T column_energy column_counts}); options include \kw{ebin},
+\kw{emin}, \kw{threshold}, \kw{outfile}, \kw{gfile}, \kw{zfile},
+\kw{tmin}, \kw{tbin}, \kw{ntbin}, \kw{kb}, \kw{ignoreb}, \kw{deltat}.
+\kw{mhistogram -h} lists them all.
+
+\paragraph{mgp2pdb.} \texttt{mgp2pdb -i polymer.pol -o polymer.pdb} converts a
+polymer file to PDB.
+
+\paragraph{dcd2pdb.} \kw{dcd2pdb traj_top.pdb traj.dcd [first [last
+[stride]]] > frames.pdb} converts a dcd trajectory to PDB models; the
+topology file is written by \kw{montegrappa} with the dcd file.
+
+%======================================================================
+\section{Tutorials}
+\label{sec:tutorials}
+
+The directory \kw{tutorial/} contains six worked examples, each with its
+input files, a \kw{README} with the commands to run, and (except 5 and 6)
+the results obtained with this version of the code in \kw{results/}. Run
+the commands from inside the directory of the tutorial, with the paths of
+the executables in \kw{bin/}. A run with the same seed (and, with MPI, the
+same number of processes) reproduces them exactly, except tutorial 2, whose
+parameter file takes the seed from the clock; the RMSD were computed
+with \kw{tools/rmsd.py} (C$_\alpha$ atoms after optimal superposition, in
+nm, as \kw{gmx rms}).
+
+\subsection{Tutorial 1: unfolding and refolding of a C\texorpdfstring{$_\alpha$}{-alpha} Go model}
+\emph{Programs:} \kw{grappino}, \kw{montegrappa}. \emph{System:} the 64
+residues of chymotrypsin inhibitor 2 (\kw{1YPC.pdb}).
+
+This is the basic workflow. \kw{1YPC-CA.in} tells \kw{grappino} to keep only
+the C$_\alpha$ atoms (\kw{backbone_atoms 1 CA}, \kw{nosidechain}), to give
+each atom its own type (\kw{atomtypes go}) and to build a Go potential: every
+pair of C$_\alpha$ closer than \kw{r_native} = 6~\AA{} in the native
+structure and more than \kw{imin} = 4 residues apart along the chain gets a
+well of depth $-1.5$, all pairs a hard core of 4~\AA; \kw{go_dihedrals}
+adds dihedral terms centred on the native dihedrals. The command
+\begin{Verbatim}
+  grappino 1YPC-CA.in
+\end{Verbatim}
+writes \kw{1YPC-CA.pol} and \kw{1YPC-CA.pot}. The first simulation,
+\begin{Verbatim}
+  montegrappa 1YPC-CA.pol 1YPC-CA.pot 1YPC-CA.unf.par
+\end{Verbatim}
+runs $5\cdot10^6$ steps at $T=1.6$, above the folding temperature, with
+pivot (every 4 steps) and multiple-pivot (every step) moves: the energy in
+\kw{energy.ene} rises and the RMSD from the native structure grows as the
+protein unfolds. The second one starts from the last, unfolded,
+conformation and runs at $T=1$, where the native state is stable:
+\begin{Verbatim}
+  montegrappa last.pol 1YPC-CA.pot 1YPC-CA.fold.par
+\end{Verbatim}
+The energy drops and the RMSD decreases to a few \AA{}ngstrom. To compute
+the RMSD, use the first frame of \kw{traj.pdb} as reference rather than
+\kw{1YPC.pdb}, because the trajectory contains only the atoms of the model,
+numbered in its own order. \kw{results/} contains the energies and the RMSD
+of both runs. With seed 42 the chain refolds only partially within $5\cdot10^6$
+steps (RMSD about 2~\AA): refolding from an unfolded state is a rare event
+on this time scale, and other seeds refold completely or not at all.
+
+\subsection{Tutorial 2: a chromatin polymer from 5C/Hi-C contact data}
+\emph{Programs:} \kw{montegrappa} (potential optimization).
+\emph{System:} a bead-spring polymer of 20 beads.
+
+\kw{expdata.dat} contains contact counts between pairs of beads
+(\kw{bead1 bead2 average stdev}), as measured by a 5C or Hi-C experiment.
+The script \kw{generate_5C.sh} asks for the data file, the number of beads,
+a normalization constant, a root name, the energy scale of the initial
+interaction matrix, the interaction range and the hard-core radius (the
+\kw{README} gives typical answers), and writes:
+\begin{itemize}
+\item \kw{test.pol}, a chain of beads one unit apart, each bead of its own type;
+\item \kw{test.op}, the restraints: for each pair, a contact (type 0) whose
+  target probability $p$ is the count divided by the normalization constant
+  (at most 1), with the standard deviation divided likewise (at least 0.01)
+  as uncertainty;
+\item \kw{test.pot}, a global hard core and an initial interaction for each
+  pair, $\epsilon = -e\,T\,[1.5\ln\ell + \ln(p/(1-p))]$ with $\ell$ the
+  separation along the chain and $e$ the energy scale (the first term
+  compensates the contact probability of an ideal chain);
+\item \kw{test.par}, a parameter file with flip and pivot moves at $T=1$ and
+  the optimization (\kw{op_minim sample}) over many runs.
+\end{itemize}
+Run
+\begin{Verbatim}
+  montegrappa test.pol test.pot test.par
+\end{Verbatim}
+After each run the interaction matrix is changed so that the contact
+probabilities, reweighted from the frames of the run, approach the
+experimental ones; the new matrix (\kw{newpot_<run>.pot}) is used in the
+next run. \kw{restraints_<run>.dat} compares the target and the
+back-calculated probability of each restraint (plot columns 2 and 3), and
+\kw{chi2.dat} shows the progress of the fit. \kw{results/} contains the
+input files and the potential after 15 iterations.
+
+\subsection{Tutorial 3: parallel tempering and the specific heat of a hairpin}
+\emph{Programs:} \kw{grappino}, \kw{montegrappa_mpi}, \kw{mhistogram}.
+\emph{System:} residues 41--56 of protein G (\kw{hairpin.pdb}).
+
+\kw{hairpin.in} builds a Go model of all heavy atoms: the N, C$_\alpha$, C
+backbone and the sidechains as in the PDB (one rotamer each, no library),
+with native dihedrals. \kw{hairpin.par} runs $10^7$ steps of parallel tempering with 8
+replicas between $T=0.4$ and $1.8$, exchanging every 1000 steps:
+\begin{Verbatim}
+  grappino hairpin.in
+  mpirun -np 8 montegrappa_mpi hairpin.pol hairpin.pot hairpin.par
+\end{Verbatim}
+Each replica writes \kw{energy_proc<N>.ene}, \kw{traj_proc<N>.pdb} and
+\kw{last_proc<N>.pol}; the exchanges are in \kw{exchange_proc<N>.dat}.
+After removing the first 10\% of each energy file as equilibration (e.g.\
+\kw{sed -e '1,100d' energy_proc0.ene > energy_cut0.ene}),
+\begin{Verbatim}
+  mhistogram mhistogram.in
+\end{Verbatim}
+combines the energies of all temperatures with the multiple-histogram
+method (\kw{nohisto}: the files are energy series, column 2) and writes in
+\kw{results.dat} the average energy and the specific heat from $T=0.4$ in
+100 steps of 0.014. The peak of the specific heat (at $T\simeq0.88$ in
+\kw{results/}) marks the folding transition of the hairpin; \kw{dumb_e.dat} contains the plain averages at
+each simulated temperature, to check the fit.
+
+\subsection{Tutorial 4: optimization of a potential with parallel tempering}
+\emph{Programs:} \kw{grappino}, \kw{montegrappa_mpi}.
+\emph{System:} a helix of 15 alanines (\kw{polyala.pdb}).
+
+\kw{polyala.in} builds a model with sidechains from the rotamer library
+(\kw{rotamers}, \kw{rotfile ../../lib/rotamers.lib}, plus the rotamer of
+the PDB with \kw{pdb_rot}), atom types from \kw{lib/atomtypes.1.lib}, the
+peptide bond locked (\kw{locked_atoms N}), a weak Go potential and native
+dihedrals. With \kw{op_file polyala.op} and \kw{op_kind GO_DIST_CA} it also
+writes the restraints: the native distances between C$_\alpha$ atoms.
+\kw{polyala.par} runs 5 iterations (\kw{nrun 5}) of $3\cdot10^6$ steps of
+parallel tempering with 8 replicas between $T=1$ and $2.4$; after each one
+the matrix is optimized at \kw{op_T 1.0} with frames recorded every 5000
+steps after the first 200000. With \kw{always_restart} and
+\kw{record_native} every iteration starts from, and includes, the native
+structure.
+\begin{Verbatim}
+  grappino polyala.in
+  mpirun -np 8 montegrappa_mpi polyala.pol polyala.pot polyala.par
+\end{Verbatim}
+The outputs carry the run and the replica in their name
+(\kw{traj_run<M>_proc<N>.pdb}); \kw{chi2.dat} should decrease over the
+iterations, and the RMSD of the replicas from the native helix shows how
+the optimized potential stabilizes it (in \kw{results/}, from 0.5~\AA{} for
+the coldest replica to 3~\AA{} for the hottest).
+
+\subsection{Tutorial 5: adaptive simulated tempering of a random heteropolymer}
+\emph{Programs:} \kw{montegrappa} built with \kw{version=STEMPERING}.
+\emph{System:} a chain of 20 beads with a random matrix of interactions
+(\kw{random_polymer.pot}).
+
+The polymer and potential files are given. \kw{random_polymer.par} runs
+$10^9$ steps of flip and pivot moves with adaptive simulated tempering:
+starting from the single temperature $T=2$, the program collects energy
+histograms, every $2\cdot10^7$ steps computes the density of states with
+the multiple-histogram method (keeping all past histograms,
+\kw{st_keepall}) and adds temperatures and adjusts their weights so that
+the walk covers the range down to the target $T=0.6$.
+\begin{Verbatim}
+  montegrappa random_polymer.pol random_polymer.pot random_polymer.par
+\end{Verbatim}
+\kw{dumb.dat} and \kw{thermdodyn.dat} contain the average energy as a
+function of temperature (columns 1:2), the latter also the specific heat
+(columns 1:4); \kw{energy.jpeg} and \kw{Cv.jpeg} show the curves obtained
+with this version: the ladder ends with five temperatures between 2 and
+0.6, and the multiple-histogram fit passes through the average energy at
+each of them.
+
+\subsection{Tutorial 6: simulated tempering with optimization of the potential}
+\emph{Programs:} \kw{montegrappa} built with \kw{version=STEMPERING}.
+\emph{System:} a segment of 20 beads of DNA with 4 types of beads.
+
+As tutorial 5, but the run also optimizes the interaction matrix of the 4
+types so that beads 0 and 3 (the single restraint in \kw{dna.op}) are in
+contact with probability 0.75 at $T=1.5$. The temperature ladder starts
+from $T=5$ and adapts down to the target $T=1.5$; once it has reached it,
+a frame is harvested at the target temperature every \kw{st_printpdb}
+steps, and the optimization at the end of each of the two runs uses those
+frames.
+\begin{Verbatim}
+  montegrappa dna.pol dna.pot dna.par
+\end{Verbatim}
+After the two runs, \kw{chi2.dat} shows the minimization of $\chi^2$.
+
+%======================================================================
+\section{Limits}
+Compile-time limits are in \kw{include/montegrappa.h} (e.g.\ \kw{NRESMAX},
+\kw{NATOMMAX}, \kw{NSIDEMAX}, \kw{NROTMAX}); the arrays are allocated with
+the sizes found in the input, so the limits only bound the input checks.
+\kw{grappino} reads at most 150 chains (\kw{NPOLMAX} in
+\kw{include/grappino.h}). With MPI, the number of replicas is bounded by
+\kw{NREPMAX}.
+
+\end{document}

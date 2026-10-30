@@ -31,6 +31,15 @@
 #include "montegrappa.h"
 #include "MPIfunc.h"
 
+// tags of the messages that distribute the system at the start: each kind of message has its own
+// tag, and messages with the same tag between two ranks arrive in the order they were sent
+// (below the 32767 that MPI guarantees, whatever the number of ranks and residues)
+#define TAG_SIZES	200
+#define TAG_BACK	300
+#define TAG_SIDE	2000
+#define TAG_ROT		10000
+#define TAG_POT		30000
+
 #ifdef ACTIVE_MPI
 
 /***********************************************
@@ -167,7 +176,7 @@ void Create_pot_datatype(MPI_Datatype *Pottype)
 	x = calloc(1,sizeof(struct s_potential));
 	if (!x) Error("Cannot allocate struct potential");
 
-	MPI_Aint adress[25];
+	MPI_Aint adress[27];
 	MPI_Get_address(x, &adress[0]);
 	MPI_Get_address(&(*x).dih_periodic, &adress[1]);
 	MPI_Get_address(&(*x).dih_tabled, &adress[2]);
@@ -193,20 +202,22 @@ void Create_pot_datatype(MPI_Datatype *Pottype)
 	MPI_Get_address(&(*x).dih_ram, &adress[22]);	
 	MPI_Get_address(&(*x).e_dihram, &adress[23]);	
 	MPI_Get_address(&(*x).h_fields, &adress[24]);
+	MPI_Get_address(&(*x).dih_ka, &adress[25]);
+	MPI_Get_address(&(*x).dih_kb, &adress[26]);
 
-	MPI_Datatype type[24]={MPI_INT, MPI_INT, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, //10
+	MPI_Datatype type[26]={MPI_INT, MPI_INT, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, //10
 		MPI_DOUBLE, MPI_INT, MPI_DOUBLE, MPI_DOUBLE, MPI_CHAR, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_INT, //20
-		MPI_INT, MPI_INT, MPI_DOUBLE, MPI_INT};
-	int blocklen[24]={1,1,1,1,1,1,1,1,1,1, //10
+		MPI_INT, MPI_INT, MPI_DOUBLE, MPI_INT, MPI_DOUBLE, MPI_DOUBLE};
+	int blocklen[26]={1,1,1,1,1,1,1,1,1,1, //10
 		1,1,1,1,1,1,1,1,1,1, //20
-		1,1,1,1};
-	MPI_Aint disp[24];
+		1,1,1,1,1,1};
+	MPI_Aint disp[26];
 	
 	int i;
-	for(i=0; i<24; ++i)
+	for(i=0; i<26; ++i)
 		disp[i]=adress[i+1]-adress[0];
 	
-	MPI_Type_create_struct(24,blocklen,disp,type,Pottype);
+	MPI_Type_create_struct(26,blocklen,disp,type,Pottype);
 	MPI_Type_commit(Pottype);
 	free(x);
 
@@ -214,145 +225,6 @@ void Create_pot_datatype(MPI_Datatype *Pottype)
 }
 
 
-void Create_parms_datatype(MPI_Datatype *Parmstype){
-
-	struct s_mc_parms *x;
-	x = malloc(1 * sizeof(struct s_mc_parms));
-	if (!x) Error("Cannot allocate mc_parms");
-
-	MPI_Aint adress[71];
-	MPI_Get_address(x, &adress[0]);
-	MPI_Get_address(&(*x).npol, &adress[1]);
-	MPI_Get_address(&(*x).nstep, &adress[2]);
-	MPI_Get_address(&(*x).seed, &adress[3]);
-	MPI_Get_address(&(*x).dw_flip, &adress[4]);
-	MPI_Get_address(&(*x).dw_pivot, &adress[5]);
-	MPI_Get_address(&(*x).dw_mpivot, &adress[6]);
-	MPI_Get_address(&(*x).dw_lpivot, &adress[7]);
-	MPI_Get_address(&(*x).dw_mflip, &adress[8]);
-	MPI_Get_address(&(*x).fntrj, &adress[9]);
-	MPI_Get_address(&(*x).fne, &adress[10]);
-	MPI_Get_address(&(*x).flastp, &adress[11]);
-	MPI_Get_address(&(*x).fnproc, &adress[12]);
-	MPI_Get_address(&(*x).nprinttrj, &adress[13]);
-	MPI_Get_address(&(*x).nprintlog, &adress[14]);
-	MPI_Get_address(&(*x).nprinte, &adress[15]);
-	MPI_Get_address(&(*x).ncheckpoint, &adress[16]);
-	MPI_Get_address(&(*x).shell, &adress[17]);
-	MPI_Get_address(&(*x).nshell, &adress[18]);
-	MPI_Get_address(&(*x).r2shell, &adress[19]);
-	MPI_Get_address(&(*x).ntemp, &adress[20]);
-	MPI_Get_address(&(*x).T, &adress[21]);
-	MPI_Get_address(&(*x).randdw, &adress[22]);
-	MPI_Get_address(&(*x).debug, &adress[23]);
-	MPI_Get_address(&(*x).movetype, &adress[24]);
-	MPI_Get_address(&(*x).nmul_mpivot, &adress[25]);
-	MPI_Get_address(&(*x).nmul_lpivot, &adress[26]);
-	MPI_Get_address(&(*x).nmul_mflip, &adress[27]);
-	MPI_Get_address(&(*x).nosidechains, &adress[28]);
-	MPI_Get_address(&(*x).noangpot, &adress[29]);
-	MPI_Get_address(&(*x).nodihpot, &adress[30]);
-	MPI_Get_address(&(*x).nohfields, &adress[31]);
-	MPI_Get_address(&(*x).nrun, &adress[32]);
-	MPI_Get_address(&(*x).always_restart, &adress[33]);
-	MPI_Get_address(&(*x).record_native, &adress[34]);
-	MPI_Get_address(&(*x).acc, &adress[35]);
-	MPI_Get_address(&(*x).mov, &adress[36]);
-	MPI_Get_address(&(*x).disentangle, &adress[37]);
-	MPI_Get_address(&(*x).stempering, &adress[38]);
-	MPI_Get_address(&(*x).dx_com, &adress[39]);
-	MPI_Get_address(&(*x).dx_clm, &adress[40]);
-	MPI_Get_address(&(*x).r_cloose, &adress[41]);
-	MPI_Get_address(&(*x).a_cloose, &adress[42]);
-	MPI_Get_address(&(*x).d_cloose, &adress[43]);
-	MPI_Get_address(&(*x).hb, &adress[44]);
-	MPI_Get_address(&(*x).anneal, &adress[45]);
-	MPI_Get_address(&(*x).anneal_often, &adress[46]);
-	MPI_Get_address(&(*x).anneal_step, &adress[47]);
-	MPI_Get_address(&(*x).anneal_t, &adress[48]);
-	MPI_Get_address(&(*x).anneal_recov, &adress[49]);
-	MPI_Get_address(&(*x).r_contact, &adress[50]);
-	#ifdef OPTIMIZEPOT
-	MPI_Get_address(&(*x).op_minim, &adress[51]);
-	MPI_Get_address(&(*x).op_itermax, &adress[52]);
-	MPI_Get_address(&(*x).op_step, &adress[53]);
-	MPI_Get_address(&(*x).op_T, &adress[54]);
-	MPI_Get_address(&(*x).op_deltat, &adress[55]);
-	MPI_Get_address(&(*x).op_stop, &adress[56]);
-	MPI_Get_address(&(*x).op_print, &adress[57]);
-	MPI_Get_address(&(*x).op_emin, &adress[58]);
-	MPI_Get_address(&(*x).op_emax, &adress[59]);
-	MPI_Get_address(&(*x).op_wait, &adress[60]);
-	MPI_Get_address(&(*x).op_r, &adress[61]);
-	MPI_Get_address(&(*x).op_r0, &adress[62]);
-	MPI_Get_address(&(*x).nstep_exchange, &adress[63]);
-	MPI_Get_address(&(*x).nmul_local,&adress[64]);
-	MPI_Get_address(&(*x).chi2start,&adress[65]);
-	MPI_Get_address(&(*x).ishell,&adress[66]);
-	MPI_Get_address(&(*x).bgs_a,&adress[67]);
-	MPI_Get_address(&(*x).bgs_b,&adress[68]);
-	MPI_Get_address(&(*x).dtheta,&adress[69]);
-
-	MPI_Get_address(&(*x).iT_bias,&adress[70]);
-	MPI_Get_address(&(*x).nreplicas,&adress[71]);
-
-
-	#else
-	MPI_Get_address(&(*x).nstep_exchange, &adress[51]);
-	#endif
-	
-
-	
-	#ifdef OPTIMIZEPOT
-	MPI_Datatype type[71]={MPI_INT, MPI_INT, MPI_LONG, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_CHAR, MPI_CHAR, //10
-		MPI_CHAR, MPI_CHAR, MPI_INT, MPI_INT, MPI_INT, MPI_INT,MPI_INT, MPI_INT, MPI_DOUBLE, MPI_INT, //20
-		MPI_DOUBLE, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, //30
-		MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_DOUBLE,  MPI_DOUBLE, //40
-		MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_INT,  MPI_INT,  MPI_INT,  MPI_INT, MPI_DOUBLE, MPI_INT, MPI_DOUBLE, //50
-		MPI_CHAR, MPI_INT, MPI_DOUBLE, MPI_DOUBLE, MPI_INT, MPI_DOUBLE, MPI_INT, MPI_DOUBLE, MPI_DOUBLE, MPI_INT, //60
-		MPI_DOUBLE, MPI_DOUBLE, MPI_INT, MPI_INT,MPI_INT,MPI_INT,MPI_DOUBLE,MPI_DOUBLE,MPI_DOUBLE,MPI_INT, //70
-		MPI_INT	};
-	int blocklen[71]={1,1,1,1,1,1,1,1,50,50,//10
-		50,50,1,1,1,1,1,1,1,1, //20
-		NREPMAX,1,1,NMOVES,1,1,1,1,1,1, //30
-		1,1,1,1,1,1,1,1,1,1, //40
-		1,1,1,1,1,1,1,1,1,1,//50
-		50,1,1,1,1,1,1,1,1,1, //60
-		1,1,1,1,1,1,1,1,1,1 //70
-		,1};
-	MPI_Aint disp[71];
-	
-	int i;
-	for(i=0; i<71; ++i)
-		disp[i]=adress[i+1]-adress[0];
-	
-	MPI_Type_create_struct(71,blocklen,disp,type,Parmstype);
-	MPI_Type_commit(Parmstype);
-	//free(x);
-	#else
-	MPI_Datatype type[51]={MPI_INT, MPI_INT, MPI_LONG, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_CHAR, MPI_CHAR, //10
-		MPI_CHAR, MPI_CHAR, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_DOUBLE, MPI_INT, //20
-		MPI_DOUBLE, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, //30
-		MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_DOUBLE,  MPI_DOUBLE, //40
-		MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_INT,  MPI_INT,  MPI_INT,  MPI_INT, MPI_DOUBLE, MPI_INT, MPI_DOUBLE, //50
-		MPI_INT};
-	int blocklen[51]={1,1,1,1,1,1,1,1,50,50,//10
-		50,50,1,1,1,1,1,1,1,1, //20
-		NREPMAX,1,1,NMOVES,1,1,1,1,1,1, //30
-		1,1,1,1,1,1,1,1,1,1, //40
-		1,1,1,1,1,1,1,1,1,1, //50
-		1};
-	MPI_Aint disp[51];
-	
-	int i;
-	for(i=0; i<51; ++i)
-		disp[i]=adress[i+1]-adress[0];
-	
-	MPI_Type_create_struct(51,blocklen,disp,type,Parmstype);
-	MPI_Type_commit(Parmstype);
-	free(x);
-	#endif
-}
 
 
 
@@ -361,25 +233,25 @@ void Create_parms_datatype(MPI_Datatype *Parmstype){
 ***********************************************/
 
 //parameters 
-struct s_mc_parms *send_parms(int iproc, int nprocs, MPI_Datatype Parmstype, struct s_mc_parms *parms, MPI_Status astatus)//,double *tmin)
+struct s_mc_parms *send_parms(int iproc, int nprocs, struct s_mc_parms *parms)
 {
-
-	int i;
-
 	if(iproc!=0)
 	{
 		parms = calloc(1,sizeof(struct s_mc_parms));
 		if (!parms) Error("Cannot allocate mc_parms");
 	}
-	
-	if(iproc==0)
-		for(i=1; i<nprocs; ++i){
-			MPI_Send(parms, 1, Parmstype, i, 100+i, MPI_COMM_WORLD);
-		}
-	
+
+	// all ranks run the same executable, so the structure can be copied as raw
+	// bytes: no field can be forgotten or sent with the wrong type
+	MPI_Bcast(parms, sizeof(struct s_mc_parms), MPI_BYTE, 0, MPI_COMM_WORLD);
 
 	if(iproc!=0)
-		MPI_Recv(parms, 1, Parmstype, 0, 100+iproc, MPI_COMM_WORLD, &astatus);
+	{
+		// pointers refer to the memory of rank 0
+		parms->flog = NULL;
+		parms->op_input = NULL;
+		parms->fobs = NULL;
+	}
 
 	return parms;
 }
@@ -405,11 +277,11 @@ void send_struct(int *nback, int iproc, int nprocs, int *nat, int *ntypes, MPI_S
 		MPI_Pack(ntypes,1,MPI_INT,buffer,buffer_size,&position,MPI_COMM_WORLD);
 		MPI_Pack(nback,1,MPI_INT,buffer,buffer_size,&position,MPI_COMM_WORLD);
 		
-		for(i=1;i<nprocs;++i) MPI_Send(buffer,position,MPI_PACKED,i, 200+i, MPI_COMM_WORLD);
+		for(i=1;i<nprocs;++i) MPI_Send(buffer,position,MPI_PACKED,i, TAG_SIZES, MPI_COMM_WORLD);
 	}
 	if(iproc!=0)
 	{
-		MPI_Recv(buffer,buffer_size,MPI_PACKED,0, 200+iproc, MPI_COMM_WORLD, &astatus);
+		MPI_Recv(buffer,buffer_size,MPI_PACKED,0, TAG_SIZES, MPI_COMM_WORLD, &astatus);
 		position=0;
 		MPI_Unpack(buffer,buffer_size,&position,nat,1,MPI_INT,MPI_COMM_WORLD);
 		MPI_Unpack(buffer,buffer_size,&position,ntypes,1,MPI_INT,MPI_COMM_WORLD);
@@ -421,7 +293,7 @@ void send_struct(int *nback, int iproc, int nprocs, int *nat, int *ntypes, MPI_S
 
 void send_struct_to_proc(int *nback, int iproc,int jproc, int nprocs, int *nat, int *ntypes, MPI_Status astatus)
 {
-        int buffer_size, position,i=0;
+        int buffer_size, position;
         char buffer[buffer_max];
         buffer_size = 3*sizeof(int);
         if(buffer_size>buffer_max)
@@ -439,12 +311,12 @@ void send_struct_to_proc(int *nback, int iproc,int jproc, int nprocs, int *nat, 
                 MPI_Pack(nback,1,MPI_INT,buffer,buffer_size,&position,MPI_COMM_WORLD);
 				fprintf(stderr,"Hi! I am replica %d and I am sending data to replica %d!\n",iproc,jproc);
 
-                MPI_Send(buffer,position,MPI_PACKED,jproc, 200+iproc, MPI_COMM_WORLD);
+                MPI_Send(buffer,position,MPI_PACKED,jproc, TAG_SIZES, MPI_COMM_WORLD);
         }
         if(iproc==jproc)
         {
 				fprintf(stderr,"Hi! I am replica %d and I am waiting for a structure!\n",iproc);
-                MPI_Recv(buffer,buffer_size,MPI_PACKED,0, 200+iproc, MPI_COMM_WORLD, &astatus);
+                MPI_Recv(buffer,buffer_size,MPI_PACKED,0, TAG_SIZES, MPI_COMM_WORLD, &astatus);
                 position=0;
 				fprintf(stderr,"Hi! I am replica %d and I have to unpack stuff!\n",iproc);
 
@@ -480,12 +352,12 @@ struct s_polymer *send_pol(int iproc, int nprocs, int nback, MPI_Datatype Backty
 		for(j=0;j<nback;++j)
 			MPI_Pack(((startp+npol)->back)+j,1,Backtype,buffer,buffer_size,&position,MPI_COMM_WORLD);
 		for(i=1; i<nprocs; ++i)
-			MPI_Send(buffer,position,MPI_PACKED,i, 300+100*i, MPI_COMM_WORLD);
+			MPI_Send(buffer,position,MPI_PACKED,i, TAG_BACK, MPI_COMM_WORLD);
 	}
 
 	if(iproc!=0)
 	{
-		MPI_Recv(buffer,buffer_size,MPI_PACKED,0, 300+100*iproc, MPI_COMM_WORLD, &astatus);		
+		MPI_Recv(buffer,buffer_size,MPI_PACKED,0, TAG_BACK, MPI_COMM_WORLD, &astatus);		
 		position=0;
 		for(j=0;j<nback;++j)
 			MPI_Unpack(buffer,buffer_size,&position,((startp+npol)->back)+j,1,Backtype,MPI_COMM_WORLD);	
@@ -495,16 +367,16 @@ struct s_polymer *send_pol(int iproc, int nprocs, int nback, MPI_Datatype Backty
         {
 		if(iproc==0)
 		{
-			for(i=1; i<nprocs; ++i) for(j=0; j<nback;++j) for(k=0; k<((startp->back)+j)->nside;++k) 
-					MPI_Send(((((startp+npol)->back)+j)->side)+k, 1, Sidetype, i, 2000+100*i+10*j+k, MPI_COMM_WORLD);
+			for(i=1; i<nprocs; ++i) for(j=0; j<nback;++j) for(k=0; k<(((startp+npol)->back)+j)->nside;++k) 
+					MPI_Send(((((startp+npol)->back)+j)->side)+k, 1, Sidetype, i, TAG_SIDE, MPI_COMM_WORLD);
 		}	
 
-	if(iproc!=0) for(j=0; j<nback;++j) for(k=0; k<((startp->back)+j)->nside;++k)
-					MPI_Recv(((((startp+npol)->back)+j)->side)+k, 1, Sidetype, 0, 2000+100*iproc+10*j+k, MPI_COMM_WORLD, &astatus);
-		if(iproc==0) for(i=1; i<nprocs; ++i) for(j=0; j<nback;++j) for(k=0; k<((startp->back)+j)->nside;++k) for(l=0; l<((startp->back)+j)->nrot; ++l)
-					MPI_Send(((((((startp+npol)->back)+j)->side)+k)->rot)+l, 1, Rottype, i, 10000+1000*i+100*j+10*k+l, MPI_COMM_WORLD);
-		if(iproc!=0) for(j=0; j<nback;++j) for(k=0; k<((startp->back)+j)->nside;++k) for(l=0; l<((startp->back)+j)->nrot; ++l)
-					MPI_Recv(((((((startp+npol)->back)+j)->side)+k)->rot)+l, 1, Rottype, 0, 10000+1000*iproc+100*j+10*k+l , MPI_COMM_WORLD, &astatus);	
+	if(iproc!=0) for(j=0; j<nback;++j) for(k=0; k<(((startp+npol)->back)+j)->nside;++k)
+					MPI_Recv(((((startp+npol)->back)+j)->side)+k, 1, Sidetype, 0, TAG_SIDE, MPI_COMM_WORLD, &astatus);
+		if(iproc==0) for(i=1; i<nprocs; ++i) for(j=0; j<nback;++j) for(k=0; k<(((startp+npol)->back)+j)->nside;++k) for(l=0; l<(((startp+npol)->back)+j)->nrot; ++l)
+					MPI_Send(((((((startp+npol)->back)+j)->side)+k)->rot)+l, 1, Rottype, i, TAG_ROT, MPI_COMM_WORLD);
+		if(iproc!=0) for(j=0; j<nback;++j) for(k=0; k<(((startp+npol)->back)+j)->nside;++k) for(l=0; l<(((startp+npol)->back)+j)->nrot; ++l)
+					MPI_Recv(((((((startp+npol)->back)+j)->side)+k)->rot)+l, 1, Rottype, 0, TAG_ROT , MPI_COMM_WORLD, &astatus);	
 	}
 
 
@@ -525,6 +397,7 @@ struct s_polymer *send_pol_to_proc(int iproc,int jproc, int nprocs, int nback, M
         int i, j, k, l,position,buffer_size;
 
         char buffer[buffer_max];
+        buffer[0] = 0;				// nothing is packed if nback=0, and nothing is sent
         (startp+npol)->nback = nback;
         buffer_size=(sizeof(struct s_back)*nback);
 
@@ -540,12 +413,12 @@ struct s_polymer *send_pol_to_proc(int iproc,int jproc, int nprocs, int nback, M
                 position=0;
                 for(j=0;j<nback;++j)
                         MPI_Pack(((startp+npol)->back)+j,1,Backtype,buffer,buffer_size,&position,MPI_COMM_WORLD);
-                MPI_Send(buffer,position,MPI_PACKED,jproc, 300+100*jproc, MPI_COMM_WORLD);
+                MPI_Send(buffer,position,MPI_PACKED,jproc, TAG_BACK, MPI_COMM_WORLD);
         }
 
         if(iproc==jproc)
         {
-                MPI_Recv(buffer,buffer_size,MPI_PACKED,0, 300+100*iproc, MPI_COMM_WORLD, &astatus);
+                MPI_Recv(buffer,buffer_size,MPI_PACKED,0, TAG_BACK, MPI_COMM_WORLD, &astatus);
                 position=0;
                 for(j=0;j<nback;++j)
                         MPI_Unpack(buffer,buffer_size,&position,((startp+npol)->back)+j,1,Backtype,MPI_COMM_WORLD);
@@ -555,16 +428,16 @@ struct s_polymer *send_pol_to_proc(int iproc,int jproc, int nprocs, int nback, M
         {
                 if(iproc==0)
                 {
-                        for(j=0; j<nback;++j) for(k=0; k<((startp->back)+j)->nside;++k)
-                                        MPI_Send(((((startp+npol)->back)+j)->side)+k, 1, Sidetype, jproc, 2000+100*jproc+10*j+k, MPI_COMM_WORLD);
+                        for(j=0; j<nback;++j) for(k=0; k<(((startp+npol)->back)+j)->nside;++k)
+                                        MPI_Send(((((startp+npol)->back)+j)->side)+k, 1, Sidetype, jproc, TAG_SIDE, MPI_COMM_WORLD);
                 }
 
-        if(iproc==jproc) for(j=0; j<nback;++j) for(k=0; k<((startp->back)+j)->nside;++k)
-                                        MPI_Recv(((((startp+npol)->back)+j)->side)+k, 1, Sidetype, 0, 2000+100*iproc+10*j+k, MPI_COMM_WORLD, &astatus);
-                if(iproc==0) for(j=0; j<nback;++j) for(k=0; k<((startp->back)+j)->nside;++k) for(l=0; l<((startp->back)+j)->nrot; ++l)
-                                        MPI_Send(((((((startp+npol)->back)+j)->side)+k)->rot)+l, 1, Rottype, jproc, 10000+1000*jproc+100*j+10*k+l, MPI_COMM_WORLD);
-                if(iproc==jproc) for(j=0; j<nback;++j) for(k=0; k<((startp->back)+j)->nside;++k) for(l=0; l<((startp->back)+j)->nrot; ++l)
-                                        MPI_Recv(((((((startp+npol)->back)+j)->side)+k)->rot)+l, 1, Rottype, 0, 10000+1000*iproc+100*j+10*k+l , MPI_COMM_WORLD, &astatus);
+        if(iproc==jproc) for(j=0; j<nback;++j) for(k=0; k<(((startp+npol)->back)+j)->nside;++k)
+                                        MPI_Recv(((((startp+npol)->back)+j)->side)+k, 1, Sidetype, 0, TAG_SIDE, MPI_COMM_WORLD, &astatus);
+                if(iproc==0) for(j=0; j<nback;++j) for(k=0; k<(((startp+npol)->back)+j)->nside;++k) for(l=0; l<(((startp+npol)->back)+j)->nrot; ++l)
+                                        MPI_Send(((((((startp+npol)->back)+j)->side)+k)->rot)+l, 1, Rottype, jproc, TAG_ROT, MPI_COMM_WORLD);
+                if(iproc==jproc) for(j=0; j<nback;++j) for(k=0; k<(((startp+npol)->back)+j)->nside;++k) for(l=0; l<(((startp+npol)->back)+j)->nrot; ++l)
+                                        MPI_Recv(((((((startp+npol)->back)+j)->side)+k)->rot)+l, 1, Rottype, 0, TAG_ROT , MPI_COMM_WORLD, &astatus);
         }
 
 
@@ -587,16 +460,16 @@ struct s_potential *send_pot(int nat, int ntypes, int noangpot, int nodihpot, in
 	{
 		for(i=1; i<nprocs; ++i)
 		{
-			MPI_Send(u, 1, Pottype, i, 30000+i, MPI_COMM_WORLD);
+			MPI_Send(u, 1, Pottype, i, TAG_POT, MPI_COMM_WORLD);
 		}
 	}
 
-	MPI_Barrier(MPI_COMM_WORLD);
-
-	if(iproc!=0)
+	if(iproc!=0)							// (before the barrier: the sends of rank 0 may wait for it)
 	{
-		MPI_Recv(u, 1, Pottype, 0, 30000+iproc, MPI_COMM_WORLD, &astatus);
+		MPI_Recv(u, 1, Pottype, 0, TAG_POT, MPI_COMM_WORLD, &astatus);
 	}
+
+	MPI_Barrier(MPI_COMM_WORLD);
 	
 	send_double_matrix(ntypes, ntypes, iproc, u->e, 0);
 	send_double_matrix(ntypes, ntypes, iproc, u->r_2, 0);
@@ -720,6 +593,15 @@ void send_char_array(int length, int iproc, char *m, int source)
  Copy a polymer structure from a replica to another 
  
  *****************************************************************************/
+// tags of the messages of a replica exchange (below the 32767 guaranteed by MPI)
+#define EX_TAG_ACC		101
+#define EX_TAG_BACK_UP		102
+#define EX_TAG_BACK_DOWN	103
+#define EX_TAG_SIDE_UP		104
+#define EX_TAG_SIDE_DOWN	105
+#define EX_TAG_ROT_UP		106
+#define EX_TAG_ROT_DOWN		107
+
 int ExchangePol(struct s_polymer *polymer, struct s_polymer *replica, struct s_polymer *oldp, struct s_mc_parms *parms, struct s_potential *u, int iproc, int ntemp, int even, int *ex_count, int *ex_acc, MPI_Datatype Backtype, MPI_Datatype Sidetype, MPI_Datatype Rottype, MPI_Status astatus,unsigned long long istep,FILE *fexchange)
 {
 	int i,j,k,l, position,a=0;
@@ -731,6 +613,8 @@ int ExchangePol(struct s_polymer *polymer, struct s_polymer *replica, struct s_p
 	int nosidechains=parms->nosidechains;
 	int ipolymer;
 
+
+	for(i=0;i<ntemp;++i) x[i]=0;			// ranks not paired in this sweep keep their conformation
 
 	E[iproc]=polymer->etot;
 	//if(iproc==0) CountContacts(stderr,polymer,parms,istep);
@@ -745,17 +629,21 @@ int ExchangePol(struct s_polymer *polymer, struct s_polymer *replica, struct s_p
 	{
 		if(iproc==i) //sender		
 		{		
+			// accept with min(1,exp[(1/T_i-1/T_i+1)(E_i-E_i+1)]): delta/denomT is the
+			// exponent with opposite sign; keep denomT>0 so that Metropolis' shortcut
+			// for delta<=0 holds also if the temperatures are not in ascending order
 			delta = -(E[i]-E[i+1]);
 			denomT = (parms->T[i]*parms->T[i+1])/(parms->T[i+1]-parms->T[i]) ;
+			if (denomT<0) { delta = -delta; denomT = -denomT; }
 			if(Metropolis(delta,denomT,polymer->tables)==1) a=1; 	
 
-			MPI_Send(&a, 1, MPI_INT, i+1, 1000000+i, MPI_COMM_WORLD); 
+			MPI_Send(&a, 1, MPI_INT, i+1, EX_TAG_ACC, MPI_COMM_WORLD); 
 			
 			#ifdef DEBUG
                         if(parms->debug>2) fprintf(stderr,"i=%d\tT(i)=%f\tT(i+1)=%f\tdelta=%f\tacc=%d\n",i,parms->T[i],parms->T[i+1],delta,a);
 			#endif			
 		}
-		if(iproc==i+1) MPI_Recv(&a, 1, MPI_INT, i, 1000000+i, MPI_COMM_WORLD, &astatus); //receiver
+		if(iproc==i+1) MPI_Recv(&a, 1, MPI_INT, i, EX_TAG_ACC, MPI_COMM_WORLD, &astatus); //receiver
 		MPI_Barrier(MPI_COMM_WORLD); 
 		if(a==1) //confirmed exchange
 		{	
@@ -773,11 +661,11 @@ int ExchangePol(struct s_polymer *polymer, struct s_polymer *replica, struct s_p
 				position=0;
 				for(j=0;j<nback;++j)
 					MPI_Pack(((polymer+ipolymer)->back)+j,1,Backtype,buffer_back,buffer_back_size,&position,MPI_COMM_WORLD);
-					MPI_Send(buffer_back,position,MPI_PACKED,i+1, 10000+100*i, MPI_COMM_WORLD);
+				MPI_Send(buffer_back,position,MPI_PACKED,i+1, EX_TAG_BACK_UP, MPI_COMM_WORLD);
 			}
 			if(iproc==i+1)
 			{
-				MPI_Recv(buffer_back,buffer_back_size,MPI_PACKED,i,10000+100*i, MPI_COMM_WORLD, &astatus);
+				MPI_Recv(buffer_back,buffer_back_size,MPI_PACKED,i,EX_TAG_BACK_UP, MPI_COMM_WORLD, &astatus);
 		                position=0;
 				for(j=0;j<nback;++j)
 					MPI_Unpack(buffer_back,buffer_back_size,&position,((replica+ipolymer)->back)+j,1,Backtype,MPI_COMM_WORLD);
@@ -786,13 +674,13 @@ int ExchangePol(struct s_polymer *polymer, struct s_polymer *replica, struct s_p
 			
 				for(j=0;j<nback;++j)
 					MPI_Pack(((polymer+ipolymer)->back)+j,1,Backtype,buffer_back,buffer_back_size,&position,MPI_COMM_WORLD);
-				MPI_Send(buffer_back,position,MPI_PACKED,i, 20000+100*i, MPI_COMM_WORLD);
+				MPI_Send(buffer_back,position,MPI_PACKED,i, EX_TAG_BACK_DOWN, MPI_COMM_WORLD);
 
 			}
 			
 			if(iproc==i)
 			{
-				MPI_Recv(buffer_back,buffer_back_size,MPI_PACKED,i+1, 20000+100*i, MPI_COMM_WORLD, &astatus);
+				MPI_Recv(buffer_back,buffer_back_size,MPI_PACKED,i+1, EX_TAG_BACK_DOWN, MPI_COMM_WORLD, &astatus);
 				position=0;
 				for(j=0;j<nback;++j)
 					MPI_Unpack(buffer_back,buffer_back_size,&position,((replica+ipolymer)->back)+j,1,Backtype,MPI_COMM_WORLD);
@@ -804,13 +692,11 @@ int ExchangePol(struct s_polymer *polymer, struct s_polymer *replica, struct s_p
 				int side_dims[nback];
 				int rot_dims[nback];
 				int buffer_side_size,sidechains=0;
-				int rotamersl=0;	
 				for(j=0;j<nback;++j)
 				{
 					side_dims[j]=(((polymer+ipolymer)->back)+j)->nside;
 					rot_dims[j]=(((polymer+ipolymer)->back)+j)->nrot;
 					sidechains+=side_dims[j];
-					rotamersl+=rot_dims[j];
 				}
 
 				buffer_side_size=sizeof(struct s_side)*sidechains;
@@ -820,11 +706,11 @@ int ExchangePol(struct s_polymer *polymer, struct s_polymer *replica, struct s_p
 					position=0;
 					for(j=0; j<nback;++j) for(k=0; k<side_dims[j];++k)
 						MPI_Pack(((((polymer+ipolymer)->back)+j)->side)+k,1,Sidetype,buffer_side,buffer_side_size,&position,MPI_COMM_WORLD);	
-					MPI_Send(buffer_side,position,MPI_PACKED,i+1, 1000000+100*i, MPI_COMM_WORLD);
+					MPI_Send(buffer_side,position,MPI_PACKED,i+1, EX_TAG_SIDE_UP, MPI_COMM_WORLD);
 				}
 				if(iproc==i+1) 
 				{
-					MPI_Recv(buffer_side,buffer_side_size,MPI_PACKED,i,1000000+100*i, MPI_COMM_WORLD, &astatus);
+					MPI_Recv(buffer_side,buffer_side_size,MPI_PACKED,i,EX_TAG_SIDE_UP, MPI_COMM_WORLD, &astatus);
 					position=0;
 					for(j=0; j<nback;++j)
 						for(k=0; k<side_dims[j];++k)
@@ -839,7 +725,7 @@ int ExchangePol(struct s_polymer *polymer, struct s_polymer *replica, struct s_p
 					for(j=0; j<nback;++j) for(k=0; k<side_dims[j];++k) for(l=0; l<rot_dims[j]; ++l)
 //					MPI_Pack((((((polymer->back)+j)->side)+k)->rot)+l,1,Rottype,buffer_rot,buffer_rot_size,&position,MPI_COMM_WORLD);
 //					MPI_Send(buffer_rot,position,MPI_PACKED,i+1, 2000000+1000*i, MPI_COMM_WORLD);
-					MPI_Send(((((((polymer+ipolymer)->back)+j)->side)+k)->rot)+l, 1, Rottype, i+1, 2000000+1000*i+100*j+10*k+l, MPI_COMM_WORLD);
+					MPI_Send(((((((polymer+ipolymer)->back)+j)->side)+k)->rot)+l, 1, Rottype, i+1, EX_TAG_ROT_UP, MPI_COMM_WORLD);
 				}
 
 				if(iproc==i+1)
@@ -848,7 +734,7 @@ int ExchangePol(struct s_polymer *polymer, struct s_polymer *replica, struct s_p
 //					position=0;
 					for(j=0; j<nback;++j) for(k=0; k<side_dims[j];++k) for(l=0; l<rot_dims[j]; ++l)
 //						MPI_Unpack(buffer_rot,buffer_rot_size,&position,(((((replica->back)+j)->side)+k)->rot)+l,1,Rottype,MPI_COMM_WORLD);
-						MPI_Recv(((((((replica+ipolymer)->back)+j)->side)+k)->rot)+l, 1, Rottype, i, 2000000+1000*i+100*j+10*k+l , MPI_COMM_WORLD, &astatus);	
+						MPI_Recv(((((((replica+ipolymer)->back)+j)->side)+k)->rot)+l, 1, Rottype, i, EX_TAG_ROT_UP, MPI_COMM_WORLD, &astatus);	
 				}
 
 			
@@ -857,14 +743,14 @@ int ExchangePol(struct s_polymer *polymer, struct s_polymer *replica, struct s_p
 					position=0;
 					for(j=0; j<nback;++j) for(k=0; k<side_dims[j];++k)
 						MPI_Pack(((((polymer+ipolymer)->back)+j)->side)+k,1,Sidetype,buffer_side,buffer_side_size,&position,MPI_COMM_WORLD);
-					MPI_Send(buffer_side,position,MPI_PACKED,i, 3000000+100*i, MPI_COMM_WORLD);
+					MPI_Send(buffer_side,position,MPI_PACKED,i, EX_TAG_SIDE_DOWN, MPI_COMM_WORLD);
 
 					//for(j=0; j<nback;++j) for(k=0; k<((polymer->back)+j)->nside;++k) 
 					//MPI_Send((((polymer->back)+j)->side)+k, 1, Sidetype, i, 3000000+100*i+10*j+k, MPI_COMM_WORLD);
 				}
 				if(iproc==i)
 				{
-					MPI_Recv(buffer_side,buffer_side_size,MPI_PACKED,i+1,3000000+100*i, MPI_COMM_WORLD, &astatus);
+					MPI_Recv(buffer_side,buffer_side_size,MPI_PACKED,i+1,EX_TAG_SIDE_DOWN, MPI_COMM_WORLD, &astatus);
 					position=0;
 					for(j=0; j<nback;++j) for(k=0; k<side_dims[j];++k)
 						MPI_Unpack(buffer_side,buffer_side_size,&position,((((replica+ipolymer)->back)+j)->side)+k,1,Sidetype,MPI_COMM_WORLD);
@@ -882,7 +768,7 @@ int ExchangePol(struct s_polymer *polymer, struct s_polymer *replica, struct s_p
                                         MPI_Send(buffer_rot,position,MPI_PACKED,i, 4000000+1000*i, MPI_COMM_WORLD);
 					*/
 					for(j=0; j<nback;++j) for(k=0; k<(((polymer+ipolymer)->back)+j)->nside;++k) for(l=0; l<(((polymer+ipolymer)->back)+j)->nrot; ++l)
-					MPI_Send(((((((polymer+ipolymer)->back)+j)->side)+k)->rot)+l, 1, Rottype, i, 4000000+1000*i+100*j+10*k+l, MPI_COMM_WORLD);
+					MPI_Send(((((((polymer+ipolymer)->back)+j)->side)+k)->rot)+l, 1, Rottype, i, EX_TAG_ROT_DOWN, MPI_COMM_WORLD);
 				}
 		
 				if(iproc==i)
@@ -894,7 +780,7 @@ int ExchangePol(struct s_polymer *polymer, struct s_polymer *replica, struct s_p
                                         MPI_Unpack(buffer_rot,buffer_rot_size,&position,(((((replica->back)+j)->side)+k)->rot)+l,1,Rottype,MPI_COMM_WORLD);
 					*/
 					 for(j=0; j<nback;++j) for(k=0; k<(((replica+ipolymer)->back)+j)->nside;++k) for(l=0; l<(((replica+ipolymer)->back)+j)->nrot; ++l)
-						MPI_Recv(((((((replica+ipolymer)->back)+j)->side)+k)->rot)+l, 1, Rottype, i+1, 4000000+1000*i+100*j+10*k+l , MPI_COMM_WORLD, &astatus);	
+						MPI_Recv(((((((replica+ipolymer)->back)+j)->side)+k)->rot)+l, 1, Rottype, i+1, EX_TAG_ROT_DOWN, MPI_COMM_WORLD, &astatus);	
 				}
 		
 				free(buffer_side);

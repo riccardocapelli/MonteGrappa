@@ -150,6 +150,7 @@
         FILE *st_pdbf;
         char st_pdbnf[500];
         struct st_restart *st_st_restart;
+        int st_nalloc;                     // allocated size of st_temp, st_g, st_prob_up, st_prob_down, st_counts
         };
 
 
@@ -167,6 +168,8 @@ void PrintHistogram(char *filename, double **h, double *t, int ntemp, int nbin, 
 void Restart(struct st_stuff *p);
 int FindClosestT(double t, int ntemp, double *temp);
 void PrintStatistics(struct st_stuff *p, double step);
+void STWriteState(FILE *fp, struct st_stuff *p);
+void STReadState(FILE *fp, struct st_stuff *p);
 
 // adjust_st.c
 void ManageRestart(struct st_stuff *p, double step);

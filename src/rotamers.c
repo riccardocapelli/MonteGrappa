@@ -53,7 +53,7 @@ struct rot_input_s *AlloRotamer(int naa, FILE *flog)
            {
               *(((x+i)->atom)+j) = (struct rot_atom_s *) calloc(ROT_ATMAX,sizeof(struct rot_atom_s));
               size += sizeof(struct rot_atom_s);
-              if (!(*((x+i)->atom)+j)) Error("Cannot allocate rotamers (3)");
+              if (!(*(((x+i)->atom)+j))) Error("Cannot allocate rotamers (3)");
            }
     }
 
@@ -82,15 +82,18 @@ int ReadRotamers(char *fname, struct rot_input_s *x, int debug)
        fprintf(stderr,"a   rot atm 	   A1  A2   A3	atm		ang	dih		r\n");
     }
 
-  while (fscanf(fp,"%s %d %d",aa,&nrot,&nat)==3)
+  while (fscanf(fp,"%9s %d %d",aa,&nrot,&nat)==3)
     {
+       if (strlen(aa)>4) { fprintf(stderr,"%s\n",aa); Error("Amino acid name longer than 4 characters in rotamer file"); }
+       if (nrot<0 || nrot>ROTMAX || nrot+1>NROTMAX) { fprintf(stderr,"%s: %d rotamers\n",aa,nrot); Error("Too many rotamers in rotamer file (ROTMAX, NROTMAX)"); }
+       if (nat<0 || nat>ROT_ATMAX || nat+1>NSIDEMAX) { fprintf(stderr,"%s: %d atoms\n",aa,nat); Error("Too many atoms in a rotamer (ROT_ATMAX, NSIDEMAX)"); }
        (x+naa)->nrot = nrot;
        (x+naa)->nat = nat;
        strcpy( (x+naa)->aa,aa);
        for (i=0;i<nrot;++i)
         for (j=0;j<nat;++j)
           {
-             if (fscanf(fp,"%s %s %s %s %lf %lf %lf",a1,a2,a3,at,&ang,&dih,&r)!=7) Error("Error in reading rotamer file");
+             if (fscanf(fp,"%4s %4s %4s %4s %lf %lf %lf",a1,a2,a3,at,&ang,&dih,&r)!=7) Error("Error in reading rotamer file");
              else
              {
 				 strcpy( (*(((x+naa)->atom)+i)+j)->A1 ,a1);
@@ -112,6 +115,7 @@ int ReadRotamers(char *fname, struct rot_input_s *x, int debug)
        naa++;
        if (naa>=AAKINDMAX) Error("AAKINDMAX too small");
     }
+  fclose(fp);
 
   return naa;
 }
@@ -122,13 +126,10 @@ int ReadRotamers(char *fname, struct rot_input_s *x, int debug)
  ***********************************************************************/
 int Rot2PolymerScratch(int nrot_kinds, int nchains, struct s_polymer *p, struct rot_input_s *r, struct s_parms *parms, int nat)
 {
-	int i,is,ic,N[NATOMMAX],C[NATOMMAX],CA[NATOMMAX],natomback=0,aamax=-1;
+	int i,is,ic,N[NRESMAX],C[NRESMAX],CA[NRESMAX],aamax=-1;
 	int k,rot_kind,irot,iaa=0,b1,b2,b3,m,iaa0;
 
 	fprintf(stderr,"\nAdd sidechains from rotamers library (neglecting pdb)...\n");
-	
-	for (i=0;i<NRESMAX;++i) CA[i] = -1;
-	for (ic=0;ic<nchains;++ic) natomback += (p+ic)->nback;
 
 	// find main backbone atoms
 	for (ic=0;ic<nchains;++ic)
@@ -136,26 +137,27 @@ int Rot2PolymerScratch(int nrot_kinds, int nchains, struct s_polymer *p, struct 
 		iaa0 = (((p+ic)->back)+0)->iaa;			// id of first aa of this chain
 		for (i=0;i<NRESMAX;++i) { CA[i] = -1; C[i] = -1; N[i] = -1; } 
 
-		// find the iback corresponding to N, CA, C
+		// find the backbone index (not the atom id) of N, CA, C of each residue
 		for (i=0;i<(p+ic)->nback;++i)
 		{
-			if ( (((p+ic)->back)+i)->iaa -iaa0 > NRESMAX ) Error("NRESMAX too small in Rot2PolymerScratch");
-			if (!strcmp( (((p+ic)->back)+i)->type,"N") )  N[ (((p+ic)->back)+i)->iaa -iaa0] =  (((p+ic)->back)+i)->ia;
-			if (!strcmp( (((p+ic)->back)+i)->type,"C") )  C[ (((p+ic)->back)+i)->iaa -iaa0] =  (((p+ic)->back)+i)->ia;
-			if (!strcmp( (((p+ic)->back)+i)->type,"CA") )  CA[ (((p+ic)->back)+i)->iaa -iaa0] =  (((p+ic)->back)+i)->ia;
-			aamax = (((p+ic)->back)+i)->iaa - iaa0;
+			iaa = (((p+ic)->back)+i)->iaa -iaa0;
+			if ( iaa < 0 || iaa >= NRESMAX ) Error("NRESMAX too small (or residues not in order) in Rot2PolymerScratch");
+			if (!strcmp( (((p+ic)->back)+i)->type,"N") )  N[iaa] = i;
+			if (!strcmp( (((p+ic)->back)+i)->type,"C") )  C[iaa] = i;
+			if (!strcmp( (((p+ic)->back)+i)->type,"CA") )  CA[iaa] = i;
+			if (iaa > aamax) aamax = iaa;
 		}
 		if (parms->debug>2) fprintf(stderr,"ic=%d\tiaa0=%d naa=%d\n",ic,iaa0,aamax+1);
 
 		// check if all aa have N, CA, C
-		for (i=0;i<=aamax;++i)
+		for (i=0;i<(p+ic)->nback;++i)
 		{
-			if ( N[ (((p+ic)->back)+i)->iaa -iaa0 ] == -1 ) { fprintf(stderr,"chain=%d amino acid=%d\n",ic,(((p+ic)->back)+i)->iaa); 
-										Error("Cannot find N atom in Rot2PolymerScratch"); }
-			if ( C[ (((p+ic)->back)+i)->iaa -iaa0] == -1 ) { fprintf(stderr,"chain=%d amino acid=%d\n",ic,(((p+ic)->back)+i)->iaa); 
-										Error("Cannot find C atom in Rot2PolymerScratch"); }
-			if ( CA[ (((p+ic)->back)+i)->iaa-iaa0] == -1 ) { fprintf(stderr,"chain=%d amino acid=%d\n",ic,(((p+ic)->back)+i)->iaa); 
-										Error("Cannot find CA atom in Rot2PolymerScratch"); }
+			iaa = (((p+ic)->back)+i)->iaa -iaa0;
+			if ( N[iaa] == -1 || C[iaa] == -1 || CA[iaa] == -1 )
+			{
+				fprintf(stderr,"chain=%d amino acid=%d\n",ic,(((p+ic)->back)+i)->iaa);
+				Error("Cannot find N, CA and C atoms in Rot2PolymerScratch");
+			}
 		}
 
 		for (i=0;i<(p+ic)->nback;++i)
@@ -176,11 +178,14 @@ int Rot2PolymerScratch(int nrot_kinds, int nchains, struct s_polymer *p, struct 
 				// find which amino acid (i.e. which element of rotamer structure)
 				iaa = (((p+ic)->back)+i)->iaa -iaa0;
 
-				if (iaa>NRESMAX) Error("NRESMAX too small in Rot2PolymerScratch");
 				rot_kind=-1;
 				for (k=0;k<nrot_kinds;++k)
 					if (!strcmp((((p+ic)->back)+i)->aa,(r+k)->aa)) rot_kind = k;
-				if (rot_kind==-1 && parms->debug >1) fprintf(stderr,"  no rotamer");
+				if (rot_kind==-1)		// not in the library (e.g. GLY): only the default CB, if any
+				{
+					if (parms->debug>1) fprintf(stderr,"  no rotamer\n");
+					continue;
+				}
 				if (parms->debug>1) fprintf(stderr,"\tRotamer id is %d\n",rot_kind);
 
 
@@ -217,9 +222,9 @@ int Rot2PolymerScratch(int nrot_kinds, int nchains, struct s_polymer *p, struct 
 								(*(((r+rot_kind)->atom)+irot)+is)->dih,(*(((r+rot_kind)->atom)+irot)+is)->r);
 
 						b1 = -1;					// find b1
-						if ( !strcmp((*(((r+rot_kind)->atom)+irot)+is)->A1 , "N") ) b1 = N[iaa];
-						else if ( !strcmp((*(((r+rot_kind)->atom)+irot)+is)->A1 , "CA") ) b1 = CA[iaa];
-						else if ( !strcmp((*(((r+rot_kind)->atom)+irot)+is)->A1 , "C") ) b1 = C[iaa];
+						if ( !strcmp((*(((r+rot_kind)->atom)+irot)+is)->A1 , "N") ) b1 = (((p+ic)->back)+N[iaa])->ia;
+						else if ( !strcmp((*(((r+rot_kind)->atom)+irot)+is)->A1 , "CA") ) b1 = (((p+ic)->back)+CA[iaa])->ia;
+						else if ( !strcmp((*(((r+rot_kind)->atom)+irot)+is)->A1 , "C") ) b1 = (((p+ic)->back)+C[iaa])->ia;
 						else
 							for (m=0;m<(((p+ic)->back)+i)->nside;++m)							// over atoms of the sidechain
 								if (!strcmp( (*(((r+rot_kind)->atom)+irot)+is)->A1, (((((p+ic)->back)+i)->side)+m)->type ))
@@ -228,9 +233,9 @@ int Rot2PolymerScratch(int nrot_kinds, int nchains, struct s_polymer *p, struct 
 						if (parms->debug>1) fprintf(stderr,"\t\tA1=%s b1=%d\n",(*(((r+rot_kind)->atom)+irot)+is)->A1,b1);
 
 						b2 = -1;					// find b2
-						if ( !strcmp((*(((r+rot_kind)->atom)+irot)+is)->A2 , "N") ) b2 = N[iaa];
-						else if ( !strcmp((*(((r+rot_kind)->atom)+irot)+is)->A2 , "CA") ) b2 = CA[iaa];
-						else if ( !strcmp((*(((r+rot_kind)->atom)+irot)+is)->A2 , "C") ) b2 = C[iaa];
+						if ( !strcmp((*(((r+rot_kind)->atom)+irot)+is)->A2 , "N") ) b2 = (((p+ic)->back)+N[iaa])->ia;
+						else if ( !strcmp((*(((r+rot_kind)->atom)+irot)+is)->A2 , "CA") ) b2 = (((p+ic)->back)+CA[iaa])->ia;
+						else if ( !strcmp((*(((r+rot_kind)->atom)+irot)+is)->A2 , "C") ) b2 = (((p+ic)->back)+C[iaa])->ia;
 						else
 							for (m=0;m<(((p+ic)->back)+i)->nside;++m)							// over atoms of the sidechain
 								if (!strcmp( (*(((r+rot_kind)->atom)+irot)+is)->A2, (((((p+ic)->back)+i)->side)+m)->type ))
@@ -239,9 +244,9 @@ int Rot2PolymerScratch(int nrot_kinds, int nchains, struct s_polymer *p, struct 
 						if (parms->debug>1) fprintf(stderr,"\t\tA2=%s b2=%d\n",(*(((r+rot_kind)->atom)+irot)+is)->A2,b2);
 
 						b3 = -1;					// find b3
-						if ( !strcmp((*(((r+rot_kind)->atom)+irot)+is)->A3 , "N") ) b3 = N[iaa];
-						else if ( !strcmp((*(((r+rot_kind)->atom)+irot)+is)->A3 , "CA") ) b3 =CA[iaa];
-						else if ( !strcmp((*(((r+rot_kind)->atom)+irot)+is)->A3 , "C") ) b3 = C[iaa];
+						if ( !strcmp((*(((r+rot_kind)->atom)+irot)+is)->A3 , "N") ) b3 = (((p+ic)->back)+N[iaa])->ia;
+						else if ( !strcmp((*(((r+rot_kind)->atom)+irot)+is)->A3 , "CA") ) b3 = (((p+ic)->back)+CA[iaa])->ia;
+						else if ( !strcmp((*(((r+rot_kind)->atom)+irot)+is)->A3 , "C") ) b3 = (((p+ic)->back)+C[iaa])->ia;
 						else
 							for (m=0;m<(((p+ic)->back)+i)->nside;++m)							// over atoms of the sidechain
 								if (!strcmp( (*(((r+rot_kind)->atom)+irot)+is)->A3, (((((p+ic)->back)+i)->side)+m)->type ))
@@ -259,6 +264,7 @@ int Rot2PolymerScratch(int nrot_kinds, int nchains, struct s_polymer *p, struct 
 				}
 
 				(((p+ic)->back)+i)->nrot = (r+rot_kind)->nrot;
+				if ((((p+ic)->back)+i)->nrot < 1) (((p+ic)->back)+i)->nrot = 1;
 				if (parms->debug>1) fprintf(stderr,"\tnrot=%d\tnside=%d (rot id=%d)\n",(r+rot_kind)->nrot,(((p+ic)->back)+i)->nside,rot_kind );
 			}
 	}
@@ -325,7 +331,7 @@ void SubstituteDefaultCB(struct s_polymer *p, int nc)
 {
 	int i,ic,is,out;
 
-	fprintf(stderr,"Substituting default CB\n");
+	fprintf(stderr,"Substituting the CB of the pdb with a pseudo-CB in the backbone plane (cb_pdb 0)\n");
 
 	for (ic=0;ic<nc;++ic)
 		for (i=0;i<(p+ic)->nback;++i)
@@ -363,17 +369,6 @@ int Rot2Polymer(int nrot_kinds, int nchains, struct s_polymer *p, struct rot_inp
 
 	fprintf(stderr,"\nAdd rotamers from rotamers library...\n");
 
-	for (i=0;i<NRESMAX;++i) CA[i] = -1;
-
-	// find main backbone atoms
-	for (ic=0;ic<nchains;++ic)
-		for (i=0;i<(p+ic)->nback;++i)
-		{
-			if (!strcmp( (((p+ic)->back)+i)->type,"N") ) { N[ (((p+ic)->back)+i)->iaa ] = (((p+ic)->back)+i)->ia; }
-			if (!strcmp( (((p+ic)->back)+i)->type,"C") ) { C[ (((p+ic)->back)+i)->iaa ] = (((p+ic)->back)+i)->ia; }
-			if (!strcmp( (((p+ic)->back)+i)->type,"CA") ) { CA[ (((p+ic)->back)+i)->iaa ] = (((p+ic)->back)+i)->ia; }
-		}
-
 	// if required, change CB
 	if (!parms->cb_pdb) SubstituteDefaultCB(p,nchains);
 
@@ -389,15 +384,30 @@ int Rot2Polymer(int nrot_kinds, int nchains, struct s_polymer *p, struct rot_inp
 				if (parms->debug>1) fprintf(stderr,"Back=%3d\taa=%s\t",i,(((p+ic)->back)+i)->aa);
 				// find which amino acid (i.e. which element of rotamer structure)
 				iaa = (((p+ic)->back)+i)->iaa;
+				if (iaa < 0 || iaa >= NATOMMAX) Error("Residue number out of range in Rot2Polymer");
+
+				// main backbone atoms of this residue in this chain (chains may number their residues alike)
+				N[iaa] = C[iaa] = CA[iaa] = -1;
+				for (k=0;k<(p+ic)->nback;++k)
+					if ((((p+ic)->back)+k)->iaa == iaa)
+					{
+						if (!strcmp( (((p+ic)->back)+k)->type,"N") ) N[iaa] = (((p+ic)->back)+k)->ia;
+						if (!strcmp( (((p+ic)->back)+k)->type,"C") ) C[iaa] = (((p+ic)->back)+k)->ia;
+						if (!strcmp( (((p+ic)->back)+k)->type,"CA") ) CA[iaa] = (((p+ic)->back)+k)->ia;
+					}
+
 				rot_kind=-1;
 				for (k=0;k<nrot_kinds;++k)
 					if (!strcmp((((p+ic)->back)+i)->aa,(r+k)->aa)) rot_kind = k;
-				if (rot_kind==-1 && parms->debug >1) fprintf(stderr,"  no rotamer");
-				if (parms->debug>1 && (r+rot_kind)->nat >0) fprintf(stderr,"\tRotamer id is %d\n",rot_kind);
+				if (rot_kind==-1)		// not in the library (e.g. GLY): keep the sidechain of the pdb as the only rotamer
+				{
+					if (parms->debug>1) fprintf(stderr,"  no rotamer\n");
+					continue;
+				}
+				if (parms->debug>1) fprintf(stderr,"\tRotamer id is %d\n",rot_kind);
 
 				//propagate CB, which in the pdb are defined only for rotamer 0, to all  rotamers
-				if ( rot_kind>-1)
-					for (irot=1;irot< (r+rot_kind)->nrot + keeppdb;++irot)
+				for (irot=1;irot< (r+rot_kind)->nrot + keeppdb;++irot)
 					{
 						(((((((p+ic)->back)+i)->side)+0)->rot)+irot)->b1 = (((((((p+ic)->back)+i)->side)+0)->rot)+0)->b1;
 						(((((((p+ic)->back)+i)->side)+0)->rot)+irot)->b2 = (((((((p+ic)->back)+i)->side)+0)->rot)+0)->b2;
@@ -408,10 +418,11 @@ int Rot2Polymer(int nrot_kinds, int nchains, struct s_polymer *p, struct rot_inp
 					}
 
 				(((p+ic)->back)+i)->nrot = (r+rot_kind)->nrot + keeppdb;
+				if ((((p+ic)->back)+i)->nrot < 1) (((p+ic)->back)+i)->nrot = 1;		// e.g. ALA, whose only rotamer is the CB
 
 				// add new spherical coordinates to rotamers
 				for (j=1;j<(((p+ic)->back)+i)->nside;++j)						// over atoms to be put except CB (j=0)
-					if (strcmp((((((p+ic)->back)+i)->side)+j)->type,"CB") && rot_kind > -1)
+					if (strcmp((((((p+ic)->back)+i)->side)+j)->type,"CB"))
 					{
 						//if (parms->debug>1) fprintf(stdout,"\tSide atom=%d (%d of %d)\tnside=%d",nat,j,(r+rot_kind)->nat,(((p+ic)->back)+i)->nside);
 

@@ -18,6 +18,9 @@ have a look at the input file: we commented the previously used keyword
 different way than a classical GO model: modify the path to let grappino 
 find the library. For further information about "nosidechain", "rotamers", 
 "rot_file", "pdb_rot" and "atomtypes" please refer to the manual. 
+The CB of each residue is taken from the pdb; with "cb_pdb 0" it is replaced
+by a pseudo-CB in the plane of the backbone, as in grappino versions older than
+2026.
 
 
 To optimize the potential, we need to calculate some restraints. There are a 
@@ -58,7 +61,8 @@ file:
 	sed -n -e '1,77p' traj_run4_proc7.pdb > check.pdb
 
 and do
-        echo 3 3 | g_rms -f traj_run4_procN.pdb -s check.pdb -o rmsd_procN.xvg 
+        ../../tools/rmsd.py traj_run4_procN.pdb check.pdb rmsd_procN.xvg
 
-for each replica. The output files should be equal to those stored in the 
-subdirectory "results".
+(or "gmx rms" of Gromacs) for each replica. The files in the subdirectory
+"results" were obtained with this version of MonteGrappa; your run will
+differ in the details if the seed or the number of processes differ.

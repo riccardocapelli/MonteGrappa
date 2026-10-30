@@ -18,8 +18,8 @@ int main(int argc, char *argv[])
 	struct s_potential *u;                  // potential structure
 	double **cm;                            // contact map
 	FILE *fin;
-	double dummy, r2, stdev;							// for contacts calculation
-	int i;
+	double stdev=1.;							// scale of the coevolutionary energies (used by h_fields)
+	int i,natalloc;
 	
     GrappinoWelcome(stderr);
     
@@ -49,11 +49,13 @@ int main(int argc, char *argv[])
     
 	// load rotamers
     
+	rotamers = NULL;
 	if (p->rotamers)
 	{
 		rotamers = AlloRotamer(AAKINDMAX,stderr);
 		nrot_kinds = ReadRotamers(p->rotfile,rotamers,p->debug);
 	}
+	else if (p->sidescratch && !p->nosidechain) Error("sidescratch needs rotamers and rotfile");
 
 	
 
@@ -63,25 +65,38 @@ int main(int argc, char *argv[])
 
 	// allocate polymer and tables
 	fprintf(stderr,"Allocate polymer\n");
-	polymer = AlloPolymer(nchain,nbackmax,NSIDEMAX,NROTMAX,npdb,0,0,stderr);
+	// sidechains built from scratch get atom ids after those of the pdb
+	natalloc = npdb;
+	if (p->sidescratch && !p->nosidechain) natalloc += nbackmax*(ROT_ATMAX+1);
+	if (p->hb_backbone) natalloc += nbackmax;					// amide hydrogens
+	polymer = AlloPolymer(nchain,nbackmax,NSIDEMAX,NROTMAX,natalloc,0,0,stderr);
 	polymer->tables = InitTables(stderr);
 	for (i=1;i<nchain;++i) (polymer+i)->tables = polymer->tables;			// tables of all polymers point to same address
 
 	// transfer pdb to polymer structure
 	nat = Pdb2Polymer(pdb,nchain,npdb,polymer,p,rotamers,nrot_kinds);		// nat is the total number of atoms
+	if (p->hb_backbone)
+	{
+		if (p->hydrogens) Error("hb_backbone builds the amide hydrogens: do not read them from the pdb (hydrogens)");
+		if (p->nosidechain) Error("hb_backbone needs sidechains (the H is a sidechain atom of N, the O of C)");
+		nat = AddAmideHydrogens(polymer,nchain,p,nat);
+	}
 
 	/////////////////
 	// POTENTIAL FILE
 	/////////////////
 
 	// set atomtypes
-	if (!strcmp(p->atomtypes,"go")) ntypes = SetGoTypes(polymer,nchain,npdb);
-	else if (!strcmp(p->atomtypes,"go_aa")) ntypes = SetGoAATypes(polymer,nchain,npdb);
-	else ntypes = ReadTypes(polymer,nchain,npdb,p->atomtypes);
+	if (!strcmp(p->atomtypes,"go")) ntypes = SetGoTypes(polymer,nchain,nat);
+	else if (!strcmp(p->atomtypes,"go_aa")) ntypes = SetGoAATypes(polymer,nchain,nat);
+	else if (!strcmp(p->atomtypes,"go_homo")) ntypes = SetGoHomoTypes(polymer,nchain,nat);
+	else if (strcmp(p->atomtypes,"")) ntypes = ReadTypes(polymer,nchain,nat,p->atomtypes);
+	else Error("atomtypes not defined (go, go_aa, go_homo or a file)");
 	
 	cm = ContactMap(p,polymer,nchain,ntypes,p->debug);
 	
-	u = AlloPotential(npdb,ntypes,0,0,0,0);
+	u = AlloPotential(nat,ntypes,0,0,p->hb_backbone,0);
+	if (p->hb_backbone) SetBackboneHBonds(polymer,nchain,u);
 	u->splice=0;
 	u->g_imin = p->imin;
 	fprintf(stderr,"imin = %d\n",u->g_imin);
@@ -93,14 +108,21 @@ int main(int argc, char *argv[])
 	}
 	else if (!strcmp(p->potential,"coevo"))
 	{
-	  stdev = Ext_Pairs(p,polymer,u->e,u->r_2,u->r0_2);
+		stdev = Ext_Pairs(p,polymer,u->e,u->r_2,u->r0_2);
 		u->g_r0hard = p->rhard;
 	}
+	else if (!strcmp(p->potential,"pairs"))
+	{
+		if (!strcmp(p->pairsfile,"")) Error("potential pairs needs pairsfile");
+		File_Pairs(p->pairsfile,u->e,u->r_2,u->r0_2,ntypes);
+		u->g_r0hard = p->rhard;
+	}
+	else Error("potential must be go, coevo or pairs");
 
 	if (p->splice) {
 		u->splice=1;
 		u->ke_splice = p->ke_splice;
-		u->kr2_splice = p->kr_splice;	// warning: here kr2_splice is not squared, it's gonna be squared in montegrappa!
+		u->kr2_splice = p->kr_splice * p->kr_splice;	// PrintPotential writes its square root
 	}
 
 	// cysteine bridge
@@ -120,6 +142,13 @@ int main(int argc, char *argv[])
 	if (p->go_ang)
         Go_Angles(p,polymer,nchain,u->ang0,u);
     
+    // statistical dihedrals (tables of phi and psi)
+    if (strcmp(p->dihfile,""))
+	{
+		if (p->go_dih || p->dih_ram) Error("dihfile cannot be used together with go_dihedrals or dih_ram");
+		Tabled_Dihedrals(p->dihfile,p->e_dihtab,polymer,nchain,u);
+	}
+
     // ramachandran dihedrals
     if (p->dih_ram)
 	{
@@ -139,10 +168,10 @@ int main(int argc, char *argv[])
 		// Read and rescale the hfields file
 		ReadHFields(p->h_fieldsfile,p->maxcontfile,u,polymer,nchain,p->hfs_alpha,stdev);
 		// Print the potential file
-		PrintPotential(u,p->eoutfile,npdb,ntypes,0,0,0,0);
+		PrintPotential(u,p->eoutfile,nat,ntypes,0,0,p->hb_backbone,0);
 		}
 	else
-		PrintPotential(u,p->eoutfile,npdb,ntypes,0,0,0,1);	// to avoid the h_fields printing
+		PrintPotential(u,p->eoutfile,nat,ntypes,0,0,p->hb_backbone,1);	// to avoid the h_fields printing
 	AppendPotentialComments(p, p->eoutfile);
 
 	// print polymer
@@ -150,7 +179,7 @@ int main(int argc, char *argv[])
 	
 	//if you want a file.op to optimize the potential
 	if(strcmp(p->op_file,""))
-        PrintOpGoFile(p->op_file,cm,polymer,nchain,p->op_kind,p->imin/3); // imin in aa
+        PrintOpGoFile(p->op_file,cm,polymer,nchain,p->op_kind,p->imin/p->n_back_a); // imin in aa
 
 	exit(0);
 }
@@ -175,6 +204,9 @@ void Parse(FILE *fp, struct s_parms *p)
 	strcpy(p->eoutfile,"potential.pot");
 	strcpy(p->cntfile,"");
 	strcpy(p->coevofile,"");
+	strcpy(p->pairsfile,"");
+	strcpy(p->dihfile,"");
+	p->e_dihtab = 1.;
 	p->n_back_a = 3;
 	strcpy(p->back_a[0],"N");
     strcpy(p->back_a[1],"CA");
@@ -182,7 +214,7 @@ void Parse(FILE *fp, struct s_parms *p)
 	for(i=0;i<100;++i) p->move_a[i]=1;
 	p->debug=0;
 	p->rotamers=0;
-	p->cb_pdb = 0;
+	p->cb_pdb = 1;			// keep the CB of the pdb ("cb_pdb 0": pseudo-CB in the backbone plane)
 	p->pdb_rot = 0;
 	p->go_dih = 0;
 	p->go_ang = 0;
@@ -208,6 +240,8 @@ void Parse(FILE *fp, struct s_parms *p)
 	p->dih_ka = 1.;
 	p->dih_kb = 1.;
 	
+	p->hb_backbone = 0;
+	p->hb_dist = 1.01;
 	p->h_fields = 0;
 	p->hfs_alpha = 0.15;		// Original value in Contini, Tiana JCP (2015)
 	
@@ -219,6 +253,9 @@ void Parse(FILE *fp, struct s_parms *p)
 		ReadParS(aux,"potfile",p->eoutfile);
 		ReadParS(aux,"contactfile",p->cntfile);
 		ReadParS(aux,"coevofile",p->coevofile);
+		ReadParS(aux,"pairsfile",p->pairsfile);
+		ReadParS(aux,"dihfile",p->dihfile);
+		ReadParF(aux,"e_dihtab",&(p->e_dihtab));
     		ReadParS(aux,"propensityfile",p->ab_propensityfile);
 		ReadParS(aux,"h_fieldsfile",p->h_fieldsfile);
 		ReadParS(aux,"maxcontfile",p->maxcontfile);
@@ -271,6 +308,8 @@ void Parse(FILE *fp, struct s_parms *p)
 		ReadParF(aux,"dih_ka",&(p->dih_ka));
 		ReadParF(aux,"dih_kb",&(p->dih_kb));
 		
+		ReadParN(aux,"hb_backbone",&(p->hb_backbone));
+		ReadParF(aux,"hb_dist",&(p->hb_dist));
 		ReadParN(aux,"h_fields",&(p->h_fields));
 		ReadParF(aux,"hfs_alpha",&(p->hfs_alpha));
 
@@ -293,12 +332,13 @@ void Parse(FILE *fp, struct s_parms *p)
         //locked atoms: only backbone atoms can be locked, allowed moves of side chain atoms are in rotamers libraries
         if (!strncmp(aux,"locked_atoms",12)) {
             char locked_a[100][100];
-            if ( sscanf(aux,"locked_atoms %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s",
+            int nlocked;
+            if ( (nlocked=sscanf(aux,"locked_atoms %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s %99s",
                 locked_a[0],locked_a[1],locked_a[2],locked_a[3],locked_a[4],locked_a[5],
                 locked_a[6],locked_a[7], locked_a[8],locked_a[9],locked_a[10],locked_a[11],
                 locked_a[12],locked_a[13],locked_a[14],locked_a[15],locked_a[16],locked_a[17],
-                locked_a[18],locked_a[19])>=1 ) {
-                    for (j=0;j<(p->n_back_a);++j)
+                locked_a[18],locked_a[19]))>=1 ) {
+                    for (j=0;j<nlocked;++j)
                         for (i=0;i<(p->n_back_a);++i)
                             if (!strcmp(locked_a[j],p->back_a[i])) p->move_a[i]=0;
             }
@@ -308,7 +348,7 @@ void Parse(FILE *fp, struct s_parms *p)
         //splice option in potential
 		if (!strncmp(aux,"splice",6)) {
             p->splice=1;
-            if ( sscanf(aux,"splice %lf %lf",&(p->kr_splice), &(p->ke_splice)) < 1 )
+            if ( sscanf(aux,"splice %lf %lf",&(p->kr_splice), &(p->ke_splice)) < 2 )
                 Error("Cannot read splice option in inputfile (splice <double> <double>)");
         }
 
@@ -333,7 +373,7 @@ void Parse(FILE *fp, struct s_parms *p)
 
     if (p->splice) {
         fprintf(stderr,"\n splice option enabled with kr_splice = %lf\t ke_splice = %lf\n",p->kr_splice,p->ke_splice);
-        if (p->kr_splice>1)
+        if (p->kr_splice>=1)
         Error("in spice option kr_splice can't be bigger than 1\n");
 		if (p->ke_splice>1) fprintf(stderr,"WARNING: in splice option ke_splice > 1 sounds strange, it makes long range interactions stronger than short range ones!!\n");
 		if (p->use_nativedist && p->kr_splice*p->k_native_r*p->rnat< p->k_native_hc*p->rnat) fprintf(stderr,"\n ** WARNING **: kr_splice*k_native_r*r_native < k_native_hc*r_native ==> spliced distance smaller than hardcore repulsion!!\n");
@@ -418,7 +458,7 @@ void GrappinoWelcome(FILE *fp) {
     fprintf(fp,"\n\n");
     fprintf(fp,"       [=]\n");
     fprintf(fp,"       | |\t*Grappino*\n");
-    fprintf(fp,"       }@{\t\tv1.3\n");
+    fprintf(fp,"       }@{\t\tv2.0\n");
     fprintf(fp,"      /   \\ \n");
     fprintf(fp,"     /     \\ \n");
     fprintf(fp,"    /       \\ \n");

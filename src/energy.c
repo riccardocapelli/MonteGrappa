@@ -49,7 +49,7 @@ void Go_Pairs(struct s_parms *parms, struct s_polymer *p, double **e, double **r
 	if (parms->go_noise) 
 	{
 		fprintf(stderr,"Adding noise (kind %d, sigma=%lf) to the Go potential\n",parms->go_noise,parms->go_noise_sigma);
-		srand(time(0));	
+		SeedRNG((long) time(0),0);
 	}
 	if (parms->debug>1)  fprintf(stderr,"\n\nGo contacts:\n");
 	
@@ -79,7 +79,7 @@ void Go_Pairs(struct s_parms *parms, struct s_polymer *p, double **e, double **r
 				++k;
 			}
 
-			if (parms->go_noise==2)								// if you want to add non-go noise
+			else if (parms->go_noise==2)							// if you want to add non-go noise (to non-native pairs)
 			{
 				e[i][j] = gauss(0.,parms->go_noise_sigma);
 				e[j][i] = e[i][j];
@@ -112,7 +112,7 @@ double Ext_Pairs(struct s_parms *parms, struct s_polymer *p, double **e, double 
 {
 	int i,ii,j,k=0,iaa1,iaa2,itype1,itype2,lines=0;
 	double energy,r,mean=0,stdev=0,appoenergy;
-	char aux[500],aa1[3],aa2[3];
+	char aux[500],aa1[10],aa2[10];
 	FILE *fp, *contfp;
 	int naapairs=210;
 	struct s_pairscont cont[210]; //max contact map between aa types
@@ -124,11 +124,12 @@ double Ext_Pairs(struct s_parms *parms, struct s_polymer *p, double **e, double 
 		if (!contfp) Error("Cannot open pairs contact statistic file");
 		else fprintf(stderr,"Reading pairs contact statistics file....\n");
 		i=0;
-		while(fscanf(contfp,"%s %s %d",(cont[i].nameaa1),(cont[i].nameaa2),&(cont[i].max))==3)
+		while(i<210 && fscanf(contfp,"%4s %4s %d",(cont[i].nameaa1),(cont[i].nameaa2),&(cont[i].max))==3)
 	    {
 			++i;
 		}
 		fclose(contfp);
+		naapairs = i;
 	}
 	//calculate std deviation of contact energies
 	fprintf(stderr,"Reading coevolutionary contact file\n");
@@ -138,7 +139,7 @@ double Ext_Pairs(struct s_parms *parms, struct s_polymer *p, double **e, double 
 	// Mean calculation (first cycle)
 	while(fgets(aux,500,fp)!=NULL)
 	{
-		if((sscanf(aux,"%d %s %d %s %lf",&iaa1,aa1,&iaa2,aa2,&energy) == 5) && (lines>0))
+		if((sscanf(aux,"%d %9s %d %9s %lf",&iaa1,aa1,&iaa2,aa2,&energy) == 5) && (lines>0))
 		{
 			mean+=energy;
 		}	
@@ -156,7 +157,7 @@ double Ext_Pairs(struct s_parms *parms, struct s_polymer *p, double **e, double 
 	i=0;
 	while(fgets(aux,500,fp)!=NULL)
 	{
-		if((sscanf(aux,"%d %s %d %s %lf",&iaa1,aa1,&iaa2,aa2,&energy) == 5) && i!=0)
+		if((sscanf(aux,"%d %9s %d %9s %lf",&iaa1,aa1,&iaa2,aa2,&energy) == 5) && i!=0)
 		{
 			stdev+=(mean-energy)*(mean-energy);
 		}	
@@ -170,7 +171,7 @@ double Ext_Pairs(struct s_parms *parms, struct s_polymer *p, double **e, double 
 
 	while(fgets(aux,500,fp)!=NULL)
 	{
-		if ( sscanf(aux,"%d %s %d %s %lf",&iaa1,aa1,&iaa2,aa2,&energy) == 5)
+		if ( sscanf(aux,"%d %9s %d %9s %lf",&iaa1,aa1,&iaa2,aa2,&energy) == 5)
 		{
 			for(i=0;i<p->nback;++i)
 			{
@@ -196,9 +197,11 @@ double Ext_Pairs(struct s_parms *parms, struct s_polymer *p, double **e, double 
 						r02[itype2][itype1] = r02[itype1][itype2];
 						
 						// set the interaction energy (such that std deviation=1)
+						appoenergy = energy;
 						if(parms->coevo_allatom)
 						{
 							//normalize energy over max contacts
+							appoenergy = 0;
 							for(ii=0;ii<naapairs;++ii)
 							{
 								if((!strcmp(aa1,cont[ii].nameaa1) && !strcmp(aa2,cont[ii].nameaa2)) || (!strcmp(aa2,cont[ii].nameaa1) && !strcmp(aa1,cont[ii].nameaa2)))
@@ -272,7 +275,8 @@ void Ram_Dihedrals(struct s_parms *p, struct s_potential *u)
 
 /*****************************************************************************
  Contact map between atoms sticking out of different backbone atoms
- (nat x nat)
+ (nat x nat): the largest distance below r_native between atoms of each
+ pair of types (0 if none)
  *****************************************************************************/
 double **ContactMap(struct s_parms *parms, struct s_polymer *p, int nchains, int nat,int debug)
 {
@@ -288,14 +292,14 @@ double **ContactMap(struct s_parms *parms, struct s_polymer *p, int nchains, int
 		for (c2=c1;c2<nchains;++c2)
 			for (ib1=0;ib1<(p+c1)->nback;++ib1)
 				for (ib2=0;ib2<(p+c2)->nback;++ib2)
-					if (c1!=c2 || ib1<=ib2-parms->imin)
+					if (c1!=c2 || ib1<ib2-parms->imin)		// as in the simulation, atoms imin apart do not interact
 					{
 						// backbone-backbone interactions
 						d = Dist( (((p+c1)->back)+ib1)->pos, (((p+c2)->back)+ib2)->pos );
 						if ( d < parms->rnat )
 						{
-							cm[(((p+c1)->back)+ib1)->itype][(((p+c2)->back)+ib2)->itype] = d;
-							cm[(((p+c2)->back)+ib2)->itype][(((p+c1)->back)+ib1)->itype] = d;
+							if (d > cm[(((p+c1)->back)+ib1)->itype][(((p+c2)->back)+ib2)->itype])			// the largest native distance of the pair of types
+								cm[(((p+c1)->back)+ib1)->itype][(((p+c2)->back)+ib2)->itype] = cm[(((p+c2)->back)+ib2)->itype][(((p+c1)->back)+ib1)->itype] = d;
 							if (debug>2) fprintf(stderr,"\t%d%s (%d%s) - %d%s (%d%s)\td=%lf\n",(((p+c1)->back)+ib1)->ia,(((p+c1)->back)+ib1)->type,
 									(((p+c1)->back)+ib1)->iaa,(((p+c1)->back)+ib1)->aa,(((p+c2)->back)+ib2)->ia,(((p+c2)->back)+ib2)->type,
 									(((p+c2)->back)+ib2)->iaa,(((p+c2)->back)+ib2)->aa,d);
@@ -307,8 +311,8 @@ double **ContactMap(struct s_parms *parms, struct s_polymer *p, int nchains, int
 							d = Dist( (((((p+c1)->back)+ib1)->side)+is1)->pos, (((p+c2)->back)+ib2)->pos );
 							if ( d < parms->rnat )
 							{
-								cm[(((((p+c1)->back)+ib1)->side)+is1)->itype][(((p+c2)->back)+ib2)->itype] = d;
-								cm[(((p+c2)->back)+ib2)->itype][(((((p+c1)->back)+ib1)->side)+is1)->itype] = d;
+								if (d > cm[(((((p+c1)->back)+ib1)->side)+is1)->itype][(((p+c2)->back)+ib2)->itype])			// the largest native distance of the pair of types
+									cm[(((((p+c1)->back)+ib1)->side)+is1)->itype][(((p+c2)->back)+ib2)->itype] = cm[(((p+c2)->back)+ib2)->itype][(((((p+c1)->back)+ib1)->side)+is1)->itype] = d;
 								if (debug>2) fprintf(stderr,"\t%d%s (%d%s) - %d%s (%d%s)\td=%lf\n",(((((p+c1)->back)+ib1)->side)+is1)->ia,(((((p+c1)->back)+ib1)->side)+is1)->type,
 									(((p+c1)->back)+ib1)->iaa,(((p+c1)->back)+ib1)->aa,(((p+c2)->back)+ib2)->ia,(((p+c2)->back)+ib2)->type,
 									(((p+c2)->back)+ib2)->iaa,(((p+c2)->back)+ib2)->aa,d);
@@ -320,8 +324,8 @@ double **ContactMap(struct s_parms *parms, struct s_polymer *p, int nchains, int
 							d = Dist( (((((p+c2)->back)+ib2)->side)+is2)->pos, (((p+c1)->back)+ib1)->pos );
 							if ( d < parms->rnat )
 							{
-								cm[(((((p+c2)->back)+ib2)->side)+is2)->itype][(((p+c1)->back)+ib1)->itype] = d;
-								cm[(((p+c1)->back)+ib1)->itype][(((((p+c2)->back)+ib2)->side)+is2)->itype] = d;
+								if (d > cm[(((((p+c2)->back)+ib2)->side)+is2)->itype][(((p+c1)->back)+ib1)->itype])			// the largest native distance of the pair of types
+									cm[(((((p+c2)->back)+ib2)->side)+is2)->itype][(((p+c1)->back)+ib1)->itype] = cm[(((p+c1)->back)+ib1)->itype][(((((p+c2)->back)+ib2)->side)+is2)->itype] = d;
 								if (debug>2) fprintf(stderr,"\t%d%s (%d%s) - %d%s (%d%s)\td=%lf\n",(((p+c1)->back)+ib1)->ia,(((p+c1)->back)+ib1)->type,
 									(((p+c1)->back)+ib1)->iaa,(((p+c1)->back)+ib1)->aa,(((((p+c2)->back)+ib2)->side)+is2)->ia,(((((p+c2)->back)+ib2)->side)+is2)->type,
 									(((p+c2)->back)+ib2)->iaa,(((p+c2)->back)+ib2)->aa,d);
@@ -336,8 +340,8 @@ double **ContactMap(struct s_parms *parms, struct s_polymer *p, int nchains, int
 								d = Dist( (((((p+c1)->back)+ib1)->side)+is1)->pos, (((((p+c2)->back)+ib2)->side)+is2)->pos );
 								if ( d < parms->rnat )
 								{
-									cm[(((((p+c1)->back)+ib1)->side)+is1)->itype][(((((p+c2)->back)+ib2)->side)+is2)->itype] = d;
-									cm[(((((p+c2)->back)+ib2)->side)+is2)->itype][(((((p+c1)->back)+ib1)->side)+is1)->itype] = d;
+									if (d > cm[(((((p+c1)->back)+ib1)->side)+is1)->itype][(((((p+c2)->back)+ib2)->side)+is2)->itype])			// the largest native distance of the pair of types
+										cm[(((((p+c1)->back)+ib1)->side)+is1)->itype][(((((p+c2)->back)+ib2)->side)+is2)->itype] = cm[(((((p+c2)->back)+ib2)->side)+is2)->itype][(((((p+c1)->back)+ib1)->side)+is1)->itype] = d;
 									if (debug>2) fprintf(stderr,"\t%d%s (%d%s) - %d%s (%d%s)\td=%lf\n",(((((p+c1)->back)+ib1)->side)+is1)->ia,(((((p+c1)->back)+ib1)->side)+is1)->type,
 										(((p+c1)->back)+ib1)->iaa,(((p+c1)->back)+ib1)->aa,(((((p+c2)->back)+ib2)->side)+is2)->ia,(((((p+c2)->back)+ib2)->side)+is2)->type,
 										(((p+c2)->back)+ib2)->iaa,(((p+c2)->back)+ib2)->aa,d);
@@ -346,7 +350,7 @@ double **ContactMap(struct s_parms *parms, struct s_polymer *p, int nchains, int
 							}
 					}
 
-			return cm;
+	return cm;
 }
 
 /*****************************************************************************
@@ -366,6 +370,42 @@ int SetGoTypes(struct s_polymer *p, int nchains, int nat)
 		}
 
 	return nat;
+}
+
+/*****************************************************************************
+ Go model of identical chains (e.g. an amyloid fibril): every atom takes the
+ type of the corresponding atom of chain 0, so that all native contacts, also
+ those between chains, become attractions between types shared by all chains
+ and any chain can take the place of any other. Returns the number of types.
+ *****************************************************************************/
+int SetGoHomoTypes(struct s_polymer *p, int nchains, int nat)
+{
+	int ic,i,j,ntypes=0;
+
+	fprintf(stderr,"Set Go types shared by identical chains\n");
+
+	for (ic=1;ic<nchains;++ic)
+	{
+		if ((p+ic)->nback != p->nback) Error("go_homo atom types need chains with the same atoms");
+		for (i=0;i<p->nback;++i)
+			if ( (((p+ic)->back)+i)->nside != ((p->back)+i)->nside || strcmp((((p+ic)->back)+i)->type,((p->back)+i)->type) )
+				Error("go_homo atom types need chains with the same atoms");
+	}
+
+	for (ic=0;ic<nchains;++ic)
+		for (i=0;i<(p+ic)->nback;++i)
+		{
+			(((p+ic)->back)+i)->itype = ((p->back)+i)->ia;
+			for (j=0;j<(((p+ic)->back)+i)->nside;++j) (((((p+ic)->back)+i)->side)+j)->itype = ((((p->back)+i)->side)+j)->ia;
+		}
+	for (i=0;i<p->nback;++i)
+	{
+		if (((p->back)+i)->ia+1 > ntypes) ntypes = ((p->back)+i)->ia+1;
+		for (j=0;j<((p->back)+i)->nside;++j)
+			if (((((p->back)+i)->side)+j)->ia+1 > ntypes) ntypes = ((((p->back)+i)->side)+j)->ia+1;
+	}
+	(void) nat;
+	return ntypes;
 }
 
 /*****************************************************************************
@@ -430,9 +470,13 @@ int ReadTypes(struct s_polymer *p, int nchains, int nat, char *nfile)
 
 	while(fgets(aux,500,fp)!=NULL)
 	{
-		if ( sscanf(aux,"%d %s %s",&(type[it]),atom[it],aa[it]) == 3) ++it;
+		if ( sscanf(aux,"%d %4s %4s",&(type[it]),atom[it],aa[it]) == 3)
+		{
+			if (type[it]<0) Error("Negative atom type in ReadTypes");
+			if (type[it]+1>nt) nt=type[it]+1;		// the number of types is the largest type plus one
+			++it;
+		}
 		if (it>=NTYPEMAX) Error("NTYPEMAX too small in ReadTypes");
-		if (it>nt) nt=it;
 	}	
 
 	fprintf(stderr,"Read %d atomtypes\n",it);
@@ -507,7 +551,7 @@ void DisulphideBonds(struct s_parms *parms, struct s_polymer *p, double **e, dou
 													r2[it2][it1] = r2[it1][it2];
 													if (r02[it1][it2]<EPSILON)
 													{
-														r02[it1][it2] = parms->rhard;
+														r02[it1][it2] = parms->rhard * parms->rhard;
 														r02[it2][it1] = r02[it1][it2];
 													}
 													cnt++;
@@ -531,11 +575,12 @@ void HydrophobicInteraction(struct s_parms *parms, struct s_polymer *p, double *
 				r2[j][i] = r2[i][j];
 				if (r02[i][j]<EPSILON)
 				{
-					r02[i][j] = parms->rhard;
+					r02[i][j] = parms->rhard * parms->rhard;
 					r02[j][i] = r02[i][j];
 				}
 				cnt++;
 			}
+	fprintf(stderr,"Added %d hydrophobic interactions.\n",cnt);
 }
 
 /**********************************************
@@ -565,7 +610,7 @@ void PrintOpGoFile(char *nfile, double **cm, struct s_polymer *p, int nchains, c
                             // counts CA atoms to check imin condition
                             if  (!strcmp((((p+jc)->back)+j)->type,"CA") )
                                 nCA++;
-                            if ( !strcmp((((p+ic)->back)+i)->type,"CA") && !strcmp((((p+jc)->back)+j)->type,"CA") && ( nCA >= imin ) )
+                            if ( !strcmp((((p+ic)->back)+i)->type,"CA") && !strcmp((((p+jc)->back)+j)->type,"CA") && ( nCA > imin ) )
                                 nrest++;
                         }
                     }
@@ -588,7 +633,7 @@ void PrintOpGoFile(char *nfile, double **cm, struct s_polymer *p, int nchains, c
                         for (j=i+1;j<(p+jc)->nback;++j) {
                             if  (!strcmp((((p+jc)->back)+j)->type,"CA") )
                                 nCA++;
-                            if ( !strcmp((((p+ic)->back)+i)->type,"CA") && !strcmp((((p+jc)->back)+j)->type,"CA") && ( nCA >= imin ) )
+                            if ( !strcmp((((p+ic)->back)+i)->type,"CA") && !strcmp((((p+jc)->back)+j)->type,"CA") && ( nCA > imin ) )
                                 fprintf(fp,"%d\t%d\t\t1\t%lf\t0.5\n",(((p+ic)->back)+i)->ia,(((p+jc)->back)+j)->ia,
                                         Dist( (((p+ic)->back)+i)->pos, (((p+jc)->back)+j)->pos ) );
                         }
@@ -618,7 +663,7 @@ void PrintOpGoFile(char *nfile, double **cm, struct s_polymer *p, int nchains, c
                             if ((jaa-iaa)%2 == 0) { // only counts restraints between even aa and between even aa
                                 if  (!strcmp((((p+jc)->back)+j)->type,"CA") ) // counts CA atoms to check imin condition
                                     nCA++;
-                                if ( !strcmp((((p+ic)->back)+i)->type,"CA") && !strcmp((((p+jc)->back)+j)->type,"CA") && ( nCA >= imin ) ){
+                                if ( !strcmp((((p+ic)->back)+i)->type,"CA") && !strcmp((((p+jc)->back)+j)->type,"CA") && ( nCA > imin ) ){
                                     if( strcmp(((((p+ic)->back)+i)->aa),"GLY") && strcmp(((((p+jc)->back)+j)->aa),"GLY") )
                                         nrest+=4;   // one for CA-CA, one for sidechain/sidechain and two for CA/sidechain
                                     if( strcmp(((((p+ic)->back)+i)->aa),"GLY") && !strcmp(((((p+jc)->back)+j)->aa),"GLY") )
@@ -665,7 +710,7 @@ void PrintOpGoFile(char *nfile, double **cm, struct s_polymer *p, int nchains, c
                             if (abs((iaa-jaa))%2 == 0) { // only counts restraints between even aa and between even aa
                                 if  (!strcmp((((p+jc)->back)+j)->type,"CA") ) // counts CA atoms to check imin condition
                                     nCA++;
-                                if ( !strcmp((((p+ic)->back)+i)->type,"CA") && !strcmp((((p+jc)->back)+j)->type,"CA") && ( nCA >= imin ) ) {
+                                if ( !strcmp((((p+ic)->back)+i)->type,"CA") && !strcmp((((p+jc)->back)+j)->type,"CA") && ( nCA > imin ) ) {
                                     fprintf(fp,"%d\t%d\t\t1\t%lf\t0.5\n",(((p+ic)->back)+i)->ia,(((p+jc)->back)+j)->ia,
                                             Dist( (((p+ic)->back)+i)->pos, (((p+jc)->back)+j)->pos ) );   // Backbone-Backbone
                                     iside = ((((p+ic)->back)+i)->nside)-1;
@@ -726,4 +771,85 @@ void PrintOpGoFile(char *nfile, double **cm, struct s_polymer *p, int nchains, c
 	fclose(fp);
 	
     
+}
+
+/*****************************************************************************
+ Pair potential between atom types read from a file (e.g. made by
+ tools/potential/derive_potential.py), with lines "type1 type2 e r_well
+ r_hardcore" (distances in A, # starts a comment); r_well=0 means only the
+ hard core. Returns the number of pairs read.
+ *****************************************************************************/
+int File_Pairs(char *fname, double **e, double **r2, double **r02, int ntypes)
+{
+	FILE *fp;
+	char aux[500];
+	int i,j,n=0;
+	double ee,rw,r0;
+
+	fp = fopen(fname,"r");
+	if (!fp) Error("Cannot open pairsfile");
+	while (fgets(aux,500,fp)!=NULL)
+	{
+		if (aux[0]=='#') continue;
+		if (sscanf(aux,"%d %d %lf %lf %lf",&i,&j,&ee,&rw,&r0)!=5) continue;
+		if (i<0 || j<0 || i>=ntypes || j>=ntypes) { fprintf(stderr,"types %d %d\n",i,j); Error("Type in pairsfile not defined by atomtypes"); }
+		if (rw>0 && rw<=r0) Error("r_well must be larger than r_hardcore in pairsfile");
+		e[i][j] = e[j][i] = (rw>0) ? ee : 0.;
+		r2[i][j] = r2[j][i] = rw*rw;
+		r02[i][j] = r02[j][i] = r0*r0;
+		n++;
+	}
+	fclose(fp);
+	fprintf(stderr,"Read %d pairs of types from %s\n",n,fname);
+	return n;
+}
+
+/*****************************************************************************
+ Statistical potential of the backbone dihedrals (tools/potential/torsion_stats.py):
+ lines "i phi_a phi_b psi_a psi_b", bin i covering [-180+i*bin,-180+(i+1)*bin),
+ with one more line for 180 itself. Phi is on CA, psi on C; table a is used
+ for all residues but glycine, b for glycine; prolines have no phi term
+ (their ring fixes it). Needs backbone_atoms N CA C.
+ *****************************************************************************/
+int Tabled_Dihedrals(char *fname, double e, struct s_polymer *p, int nchains, struct s_potential *u)
+{
+	FILE *fp;
+	char aux[500];
+	int i,n=0,ic,iw,ia,gly,nw=0;
+	double fa,fb,sa,sb;
+
+	fp = fopen(fname,"r");
+	if (!fp) Error("Cannot open dihfile");
+	while (fgets(aux,500,fp)!=NULL)
+	{
+		if (aux[0]=='#') continue;
+		if (sscanf(aux,"%d %lf %lf %lf %lf",&i,&fa,&fb,&sa,&sb)!=5) continue;
+		if (i!=n) Error("Lines of dihfile must be numbered from 0 in order");
+		if (n>=NDIHFMAX) Error("NDIHFMAX too small for dihfile");
+		u->dih_f_phi_a[n] = fa; u->dih_f_phi_b[n] = fb;
+		u->dih_f_psi_a[n] = sa; u->dih_f_psi_b[n] = sb;
+		n++;
+	}
+	fclose(fp);
+	if (n<3) Error("Too few lines in dihfile");
+	u->g_dihbin = 360./(n-1);
+	u->g_dihe = e;
+	u->dih_tabled = 1;
+
+	for (ic=0;ic<nchains;++ic)
+		for (iw=0;iw<(p+ic)->nback;++iw)
+		{
+			ia = (((p+ic)->back)+iw)->ia;
+			gly = !strcmp((((p+ic)->back)+iw)->aa,"GLY");
+			if (!strcmp((((p+ic)->back)+iw)->type,"CA") && strcmp((((p+ic)->back)+iw)->aa,"PRO"))
+				{ u->dih_which[ia] = 0; nw++; }
+			else if (!strcmp((((p+ic)->back)+iw)->type,"C"))
+				{ u->dih_which[ia] = 1; nw++; }
+			else continue;
+			u->dih_pa[ia] = gly ? 0. : 1.;
+			u->dih_pb[ia] = gly ? 1. : 0.;
+		}
+	if (nw==0) Error("dihfile needs CA and C backbone atoms");
+	fprintf(stderr,"Read %d bins of dihedral tables from %s (bin %.2lf degrees), %d phi/psi\n",n,fname,u->g_dihbin,nw);
+	return nw;
 }

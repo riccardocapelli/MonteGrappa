@@ -34,9 +34,21 @@ struct s_optimizepot
 {
 	int *it1;		// this itype...
 	int *it2;		// ...interacts with itype
-	double **mul;		// the interaction is multiplied by this geometric factor in each snapshot
 	int ncontacts;		// this is the dimension of the arrays above
-	int nallocont;		// size of it1, it2 and mul in terms of ncontacts, in terms of OP_NCONTMAX
+	int nallocont;		// size of it1, it2, fmul, ftouched in terms of OP_NCONTMAX
+	int ntypes;
+	int **cindex;		// index in it1/it2 of each pair of types (-1 = not met yet)
+
+				// contacts of the frames while recording, sparse: frame ifr has the entries fstart[ifr]..fstart[ifr+1]-1
+	long long *fstart;
+	int *cidx;		// contact index of each entry (ascending within a frame)
+	double *cmul;		// the interaction is multiplied by this geometric factor in the frame
+	long long nnz;		// number of entries
+	long long nnzmax;	// allocated entries
+	double *fmul;		// geometric factors of the frame being recorded, by contact index
+	int *ftouched;		// contacts met in the frame being recorded
+	int nftouched;
+
 	double *eold;		// the original energy of each recorded structure
 	double *efix;		// the non-optimizible part of the energy (dihedrals, angles, etc.)
 
@@ -46,12 +58,29 @@ struct s_optimizepot
 	double *rest_av;	// the calculated thermal average of restrains
 	double *enew;		// new energies
 	double *t;		// the temperature of the ith snapshot
+	double *lnden;		// weight of frame i at the new energy: exp(-enew/op_T - lnden), lnden = -eold/t or the MBAR mixture of the temperatures
+				// the same contacts by pair of types, built for the reweighting (and the copy by frame freed):
+	long long *cstart;	// contact c is in the entries cstart[c]..cstart[c+1]-1...
+	int *cfr;		// ...of the frames cfr (ascending)...
+	double *cmc;		// ...with geometric factor cmc
+	double neff;		// effective fraction of frames of the last reweighting, (sum w)^2/(sum w^2)/nframes
+				// weights kept between the steps of the reweighting, so that a step updates only the frames it changes:
+	double *w;		// weight of each frame, exp(-enew/op_T - lnden - eshift)
+	double *sw;		// sum of w*restrain over the frames, by restraint
+	double z,z2;		// sum of w and of w^2
+	double eshift;		// largest exponent when the weights were last computed from scratch
+	double *wold,*swold,zold,z2old;	// the same before the last OP_functionDiff, to undo it
+	int ndiff;		// steps since the weights were last computed from scratch
+	int fullold;		// the last OP_functionDiff computed them from scratch (undo does the same)
 
 	int nframes;		// number of recorded conformations
 	int nframesmax;		// size of the allocated structure
 	int icount;
 
 	int record;		// 1= record the energy when calling EnergyPairs
+
+	FILE *fsave;		// frames saved with the checkpoints (see OP_SaveFrames)...
+	int nfsaved,ncsaved;	// ...up to this frame and contact
 };
 
 struct s_optimizepot_input

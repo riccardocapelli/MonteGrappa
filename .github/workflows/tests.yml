@@ -1,0 +1,60 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GSL and MPI
+        run: sudo apt-get update && sudo apt-get install -y libgsl-dev libopenmpi-dev openmpi-bin
+      - name: Build
+        run: |
+          make version=STEMPERING MC_BIN=bin/montegrappa_st   # simulated tempering (group stempering)
+          make                         # serial executable used by the tests
+          make version=MPI
+          make grappino mgp2pdb dcd2pdb mhistogram
+      - name: Tests
+        run: MG_TEST_WORKDIR=$RUNNER_TEMP/mgtests tests/run_tests.sh
+      - name: Keep the outputs of failed tests
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-test-outputs
+          path: ${{ runner.temp }}/mgtests
+      - name: Tests with AddressSanitizer
+        run: |
+          sudo sysctl -w vm.mmap_rnd_bits=28     # ASan cannot map its shadow memory with the default ASLR entropy
+          make version=ASAN montegrappa grappino
+          MG_TEST_WORKDIR=$RUNNER_TEMP/mgtests_asan tests/run_tests.sh --asan errors regression echeck restart cells tools avbmc
+      - name: Keep the outputs of failed ASan tests
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-asan-outputs
+          path: ${{ runner.temp }}/mgtests_asan
+      - name: Detailed balance
+        run: tests/run_tests.sh stat
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GSL
+        run: brew install gsl
+      - name: Build
+        run: |
+          make version=STEMPERING MC_BIN=bin/montegrappa_st
+          make
+          make grappino mgp2pdb dcd2pdb mhistogram
+      - name: Tests
+        run: MG_TEST_WORKDIR=$RUNNER_TEMP/mgtests tests/run_tests.sh
+      - name: Keep the outputs of failed tests
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-test-outputs
+          path: ${{ runner.temp }}/mgtests

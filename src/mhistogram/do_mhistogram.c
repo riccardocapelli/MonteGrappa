@@ -72,6 +72,7 @@ double *MHistogram(double **h, double *t, int ntemp, int nbin, double emin, doub
 
     // One of the partition functions is arbitrary
     f[0] = 0;
+    for (j=0;j<ntemp;++j) good_f[j] = f[j];				// reliable f if the first equations cannot be solved
 
 	// Solve iteratively the MH equations, starting from the highest temperature
 	for (i=1;i<ntemp;i++)					// Start with 2 equations
@@ -684,9 +685,9 @@ void print_state (size_t iter, gsl_multiroot_fsolver *s, int ntemp)
  *****************************************************************************/
 int GMHequation (const gsl_vector *ff, void *params, gsl_vector *eqq)
 {
-  int i,ie,it,nbin,ntemp,debug,paranoid,*useit,*binok;
+  int i,ie,it,nbin,ntemp,*useit,*binok;
   double num,den,fmax,e,emin,ebin,kb;
-  double f[NTEMPMAX], eq[NTEMPMAX], *T, **h, n;
+  double f[NTEMPMAX], eq[NTEMPMAX], *T, **h, n[NTEMPMAX];
 
   // The GMH equations are (Eq. A.1 jesper's thesis):
   //                                                 \sum_t h_t(E)
@@ -701,8 +702,6 @@ int GMHequation (const gsl_vector *ff, void *params, gsl_vector *eqq)
   ntemp = ((struct rparams *) params)->ntemp;
   nbin = ((struct rparams *) params)->nbin;
   kb = ((struct rparams *) params)->kb;
-  debug = ((struct rparams *) params)->debug;
-  paranoid = ((struct rparams *) params)->paranoid;
   useit = ((struct rparams *) params)->useit;
   binok = ((struct rparams *) params)->binok;
 
@@ -711,15 +710,18 @@ int GMHequation (const gsl_vector *ff, void *params, gsl_vector *eqq)
 	  f[i] = gsl_vector_get (ff, i);
 
 
+  // normalization constants n_t (number of samples at each temperature)
+  for (it=0;it<ntemp;it++)
+  {
+	  n[it] = 0;
+	  for (ie=0;ie<nbin;ie++)
+		  if (binok[ie] == 1 ) n[it] += h[it][ie];
+  }
+
   // Put in eq[i] the system of functions whose zeros must be found
   for (i=0;i<ntemp;i++)									// sum over the ntemp equations
 	  if (useit[i]==1)
 	  {
-		  // normalization constant
-		  n = 0;
-		  for (ie=0;ie<nbin;ie++)
-			  if (binok[ie] == 1 ) n += h[i][ie];
-
 		  // Find maximum exponent to prevent overflows
 		   fmax = -9E19;
 		   for (ie=0;ie<nbin;ie++)
@@ -746,7 +748,7 @@ int GMHequation (const gsl_vector *ff, void *params, gsl_vector *eqq)
 					{
 						num += h[it][ie];						// sum numerator
 						if (h[it][ie]>0)						// chi_t(e)
-							den += n * exp(-e/(kb*T[it])+e/(kb*T[i])-f[i]+f[it]-fmax);
+							den += n[it] * exp(-e/(kb*T[it])+e/(kb*T[i])-f[i]+f[it]-fmax);
 					}
 				eq[i] += exp(-fmax) * num / den ;
 			}
@@ -770,7 +772,7 @@ int GMHequation (const gsl_vector *ff, void *params, gsl_vector *eqq)
  *****************************************************************************/
 int GMHequation_df (const gsl_vector *ff, void *params, gsl_matrix *J)
 {
-  int i,ie,iT,nbin,ntemp,debug,paranoid,*useit, *binok;
+  int i,ie,iT,nbin,ntemp,*useit, *binok;
   double den2[NEBINMAX],fmax[NEBINMAX],e,emin,ebin,kb,sum,d,fmax2;
   double f[NTEMPMAX], deriv, *T, **h, n[NTEMPMAX],s[NEBINMAX];
   gsl_vector *eqq;
@@ -788,8 +790,6 @@ int GMHequation_df (const gsl_vector *ff, void *params, gsl_matrix *J)
   ntemp = ((struct rparams *) params)->ntemp;
   nbin = ((struct rparams *) params)->nbin;
   kb = ((struct rparams *) params)->kb;
-  debug = ((struct rparams *) params)->debug;
-  paranoid = ((struct rparams *) params)->paranoid;
   useit = ((struct rparams *) params)->useit;
   binok = ((struct rparams *) params)->binok;
 

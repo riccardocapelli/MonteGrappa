@@ -37,20 +37,234 @@
 
 #include "montegrappa.h"
 
+unsigned long long contacts_stamp = 1;	// stamp of the current move for the contact lists it changes
+
+// residues (chain, index) whose contact list changed since the last ContactsNewMove, each once
+static int *touched_c=NULL,*touched_i=NULL,ntouched=0,touchedmax=0;
+
+static inline void Touch(struct s_back *b, int c, int i)
+{
+	if (b->touched == contacts_stamp) return;
+	b->touched = contacts_stamp;
+	if (ntouched >= touchedmax)
+	{
+		touchedmax = 2*touchedmax + 1024;
+		touched_c = (int *) realloc(touched_c,touchedmax*sizeof(int));
+		touched_i = (int *) realloc(touched_i,touchedmax*sizeof(int));
+		if (!touched_c || !touched_i) Error("Cannot allocate the list of changed contacts");
+	}
+	touched_c[ntouched] = c;
+	touched_i[ntouched] = i;
+	ntouched ++;
+}
+
+/********************************************************************
+ Residues whose contact list changed in the current move (AddContact,
+ ResetContactsMonomer and TotalEnergy record them): the moves copy
+ only these between p and oldp (UpdateChainRanges)
+ ********************************************************************/
+int ContactsTouched(int **c, int **i)
+{
+	*c = touched_c;
+	*i = touched_i;
+	return ntouched;
+}
+
+void ContactsNewMove(void)
+{
+	ntouched = 0;
+	contacts_stamp ++;
+}
+
+/********************************************************************
+ Largest distance at which two atoms interact (well or hard core):
+ EnergyPair skips pairs of residues farther than this plus the
+ extent of their sidechains
+ ********************************************************************/
+void SetPairCutoff(struct s_potential *u, int ntypes)
+{
+	int i,j;
+	double r2max = u->g_r0hard * u->g_r0hard;
+
+	for (i=0;i<ntypes;++i)
+		for (j=0;j<ntypes;++j)
+		{
+			if ((u->r_2)[i][j] > r2max) r2max = (u->r_2)[i][j];
+			if ((u->r0_2)[i][j] > r2max) r2max = (u->r0_2)[i][j];
+		}
+	u->rcut = sqrt(r2max);
+	SetPairParameters(u,ntypes);
+}
+
+/********************************************************************
+ Copy of r0_2, r_2 and e of each pair of types in a single array, read
+ by the pair energy of atoms: to be called again whenever the matrices
+ change (optimization of the potential)
+ ********************************************************************/
+void SetPairParameters(struct s_potential *u, int ntypes)
+{
+	int i,j;
+
+	if (!u->pp || u->npptypes != ntypes)
+	{
+		free(u->pp);
+		u->pp = (struct s_pairpar *) malloc((size_t)ntypes*ntypes*sizeof(struct s_pairpar));
+		if (!u->pp) Error("Cannot allocate the parameters of the pairs");
+		u->npptypes = ntypes;
+	}
+	for (i=0;i<ntypes;++i)
+		for (j=0;j<ntypes;++j)
+		{
+			u->pp[i*ntypes+j].r02 = (u->r0_2)[i][j];
+			u->pp[i*ntypes+j].rw2 = (u->r_2)[i][j];
+			u->pp[i*ntypes+j].e = (u->e)[i][j];
+		}
+	u->pp_r2max = 0;
+	for (i=0;i<ntypes*ntypes;++i)
+	{
+		if (u->pp[i].r02 > u->pp_r2max) u->pp_r2max = u->pp[i].r02;
+		if (u->pp[i].rw2 > u->pp_r2max) u->pp_r2max = u->pp[i].rw2;
+	}
+}
+
+/********************************************************************
+ The angular factor of a hydrogen bond uses the atom hb_iam preceding
+ the donor/acceptor: if it belongs to another backbone unit, a move of
+ that unit changes the bond energy without recomputing it. Returns the
+ number of such donors/acceptors.
+ ********************************************************************/
+int CheckHBReferences(struct s_polymer *p, struct s_potential *u, int npol, int nat)
+{
+	int ic,i,is,k,g=0,nbad=0,*owner;
+
+	owner = (int *) malloc(nat*sizeof(int));
+	if (!owner) Error("Cannot allocate in CheckHBReferences");
+	for (k=0;k<nat;++k) owner[k] = -1;
+	for (ic=0;ic<npol;++ic)
+		for (i=0;i<(p+ic)->nback;++i,++g)
+		{
+			owner[(((p+ic)->back)+i)->ia] = g;
+			for (is=0;is<(((p+ic)->back)+i)->nside;++is)
+				owner[(((((p+ic)->back)+i)->side)+is)->ia] = g;
+		}
+	for (k=0;k<nat;++k)
+		if ((u->hb)[k] && (u->hb_iam[k]<0 || u->hb_iam[k]>=nat || owner[u->hb_iam[k]] != owner[k]))
+		{
+			if (nbad < 5) fprintf(stderr,"WARNING: hydrogen bond atom %d refers to atom %d, which is not in its backbone unit\n",k,u->hb_iam[k]);
+			nbad++;
+		}
+	free(owner);
+	return nbad;
+}
+
+/********************************************************************
+ Largest distance of the sidechain atoms of each residue from its
+ backbone atom (also kept up to date by AddSidechain)
+ ********************************************************************/
+void SetSidechainExtents(struct s_polymer *p, int npol, int nosidechains)
+{
+	int ci,i,is;
+	double e2,e2max;
+
+	for (ci=0;ci<npol;++ci)
+		for (i=0;i<(p+ci)->nback;++i)
+		{
+			e2max = 0;
+			if (!nosidechains)
+				for (is=0;is<(((p+ci)->back)+i)->nside;++is)
+				{
+					e2 = Dist2( (((((p+ci)->back)+i)->side)+is)->pos, (((p+ci)->back)+i)->pos );
+					if (e2 > e2max) e2max = e2;
+				}
+			(((p+ci)->back)+i)->ext = sqrt(e2max);
+		}
+}
+
+/********************************************************************
+ Pair energy of the whole system with the cell list: only residue pairs
+ in neighbouring cells, summed in the same order as the plain loops of
+ TotalEnergy (chain ci, chain cj>=ci, residue i, residue j), so that the
+ result is identical. Returns 0 (nothing done) if some residue has too
+ many candidates for the cell list to be useful.
+ ********************************************************************/
+static int TotalPairEnergyCells(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms, int npol, int update, int nosidechains, double *etot)
+{
+	struct s_cells *c = p->cells;
+	int g,n,k,ci,cj,i,j,tooclose,*start,*list,*ptr,nlist=0,size;
+
+	start = (int *) malloc((c->nres+1)*sizeof(int));
+	ptr = (int *) malloc(c->nres*sizeof(int));
+	size = 32*c->nres;
+	list = (int *) malloc(size*sizeof(int));
+	if (!start || !ptr || !list) Error("Cannot allocate in TotalPairEnergyCells");
+
+	// sorted candidates of every residue
+	for (g=0;g<c->nres;++g)
+	{
+		start[g] = nlist;
+		n = CellsCandidates(p,c->chain[g],c->res[g]);
+		if (n < 0) { free(start); free(ptr); free(list); return 0; }
+		if (nlist+n > size)
+		{
+			size = 2*(nlist+n);
+			list = (int *) realloc(list,size*sizeof(int));
+			if (!list) Error("Cannot allocate in TotalPairEnergyCells");
+		}
+		for (k=0;k<n;++k) list[nlist++] = c->cand[k];
+	}
+	start[c->nres] = nlist;
+
+	for (ci=0;ci<npol;++ci)
+	{
+		for (i=0;i<(p+ci)->nback;++i) ptr[c->offset[ci]+i] = start[c->offset[ci]+i];
+		for (cj=ci;cj<npol;++cj)
+			for (i=0;i<(p+ci)->nback;++i)
+			{
+				g = c->offset[ci]+i;
+				// candidates are sorted by global index: those of chain cj are a contiguous block
+				while (ptr[g] < start[g+1] && list[ptr[g]] < c->offset[cj]) ptr[g]++;
+				for (k=ptr[g]; k<start[g+1] && list[k] < c->offset[cj+1]; ++k)
+				{
+					j = list[k] - c->offset[cj];
+					if (ci!=cj || i<j)					// in the same polymer, do not count twice a contact
+					{
+						tooclose = 0;
+						if (ci==cj && j-i <= u->g_imin ) tooclose = 1;
+						if (parms->hb) *etot += EnergyPair(p,u,i,j,ci,cj,update,nosidechains,parms->disentangle,tooclose,parms->hb);
+						else *etot += EnergyPairCells(p,u,g,list[k],i,j,ci,cj,update,nosidechains,parms->disentangle,tooclose);
+					}
+				}
+			}
+	}
+	free(start); free(ptr); free(list);
+	return 1;
+}
+
 double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms, int npol, int update, int nosidechains, int debug, int iproc)
 {
 	int i,j,ci,cj,tooclose;
 	double etot=0,eang=0,edih=0,ehfs=0,ebox=0;
+
+	SetSidechainExtents(p,npol,nosidechains);			// coordinates may have been loaded in bulk (start, exchange, restart)
+	if (p->cells) CellsBuild(p,u->rcut,u->boxtype=='p' ? u->lbox : 0.);
+
 	if (update)
+		#ifdef _OPENMP
 		#pragma omp parallel for private(i,j)
+		#endif
 		  for (ci=0;ci<npol;++ci)
 			for (i=0;i<(p+ci)->nback;++i)
                   {
                         for (j=0;j<(((p+ci)->back)+i)->ncontacts;++j)  ((((p+ci)->back)+i)->e)[j] = 0;
                         (((p+ci)->back)+i)->ncontacts = 0;
                   }
+	if (update)								// (not in the parallel loop: the list is shared)
+		for (ci=0;ci<npol;++ci)
+			for (i=0;i<(p+ci)->nback;++i) Touch(((p+ci)->back)+i,ci,i);
 
-	if(update)
+	if (p->cells && p->cells->active && TotalPairEnergyCells(p,u,parms,npol,update,nosidechains,&etot))
+		;							// pairs from the cell list
+	else if(update)
 	{
 	for (ci=0;ci<npol;++ci)                                     // loops on polymers
             for (cj=ci;cj<npol;++cj)
@@ -65,7 +279,10 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
 	}
 	else
 	{
-	#pragma omp parallel for private(cj,i,j,tooclose) reduction(+:etot)
+	#ifdef _OPENMP
+	int recording = (p->op && p->op->record);			// recording a frame adds to the shared contacts of the frame
+	#pragma omp parallel for private(cj,i,j,tooclose) reduction(+:etot) if(!recording)
+	#endif
 	for (ci=0;ci<npol;++ci)                                     // loops on polymers
             for (cj=ci;cj<npol;++cj)
                   for (i=0;i<(p+ci)->nback;++i)             // loops on backbone atoms of each polymer
@@ -79,7 +296,7 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
 	}
 	if (debug>0 && iproc==0) fprintf(parms->flog," Epairs = %lf\n",etot);
 
-	if (!parms->noangpot || !parms->nodihpot || !parms->nohfields)
+	if (!parms->noangpot || !parms->nodihpot || !parms->nohfields || u->boxtype != 'n')
 	{
 		if(update)
 		{
@@ -105,7 +322,9 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
 		}
 		else
 		{
-		#pragma omp parallel for shared(ebox) private(i) reduction(+:eang,edih)
+		#ifdef _OPENMP
+		#pragma omp parallel for shared(ebox) private(i) reduction(+:eang,edih,ehfs)
+		#endif
 			for (ci=0;ci<npol;++ci)
 			{
 				for (i=0;i<(p+ci)->nback;++i)
@@ -145,183 +364,246 @@ double TotalEnergy(struct s_polymer *p, struct s_potential *u, struct s_mc_parms
 
 
 /********************************************************************
+ Hard core and square well of two atoms of types a1, a2 at square
+ distance r2 (a hydrogen bond multiplies the well by hbmul, -1 if none).
+ Returns 1 if the hard core is hit without disentangle (the pair
+ energy is then LARGE); with disentangle the overlap costs EOVERLAP,
+ kept in the contact of the pair so that removing it lowers the energy.
+ ********************************************************************/
+static inline int AtomPairEnergy(struct s_polymer *p, struct s_potential *u, int a1, int a2, double r2, int tooclose, int disentangle,
+		int record, double *etot, double *econt, int *incontact)
+{
+	double e,mul,rw2;
+	const struct s_pairpar *q = u->pp + a1*u->npptypes + a2;
+
+	if ( r2 < (tooclose ? u->g_r0hard * u->g_r0hard : q->r02) )
+	{
+		if (!disentangle) return 1;
+		*etot += EOVERLAP;
+		*econt += EOVERLAP;
+		*incontact = 1;
+	}
+	if (tooclose) return 0;
+	rw2 = q->rw2;
+	if ( r2 < rw2 )							// close in space but not in sequence: the element is defined (rw2>0)
+	{
+		e = q->e;
+		mul = 1.;
+		if (u->splice==1)
+			if (rw2 * u->kr2_splice < r2) mul = u->ke_splice;
+
+		#ifdef OPTIMIZEPOT
+		if (record && mul>0) OP_AddEnergy(p,a1,a2,mul);
+		#endif
+
+		e *= mul;
+		*etot += e;
+		*econt += e;
+		*incontact = 1;
+	}
+	return 0;
+}
+
+/********************************************************************
  Calculate the energy of a pair of residues,
  updating contact lists and partial energies if update==1.
  ********************************************************************/
-double EnergyPair(struct s_polymer *p, struct s_potential *u, int i, int j, int ci, int cj, int update, int nosidechains, int disentangle, int tooclose, int hb)
+static double EnergyPairAtoms(struct s_polymer *p, struct s_potential *u, int i, int j, int ci, int cj, int nosidechains, int disentangle, int tooclose, int hb, double *econt, int *incontact)
 {
-	int is,js,a1,a2,ia1,ia2,out;
-	double r2,etot=0,e,r02,cos1,cos2,mul;
-	
+	int is,js,a1,a2,ia1,ia2,out,record=0;
+	double r2,etot=0,e,r02,cos1,cos2,mul,rmax,r2bb;
+	struct vector sh = {0.,0.,0.},v2,v2m,pj,psj;			// periodic box: shift of the atoms of j to the image nearest to i
+	struct s_back *bi = ((p+ci)->back)+i, *bj = ((p+cj)->back)+j;
+	struct s_side *si,*sj;
+
 	// within same aa do not interact
-	if (ci==cj && (((p+ci)->back)+i)->iaa == (((p+cj)->back)+j)->iaa) return 0;
+	if (ci==cj && bi->iaa == bj->iaa) return 0;
+
+	// no atom of the two residues can be within the interaction range
+	if (u->boxtype=='p') sh = ImageShift( bi->pos, bj->pos, u->lbox );
+	r2bb = Dist2S( bi->pos, bj->pos, sh );
+	rmax = u->rcut + bi->ext + bj->ext;
+	if (r2bb > rmax*rmax) return 0;
+
+	#ifdef OPTIMIZEPOT
+	record = p->op->record;
+	#endif
+	// the atoms of j in the image of i (as in Dist2S: b+s-a)
+	pj.x = bj->pos.x + sh.x; pj.y = bj->pos.y + sh.y; pj.z = bj->pos.z + sh.z;
 
 	// interaction backbone-backbone (i-j)
 	if ( ci!=cj || (i!=(j+1) && i!=(j-1)) )						// if not consecutive (i.e., no covalent interaction)
-	{
-		a1 = (((p+ci)->back)+i)->itype;
-		a2 = (((p+cj)->back)+j)->itype;
-
-		r2 = Dist2( (((p+ci)->back)+i)->pos, (((p+cj)->back)+j)->pos );
-
-		if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
-		else r02 = (u->r0_2)[a1][a2];
-
-		if ( r2 < r02 )
-		{
-			if (!disentangle) return LARGE;
-			else etot += LARGE;
-		}
-		if ( r2 < (u->r_2)[a1][a2] && !tooclose)					// if they are close in space but not in sequence
-		{
-			if ((u->e)[a1][a2]<-EPSILON || 0<(u->r_2)[a1][a2])			// and their interaction element is defined
-			{
-				e = (u->e)[a1][a2];
-				mul=1.;
-				if (u->splice==1)
-					if ((u->r_2)[a1][a2] * u->kr2_splice < r2 ) mul = u->ke_splice;
-
-				#ifdef OPTIMIZEPOT
-				if (p->op->record && mul>0) OP_AddEnergy(p,a1,a2,mul);
-				#endif
-				
-				e *= mul;
-				etot += e;
-				if (update) AddContact(p,i,j,ci,cj,e);
-
-			}
-		}
-	}
+		if (AtomPairEnergy(p,u,bi->itype,bj->itype,r2bb,tooclose,disentangle,record,&etot,econt,incontact)) return LARGE;
 
   	if (nosidechains == 1) return etot;
 
-
-
-	for (js=0;js< (((p+cj)->back)+j)->nside;++js)
+	for (js=0;js<bj->nside;++js)
 	{
+		sj = bj->side+js;
+		psj.x = sj->pos.x + sh.x; psj.y = sj->pos.y + sh.y; psj.z = sj->pos.z + sh.z;
+		a2 = sj->itype;
+
 		// interaction backbone-sidechain (i-js)
-		a1 = (((p+ci)->back)+i)->itype;
-		a2 = (((((p+cj)->back)+j)->side)+js)->itype;
-		r2 = Dist2( (((p+ci)->back)+i)->pos, (((((p+cj)->back)+j)->side)+js)->pos );
+		r2 = (psj.x-bi->pos.x)*(psj.x-bi->pos.x) + (psj.y-bi->pos.y)*(psj.y-bi->pos.y) + (psj.z-bi->pos.z)*(psj.z-bi->pos.z);
+		if (AtomPairEnergy(p,u,bi->itype,a2,r2,tooclose,disentangle,record,&etot,econt,incontact)) return LARGE;
 
-		if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
-		else r02 = (u->r0_2)[a1][a2];
-
-		if ( r2 < r02 )
-		{
-			if (!disentangle) return LARGE;
-			else etot += LARGE;
-		}
-		if ( r2 < (u->r_2)[a1][a2] && !tooclose)				// if they are close in space and not in sequence
-			if ((u->e)[a1][a2]<-EPSILON || (u->r_2)[a1][a2]>0)		// and their interaction element is defined
-			{
-				e = (u->e)[a1][a2];
-				mul = 1.;
-				if (u->splice==1)
-					if ((u->r_2)[a1][a2] * u->kr2_splice < r2) mul = u->ke_splice;
-				
-				#ifdef OPTIMIZEPOT
-				if (p->op->record && 0 < mul) OP_AddEnergy(p,a1,a2,mul);
-				#endif
-				
-				e *= mul;
-				etot += e;
-				if (update) AddContact(p,i,j,ci,cj,e);
-			}
-
-		for (is=0;is< (((p+ci)->back)+i)->nside;++is)
+		for (is=0;is<bi->nside;++is)
 		{
 			// interaction sidechain-sidechain (is-js)
-			a1 = (((((p+ci)->back)+i)->side)+is)->itype;
-			a2 = (((((p+cj)->back)+j)->side)+js)->itype;
+			si = bi->side+is;
+			a1 = si->itype;
+			r2 = (psj.x-si->pos.x)*(psj.x-si->pos.x) + (psj.y-si->pos.y)*(psj.y-si->pos.y) + (psj.z-si->pos.z)*(psj.z-si->pos.z);
 
-			r2 = Dist2( (((((p+ci)->back)+i)->side)+is)->pos, (((((p+cj)->back)+j)->side)+js)->pos );
-			
+			if (!hb)
+			{
+				if (AtomPairEnergy(p,u,a1,a2,r2,tooclose,disentangle,record,&etot,econt,incontact)) return LARGE;
+				continue;
+			}
+
 			if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
 			else r02 = (u->r0_2)[a1][a2];
 
 			if ( r2 < r02 )
 			{
-				//fprintf(stderr,"side %d of %d - side %d of %d : r2<r02\n",is,i,js,j);
 				if (!disentangle) return LARGE;
-				else etot += LARGE;
+				etot += EOVERLAP;
+				*econt += EOVERLAP;
+				*incontact = 1;
 			}
-			if ( r2 < (u->r_2)[a1][a2] && !tooclose)				// if they are close in space anbd not in sequence
+			if ( r2 < (u->r_2)[a1][a2] && !tooclose)				// if they are close in space anbd not in sequence (the element is defined)
 			{
-				if ((u->e)[a1][a2]<-EPSILON || (u->r_2)[a1][a2]>0)		// and their interaction element is defined
+				e = (u->e)[a1][a2];
+				mul = 1;
+				if (u->splice==1)
+					if ((u->r_2)[a1][a2] * u->kr2_splice < r2) mul =  u->ke_splice;
+
+				// calculate hydrogen bond (if any)
+				ia1 = si->ia;
+				ia2 = sj->ia;
+				if ((u->hb)[ia1]*(u->hb)[ia2]==2)		// donor-acceptor pair
 				{
-					e = (u->e)[a1][a2];
-					mul = 1;
-					if (u->splice==1)
-						if ((u->r_2)[a1][a2] * u->kr2_splice < r2) mul =  u->ke_splice;
-
-					// calculate hydrogen bond (if any)
-					if (hb)
-					{
-						if (u->splice==1)		// if HB, interacts only the first half of splice
-							if ((u->r_2)[a1][a2] * u->kr2_splice < r2) mul = 0;
-
-						ia1 = (((((p+ci)->back)+i)->side)+is)->ia;
-						ia2 = (((((p+cj)->back)+j)->side)+js)->ia;
-						if ((u->hb)[ia1]*(u->hb)[ia2]==2)
-						{
-							cos1 = CosAngle( (*(*(((p+ci)->vback)+(u->hb_iam)[ia1]))), (*(*(((p+ci)->vback)+ia1))), 
-									(*(*(((p+cj)->vback)+ia2))), p->tables, &out );
-							if (out==0) return LARGE;
-							cos2 = CosAngle( (*(*(((p+ci)->vback)+ia1))), (*(*(((p+cj)->vback)+ia2))), 
-									(*(*(((p+cj)->vback)+(u->hb_iam)[ia2]))), p->tables , &out);
-							if (out==0) return LARGE;
-							mul = FastSqrt( DAbs(cos1*cos2),p->tables);
-						}
-					}
-
-					#ifdef OPTIMIZEPOT
-					if (p->op->record && mul>0) OP_AddEnergy(p,a1,a2,mul);
-					#endif
-					if(i==10 && j==43 && r2< 2.) fprintf(stderr,"dist = %lf\n",r2);					
-					e *= mul;
-					etot += e;
-					if (update) AddContact(p,i,j,ci,cj,e);
+				 // a hydrogen bond acts only in the first half of splice (other pairs keep ke_splice)
+				 if (u->splice==1 && (u->r_2)[a1][a2] * u->kr2_splice < r2) mul = 0;
+				 else
+				 {
+					v2 = *(*(((p+cj)->vback)+ia2));
+					v2.x += sh.x; v2.y += sh.y; v2.z += sh.z;
+					v2m = *(*(((p+cj)->vback)+(u->hb_iam)[ia2]));
+					v2m.x += sh.x; v2m.y += sh.y; v2m.z += sh.z;
+					cos1 = CosAngle( (*(*(((p+ci)->vback)+(u->hb_iam)[ia1]))), (*(*(((p+ci)->vback)+ia1))), 
+							v2, p->tables, &out );
+					if (out==0) return LARGE;
+					cos2 = CosAngle( (*(*(((p+ci)->vback)+ia1))), v2, v2m, p->tables , &out);
+					if (out==0) return LARGE;
+					mul = FastSqrt( DAbs(cos1*cos2),p->tables);
+				 }
 				}
+
+				#ifdef OPTIMIZEPOT
+				if (record && mul>0) OP_AddEnergy(p,a1,a2,mul);
+				#endif
+				e *= mul;
+				etot += e;
+				{ *econt += e; *incontact = 1; }
 			}
 		}
 	}
 
 	// interaction backbone-sidechain (is-j)
-	for (is=0;is< (((p+ci)->back)+i)->nside;++is)
+	for (is=0;is<bi->nside;++is)
 	{
-		a1 = (((p+cj)->back)+j)->itype;
-		a2 = (((((p+ci)->back)+i)->side)+is)->itype;
-		r2 = Dist2( (((p+cj)->back)+j)->pos, (((((p+ci)->back)+i)->side)+is)->pos );
-
-		if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
-		else r02 = (u->r0_2)[a1][a2];
-
-		if ( r2 < r02 )
-		{
-			if (!disentangle) return LARGE;
-			else etot += LARGE;
-		}
-		if ( r2 < (u->r_2)[a1][a2] && !tooclose)				// if they are close in space and not in sequence
-		{
-			if ((u->e)[a1][a2]<-EPSILON || 0<(u->r_2)[a1][a2])		// and their interaction element is defined
-			{
-				e = (u->e)[a1][a2];
-				mul = 1;
-				if (u->splice==1)
-					if (r2 > (u->r_2)[a1][a2] * u->kr2_splice) mul =  u->ke_splice;
-				
-				#ifdef OPTIMIZEPOT
-				if (p->op->record && 0 < mul) OP_AddEnergy(p,a1,a2,mul);
-				#endif
-				
-				e *= mul;
-				etot += e;
-				if (update) AddContact(p,i,j,ci,cj,e);
-			}
-		}
+		si = bi->side+is;
+		r2 = (pj.x-si->pos.x)*(pj.x-si->pos.x) + (pj.y-si->pos.y)*(pj.y-si->pos.y) + (pj.z-si->pos.z)*(pj.z-si->pos.z);
+		if (AtomPairEnergy(p,u,bj->itype,si->itype,r2,tooclose,disentangle,record,&etot,econt,incontact)) return LARGE;
 	}
 	return etot;
+}
+
+/********************************************************************
+ Interaction energy of residues i (chain ci) and j (chain cj); if
+ update, the pair is recorded once in their contact lists (also when
+ a hard core is found, as the move is then rejected and restored)
+ ********************************************************************/
+double EnergyPair(struct s_polymer *p, struct s_potential *u, int i, int j, int ci, int cj, int update, int nosidechains, int disentangle, int tooclose, int hb)
+{
+	double e,econt=0;
+	int incontact=0;
+
+	e = EnergyPairAtoms(p,u,i,j,ci,cj,nosidechains,disentangle,tooclose,hb,&econt,&incontact);
+	if (update && incontact) AddContact(p,i,j,ci,cj,econt);
+	return e;
+}
+
+/********************************************************************
+ As EnergyPair (without hydrogen bonds), for residues gi=(ci,i) and
+ gj=(cj,j) of the cell list, reading their atoms from its compact copy
+ (CellsSphere): the same pairs of atoms with the same arithmetic, in
+ the same order. The distances of an atom of j from all the atoms of i
+ are computed together (vectorized), and the pairs farther than any
+ interaction (pp_r2max) skip the lookup of their parameters
+ ********************************************************************/
+double EnergyPairCells(struct s_polymer *p, struct s_potential *u, int gi, int gj, int i, int j, int ci, int cj, int update, int nosidechains, int disentangle, int tooclose)
+{
+	struct s_cells *c = p->cells;
+	const double *ax = c->ax, *ay = c->ay, *az = c->az;
+	const int *at = c->at;
+	int a0 = c->aoff[gi], na = c->aoff[gi+1]-a0, b0 = c->aoff[gj], b1 = c->aoff[gj+1];
+	int k,ja,record=0,incontact=0;
+	double r2bb,rmax,thr,etot=0,econt=0,xi=ax[a0],yi=ay[a0],zi=az[a0],pjx,pjy,pjz,px,py,pz;
+	double row[NSIDEMAX+1],rowb[NSIDEMAX+1];
+	struct vector sh = {0.,0.,0.};
+
+	// within same aa do not interact
+	if (ci==cj && c->iaa[gi] == c->iaa[gj]) return 0;
+
+	// no atom of the two residues can be within the interaction range
+	if (u->boxtype=='p')
+	{
+		struct vector va = {xi,yi,zi}, vb = {ax[b0],ay[b0],az[b0]};
+		sh = ImageShift(va,vb,u->lbox);
+	}
+	r2bb = (ax[b0]+sh.x-xi)*(ax[b0]+sh.x-xi) + (ay[b0]+sh.y-yi)*(ay[b0]+sh.y-yi) + (az[b0]+sh.z-zi)*(az[b0]+sh.z-zi);
+	rmax = u->rcut + c->ext[gi] + c->ext[gj];
+	if (r2bb > rmax*rmax) return 0;
+
+	#ifdef OPTIMIZEPOT
+	record = p->op->record;
+	#endif
+	thr = tooclose ? u->g_r0hard*u->g_r0hard : u->pp_r2max;	// AtomPairEnergy does nothing for pairs of atoms this far
+	pjx = ax[b0] + sh.x; pjy = ay[b0] + sh.y; pjz = az[b0] + sh.z;
+
+	// backbone-backbone, if not consecutive (covalent)
+	if ( ci!=cj || (i!=(j+1) && i!=(j-1)) )
+		if (r2bb < thr && AtomPairEnergy(p,u,at[a0],at[b0],r2bb,tooclose,disentangle,record,&etot,&econt,&incontact)) goto large;
+
+	if (nosidechains == 1) goto done;
+
+	// distances of the backbone atom of j from the sidechain of i (evaluated at the end)
+	for (k=1;k<na;++k)
+		rowb[k] = (pjx-ax[a0+k])*(pjx-ax[a0+k]) + (pjy-ay[a0+k])*(pjy-ay[a0+k]) + (pjz-az[a0+k])*(pjz-az[a0+k]);
+
+	for (ja=b0+1;ja<b1;++ja)
+	{
+		// distances of sidechain atom ja of j from the atoms of i (backbone first), then their energies in this order
+		px = ax[ja] + sh.x; py = ay[ja] + sh.y; pz = az[ja] + sh.z;
+		for (k=0;k<na;++k)
+			row[k] = (px-ax[a0+k])*(px-ax[a0+k]) + (py-ay[a0+k])*(py-ay[a0+k]) + (pz-az[a0+k])*(pz-az[a0+k]);
+		if (row[0] < thr && AtomPairEnergy(p,u,at[a0],at[ja],row[0],tooclose,disentangle,record,&etot,&econt,&incontact)) goto large;
+		for (k=1;k<na;++k)
+			if (row[k] < thr && AtomPairEnergy(p,u,at[a0+k],at[ja],row[k],tooclose,disentangle,record,&etot,&econt,&incontact)) goto large;
+	}
+
+	// sidechain of i - backbone of j
+	for (k=1;k<na;++k)
+		if (rowb[k] < thr && AtomPairEnergy(p,u,at[b0],at[a0+k],rowb[k],tooclose,disentangle,record,&etot,&econt,&incontact)) goto large;
+
+	done:
+	if (update && incontact) AddContact(p,i,j,ci,cj,econt);
+	return etot;
+
+	large:
+	etot = LARGE;
+	goto done;
 }
 
 /********************************************************************
@@ -396,10 +678,54 @@ double EnergyMonomer(struct s_polymer *p, struct s_potential *u, int i, int ci, 
 }
 
 /********************************************************************
+ Residues g0..g1-1 of the compact copy whose sphere (CellsSphere) is
+ within reach of the sphere of centre (xi,yi,zi) and radius plus range ri
+ (the others cannot interact): appended to c->cand from position nhit
+ (branchless, in their order). Returns the new number of candidates.
+ ********************************************************************/
+static inline int CandidatesRange(struct s_cells *c, int g0, int g1, double xi, double yi, double zi, double ri, struct s_potential *u, int nhit)
+{
+	double dx,dy,dz,rmax;
+	int g;
+
+	if (u->boxtype=='p')
+	{
+		double box=u->lbox,invbox=1./box;			// (the image only decides which far pairs are skipped)
+		for (g=g0;g<g1;++g)
+		{
+			dx = c->sx[g]-xi; dy = c->sy[g]-yi; dz = c->sz[g]-zi;
+			dx -= box*round(dx*invbox); dy -= box*round(dy*invbox); dz -= box*round(dz*invbox);
+			rmax = ri + c->srad[g];
+			c->cand[nhit] = g;
+			nhit += ( dx*dx + dy*dy + dz*dz <= rmax*rmax );
+		}
+	}
+	else
+		for (g=g0;g<g1;++g)
+		{
+			dx = c->sx[g]-xi; dy = c->sy[g]-yi; dz = c->sz[g]-zi;
+			rmax = ri + c->srad[g];
+			c->cand[nhit] = g;
+			nhit += ( dx*dx + dy*dy + dz*dz <= rmax*rmax );
+		}
+	return nhit;
+}
+
+/********************************************************************
  Calculate the energy of energies of monomers in a range, updating
  contacts and partial energies
  ********************************************************************/
 double EnergyMonomerRange(struct s_polymer *p, struct s_potential *u, int from, int to, int ip, int npol, int shell, int update, int nosidechains, int disentangle, int hb)
+{
+	return EnergyMonomerRangeRigid(p,u,from,to,ip,npol,shell,update,nosidechains,disentangle,hb,NULL);
+}
+
+/********************************************************************
+ The same, when the residues of chain ip (within [from,to]) with
+ rig[i]=1 moved rigidly together: their pairs keep energy and contacts
+ (rig=NULL computes all the pairs)
+ ********************************************************************/
+double EnergyMonomerRangeRigid(struct s_polymer *p, struct s_potential *u, int from, int to, int ip, int npol, int shell, int update, int nosidechains, int disentangle, int hb, const char *rig)
 {
 	int i,j,cj,k,tooclose;
 	double etot=0,e;
@@ -414,7 +740,8 @@ double EnergyMonomerRange(struct s_polymer *p, struct s_potential *u, int from, 
 		//#pragma omp parallel for 
 		for (i=from;i<=to;++i)
 		{
-			ResetContactsMonomer(p,i,ip);
+			if (rig && rig[i]) ResetContactsMonomerOutside(p,i,ip,rig);
+			else ResetContactsMonomer(p,i,ip);
 		}
 
 	// box energy
@@ -422,16 +749,115 @@ double EnergyMonomerRange(struct s_polymer *p, struct s_potential *u, int from, 
         	for (i=from;i<=to;++i)
 			if (EnergyBox(p,u,i,ip) == 1) return LARGE;
 
-	// if not shell
-	if (shell == 0)
+	if (shell == 0 && p->cells)
 	{
+		CellsUpdateRange(p,ip,from,to);
+		if (p->cells->dirty) CellsBuild(p,u->rcut,u->boxtype=='p' ? u->lbox : 0.);
+	}
+
+	// if not shell, with cell list
+	if (shell == 0 && p->cells && p->cells->active)
+	{
+		struct s_cells *c = p->cells;
+		double rmax,dx,dy,dz,invbox = c->box > 0 ? 1./c->box : 0.;	// (the image only decides which far pairs are skipped)
+		int ncand,k,g,gi;
+
 		for (i=from;i<=to;++i)
 		{
+			gi = c->offset[ip]+i;
+			ncand = CellsCandidates(p,ip,i);
+			if (ncand<0)						// too many: all residues, in the same order
+			{
+				ncand = c->nres;
+				for (k=0;k<ncand;++k) c->cand[k] = k;
+			}
+			for (k=0;k<ncand;++k)
+			{
+				g = c->cand[k];
+				cj = c->chain[g];
+				j = c->res[g];
+				rmax = u->rcut + c->srad[gi] + c->srad[g];				// spheres of the residues (see CellsSphere)
+				dx = c->sx[g]-c->sx[gi]; dy = c->sy[g]-c->sy[gi]; dz = c->sz[g]-c->sz[gi];
+				if (c->box > 0) { dx -= c->box*round(dx*invbox); dy -= c->box*round(dy*invbox); dz -= c->box*round(dz*invbox); }
+				if ( dx*dx + dy*dy + dz*dz > rmax*rmax ) continue;
+
+				if ( ( ip!=cj || j<from || j>to || i<j ) && !( rig && ip==cj && rig[i] && rig[j] ) )	// j in [from,to] of the same chain: i<j to count once; skip rigid pairs
+				{
+					tooclose = 0;
+					if (ip == cj && Abs(i-j) <= u->g_imin) tooclose = 1;
+					if (hb) e = EnergyPair(p,u,i,j,ip,cj,update,nosidechains,disentangle,tooclose,hb);
+					else e = EnergyPairCells(p,u,gi,g,i,j,ip,cj,update,nosidechains,disentangle,tooclose);
+					if (e>=LARGE && !disentangle) return LARGE;
+					etot += e;
+				}
+			}
+		}
+	}
+
+	// if not shell, all residues from the compact copy of the positions
+	else if (shell == 0 && p->cells)
+	{
+		struct s_cells *c = p->cells;
+		double xi,yi,zi,ri;
+		int nhit,k,g,gi,r0=to+1,r1=from-1;
+
+		if (rig)							// first and last rigid residue
+			for (i=from;i<=to;++i)
+				if (rig[i]) { if (i<r0) r0 = i; r1 = i; }
+
+		for (i=from;i<=to;++i)
+		{
+			gi = c->offset[ip]+i;
+			xi = c->sx[gi]; yi = c->sy[gi]; zi = c->sz[gi]; ri = u->rcut + c->srad[gi];
+
+			// spheres of the residues (tighter than the test at the beginning of EnergyPair); branchless, the hits keep their order
+			// (a rigid residue skips the rigid ones, whose pairs are kept)
+			if (rig && rig[i])
+			{
+				nhit = CandidatesRange(c,0,c->offset[ip]+r0,xi,yi,zi,ri,u,0);
+				for (g=c->offset[ip]+r0;g<=c->offset[ip]+r1;++g)
+					if (!rig[g-c->offset[ip]]) nhit = CandidatesRange(c,g,g+1,xi,yi,zi,ri,u,nhit);
+				nhit = CandidatesRange(c,c->offset[ip]+r1+1,c->nres,xi,yi,zi,ri,u,nhit);
+			}
+			else nhit = CandidatesRange(c,0,c->nres,xi,yi,zi,ri,u,0);
+
+			for (k=0;k<nhit;++k)
+			{
+				cj = c->chain[c->cand[k]];
+				j = c->res[c->cand[k]];
+				if ( ( ip!=cj || j<from || j>to || i<j ) && !( rig && ip==cj && rig[i] && rig[j] ) )	// j in [from,to] of the same chain: i<j to count once; skip rigid pairs
+				{
+					tooclose = 0;
+					if (ip == cj && Abs(i-j) <= u->g_imin) tooclose = 1;
+					if (hb) e = EnergyPair(p,u,i,j,ip,cj,update,nosidechains,disentangle,tooclose,hb);
+					else e = EnergyPairCells(p,u,gi,c->cand[k],i,j,ip,cj,update,nosidechains,disentangle,tooclose);
+					if (e>=LARGE && !disentangle) return LARGE;
+					etot += e;
+				}
+			}
+		}
+	}
+
+	// if not shell
+	else if (shell == 0)
+	{
+		struct s_back *bi,*bj;
+		double rmax;
+
+		for (i=from;i<=to;++i)
+		{
+			bi = ((p+ip)->back)+i;
 			for (cj=0;cj<npol;++cj)
 			{
 				for (j=0;j<(p+cj)->nback;++j)
 				{
-					if ( ip!=cj || j<from || j>to || i<j )				// if j in [from,to] of the same chain, require i<j to count only once
+					// same test as at the beginning of EnergyPair, to skip the call for far pairs
+					bj = ((p+cj)->back)+j;
+					rmax = u->rcut + bi->ext + bj->ext;
+					if ( (bi->pos.x-bj->pos.x)*(bi->pos.x-bj->pos.x) + (bi->pos.y-bj->pos.y)*(bi->pos.y-bj->pos.y)
+						+ (bi->pos.z-bj->pos.z)*(bi->pos.z-bj->pos.z) > rmax*rmax ) continue;
+
+					if ( ( ip!=cj || j<from || j>to || i<j ) && !( rig && ip==cj && rig[i] && rig[j] ) )	// j in [from,to] of the same chain: i<j to count once; skip rigid pairs
 					{
 						//fprintf(stderr,"energypair atomi %d di %d / %d di %d \n",i,ip,j,cj);
 						tooclose = 0;
@@ -476,47 +902,80 @@ double EnergyMonomerRange(struct s_polymer *p, struct s_potential *u, int from, 
  ********************************************************************/
 void AddContact(struct s_polymer *p, int i, int j, int ci, int cj, double e)
 {
+	struct s_back *bi = ((p+ci)->back)+i;
+	struct s_back *bj = ((p+cj)->back)+j;
 
-	int k,w;
-	
-	// check if j is already among the contacts of i
-	w=-1;
-	for (k=0;k<(((p+ci)->back)+i)->ncontacts;++k)
-		if ( ((((p+ci)->back)+i)->contacts)[k] == j && ((((p+ci)->back)+i)->contacts_p)[k] == cj) w=k;  // w is the element of the contact list
-																			// corresponding to j
-	if (w==-1) // if not present, add it
-	{
-		((((p+ci)->back)+i)->contacts)[ (((p+ci)->back)+i)->ncontacts ] = j;			// add contact
-		((((p+ci)->back)+i)->contacts_p)[ (((p+ci)->back)+i)->ncontacts ] = cj;			// add contact
-		((((p+ci)->back)+i)->e)[ (((p+ci)->back)+i)->ncontacts ] = e;					// add energy
-		(((p+ci)->back)+i)->ncontacts ++;
-		if ( (((p+ci)->back)+i)->ncontacts >= NCONTMAX) Error("NCONTMAX too small");
-	}
-	else	// if already a contact, add the associated energy
-	{
-		((((p+ci)->back)+i)->e)[w] += e;
-	}
+	Touch(bi,ci,i);
+	Touch(bj,cj,j);
 
-	//fprintf(stderr,"added contact atom %d chain %d with atom %d chain %d\n",i,ci,j,cj);
-	// check if i is already among the contacts of j
-	w=-1;
-	for (k=0;k<(((p+cj)->back)+j)->ncontacts;++k)
-		if ( ((((p+cj)->back)+j)->contacts)[k] == i && ((((p+cj)->back)+j)->contacts_p)[k] == ci) w=k; // w is the element of the contact list
-																		// corresponding to i
+	// each residue pair is evaluated once after the contacts of the moved residues
+	// have been reset (ResetContactsMonomer, TotalEnergy), so it is not in the lists yet
+	#ifdef DEBUG
+	int k;
+	for (k=0;k<bi->ncontacts;++k)
+		if (bi->contacts[k]==j && bi->contacts_p[k]==cj) Error("AddContact: contact already present");
+	#endif
 
-	if (w==-1) // if not present, add it
+	if (bi->ncontacts+1 >= NCONTMAX || bj->ncontacts+1 >= NCONTMAX) Error("NCONTMAX too small");
+
+	bi->contacts[bi->ncontacts] = j;
+	bi->contacts_p[bi->ncontacts] = cj;
+	bi->contacts_r[bi->ncontacts] = bj->ncontacts;		// each entry knows where its partner is
+	bi->e[bi->ncontacts] = e;
+
+	bj->contacts[bj->ncontacts] = i;
+	bj->contacts_p[bj->ncontacts] = ci;
+	bj->contacts_r[bj->ncontacts] = bi->ncontacts;
+	bj->e[bj->ncontacts] = e;
+
+	bi->ncontacts ++;
+	bj->ncontacts ++;
+}
+
+/********************************************************************
+ Number of contact entries whose reverse index (contacts_r) does not
+ point back to them (for echeck)
+ ********************************************************************/
+int ContactsReverseErrors(struct s_polymer *p, int npol)
+{
+	int ci,i,k,nerr=0;
+	struct s_back *b,*m;
+
+	for (ci=0;ci<npol;++ci)
+		for (i=0;i<(p+ci)->nback;++i)
+		{
+			b = ((p+ci)->back)+i;
+			for (k=0;k<b->ncontacts;++k)
+			{
+				m = ((p+b->contacts_p[k])->back)+b->contacts[k];
+				if (b->contacts_r[k] < 0 || b->contacts_r[k] >= m->ncontacts || m->contacts[b->contacts_r[k]] != i ||
+				    m->contacts_p[b->contacts_r[k]] != ci || m->contacts_r[b->contacts_r[k]] != k) nerr++;
+			}
+		}
+	return nerr;
+}
+
+/********************************************************************
+ Remove entry l of the contact list of b (residue i of chain c),
+ moving the last one in its place (and telling its partner)
+ ********************************************************************/
+static inline void RemoveContactEntry(struct s_polymer *p, struct s_back *b, int c, int i, int l)
+{
+	int last = b->ncontacts-1;
+	struct s_back *m;
+
+	if (l != last)
 	{
-		((((p+cj)->back)+j)->contacts)[ (((p+cj)->back)+j)->ncontacts ] = i;			// add contact
-		((((p+cj)->back)+j)->contacts_p)[ (((p+cj)->back)+j)->ncontacts ] = ci;			// add contact
-		((((p+cj)->back)+j)->e)[ (((p+cj)->back)+j)->ncontacts ] = e;					// add energy
-		(((p+cj)->back)+j)->ncontacts ++;
-		if ( (((p+cj)->back)+j)->ncontacts >= NCONTMAX) Error("NCONTMAX too small");
+		b->contacts[l] = b->contacts[last];
+		b->contacts_p[l] = b->contacts_p[last];
+		b->contacts_r[l] = b->contacts_r[last];
+		b->e[l] = b->e[last];
+		m = ((p+b->contacts_p[l])->back)+b->contacts[l];
+		m->contacts_r[b->contacts_r[l]] = l;
+		Touch(m,b->contacts_p[l],b->contacts[l]);
 	}
-	else	// if already a contact, add the associated energy
-	{
-		((((p+cj)->back)+j)->e)[w] += e;
-	}
-	//fprintf(stderr,"added contact atom %d chain %d with atom %d chain %d\n\n\n",i,ci,j,cj);
+	b->ncontacts --;
+	Touch(b,c,i);
 }
 
 /********************************************************************
@@ -532,12 +991,10 @@ void AddShell(struct s_polymer *p, int i, int j, int ci, int cj)
 		if ( ((((p+ci)->back)+i)->shell)[k] == j && ((((p+ci)->back)+i)->shell_p)[k] == cj) ok=0;
 	if (ok==1) // if not, add it
 	{
+		if ( (((p+ci)->back)+i)->nshell >= NSHELLMAX) Error("NSHELLMAX too small");
 		((((p+ci)->back)+i)->shell)[ (((p+ci)->back)+i)->nshell ] = j;
 		((((p+ci)->back)+i)->shell_p)[ (((p+ci)->back)+i)->nshell ] = cj;
 		(((p+ci)->back)+i)->nshell ++;
-		#ifdef DEBUG
-			if ( (((p+ci)->back)+i)->ncontacts >= NSHELLMAX) Error("NSHELLMAX too small");
-		#endif
 	}
 
 	// check if i is already among the shell of j
@@ -546,12 +1003,10 @@ void AddShell(struct s_polymer *p, int i, int j, int ci, int cj)
 		if ( ((((p+cj)->back)+j)->shell)[k] == i && ((((p+cj)->back)+j)->shell_p)[k] == ci) ok=0;
 	if (ok==1) // if not, add it
 	{
+		if ( (((p+cj)->back)+j)->nshell >= NSHELLMAX) Error("NSHELLMAX too small");
 		((((p+cj)->back)+j)->shell)[ (((p+cj)->back)+j)->nshell ] = i;
 		((((p+cj)->back)+j)->shell_p)[ (((p+cj)->back)+j)->nshell ] = ci;
 		(((p+cj)->back)+j)->nshell ++;
-		#ifdef DEBUG
-			if ( (((p+cj)->back)+j)->ncontacts >= NSHELLMAX) Error("NSHELLMAX too small");
-		#endif
 	}
 }
 
@@ -561,34 +1016,186 @@ void AddShell(struct s_polymer *p, int i, int j, int ci, int cj)
  ********************************************************************/
 void ResetContactsMonomer(struct s_polymer *p, int i, int ci)
 {
-	int k,neigh,l,cn;
+	int k,neigh,cn;
+	struct s_back *bi = ((p+ci)->back)+i;
 
-	// remove i from its neighbours
-	//#pragma omp parallel for private(neigh,cn,l)
-	for (k=0;k<(((p+ci)->back)+i)->ncontacts;++k)
+	// remove i from its neighbours (the entry of i in the list of the k-th is contacts_r[k])
+	for (k=0;k<bi->ncontacts;++k)
 	{
-		neigh = ((((p+ci)->back)+i)->contacts)[k];					// neigh is the k-th contact of i
-		cn = ((((p+ci)->back)+i)->contacts_p)[k];					// ... its chain
-		for (l=0;l<(((p+cn)->back)+neigh)->ncontacts;++l)
-			if ( ((((p+cn)->back)+neigh)->contacts)[l] == i && ((((p+cn)->back)+neigh)->contacts_p)[l] ==ci )		// l is the position of i in the list of neigh
-			{								// overwrite l-th with the last (i.e., delete both contact and energy)
-				((((p+cn)->back)+neigh)->contacts)[l] = ((((p+cn)->back)+neigh)->contacts)[ (((p+cn)->back)+neigh)->ncontacts - 1 ];
-//FRANBOB
-				((((p+cn)->back)+neigh)->contacts_p)[l] = ((((p+cn)->back)+neigh)->contacts_p)[ (((p+cn)->back)+neigh)->ncontacts - 1 ];
-				((((p+cn)->back)+neigh)->e)[l] = ((((p+cn)->back)+neigh)->e)[ (((p+cn)->back)+neigh)->ncontacts - 1 ];
-				//fprintf(stderr,"ncontacts = %d\n",(((p+cn)->back)+neigh)->ncontacts);
-
-
-				(((p+cn)->back)+neigh)->ncontacts --;
-                                //fprintf(stderr,"ncontacts = %d\n",(((p+cn)->back)+neigh)->ncontacts);
-
-				l--;
-			}
-		//reset its energy
-		(((p+ci)->back)+i)->e[k] = 0;
+		neigh = bi->contacts[k];
+		cn = bi->contacts_p[k];
+		RemoveContactEntry(p,((p+cn)->back)+neigh,cn,neigh,bi->contacts_r[k]);
+		bi->e[k] = 0;								// reset its energy
 	}
 	// reset the neighbour list of i
+	if ((((p+ci)->back)+i)->ncontacts) Touch(((p+ci)->back)+i,ci,i);
 	(((p+ci)->back)+i)->ncontacts = 0;
+}
+
+/********************************************************************
+ As ResetContactsMonomer, but keeping the contacts of i with the
+ residues of its own chain with rig[j]=1
+ ********************************************************************/
+void ResetContactsMonomerOutside(struct s_polymer *p, int i, int ci, const char *rig)
+{
+	struct s_back *bi = ((p+ci)->back)+i, *bn;
+	int k,neigh,cn,nk=0;
+
+	for (k=0;k<bi->ncontacts;++k)
+	{
+		neigh = bi->contacts[k];
+		cn = bi->contacts_p[k];
+		bn = ((p+cn)->back)+neigh;
+		if (cn==ci && rig[neigh])						// kept, in the same order
+		{
+			if (nk != k)
+			{
+				bi->contacts[nk] = neigh;
+				bi->contacts_p[nk] = cn;
+				bi->contacts_r[nk] = bi->contacts_r[k];
+				bi->e[nk] = bi->e[k];
+				bn->contacts_r[bi->contacts_r[k]] = nk;			// i moved in its own list
+				Touch(bn,cn,neigh);
+			}
+			nk++;
+			continue;
+		}
+		RemoveContactEntry(p,bn,cn,neigh,bi->contacts_r[k]);		// remove i from the list of neigh
+	}
+	for (k=nk;k<bi->ncontacts;++k) bi->e[k] = 0;
+	if (nk < bi->ncontacts) Touch(bi,ci,i);
+	bi->ncontacts = nk;
+}
+
+/********************************************************************
+ The residues whose backbone or sidechain atoms the rotamers of the
+ sidechain of each residue are built from (AddSidechain): a move that
+ changes the position of one of them must rebuild that sidechain too
+ (see SideRange). Usually the residue itself and its neighbours; the
+ last oxygen of a chain refers to the N two residues before.
+ ********************************************************************/
+void SetSidechainDependencies(struct s_polymer *p, struct s_mc_parms *parms, int nat)
+{
+	int ic,i,is,ir,k,ref[3],*owner,nwarn=0;
+	struct s_back *b;
+	struct s_rotamers *r;
+
+	owner = (int *) malloc(nat*sizeof(int));
+	parms->sidelo = (int **) malloc(parms->npol*sizeof(int *));
+	parms->sidehi = (int **) malloc(parms->npol*sizeof(int *));
+	if (!owner || !parms->sidelo || !parms->sidehi) Error("Cannot allocate in SetSidechainDependencies");
+	parms->sidereach = 0;
+	for (ic=0;ic<parms->npol;++ic)
+	{
+		parms->sidelo[ic] = (int *) malloc((p+ic)->nback*sizeof(int));
+		parms->sidehi[ic] = (int *) malloc((p+ic)->nback*sizeof(int));
+		if (!parms->sidelo[ic] || !parms->sidehi[ic]) Error("Cannot allocate in SetSidechainDependencies");
+		for (k=0;k<nat;++k) owner[k] = -1;
+		for (i=0;i<(p+ic)->nback;++i)
+		{
+			b = ((p+ic)->back)+i;
+			if (b->ia>=0 && b->ia<nat) owner[b->ia] = i;
+			for (is=0;is<b->nside;++is)
+				if (b->side[is].ia>=0 && b->side[is].ia<nat) owner[b->side[is].ia] = i;
+		}
+		for (i=0;i<(p+ic)->nback;++i)
+		{
+			b = ((p+ic)->back)+i;
+			parms->sidelo[ic][i] = parms->sidehi[ic][i] = i;
+			for (is=0;is<b->nside;++is)
+				for (ir=0;ir<b->nrot;++ir)
+				{
+					r = b->side[is].rot+ir;
+					ref[0] = r->b1; ref[1] = r->b2; ref[2] = r->b3;
+					for (k=0;k<3;++k)
+					{
+						if (ref[k]<0 || ref[k]>=nat || owner[ref[k]]<0)
+							Error("A rotamer refers to an atom which is not in its chain");
+						if (owner[ref[k]] != i && (((p+ic)->back)+owner[ref[k]])->ia != ref[k] && !nwarn++)
+							fprintf(stderr,"WARNING: a rotamer of residue %d refers to a sidechain atom of residue %d: a change of rotamer\n"
+								"         of the latter does not rebuild it\n",i,owner[ref[k]]);
+						if (owner[ref[k]] < parms->sidelo[ic][i]) parms->sidelo[ic][i] = owner[ref[k]];
+						if (owner[ref[k]] > parms->sidehi[ic][i]) parms->sidehi[ic][i] = owner[ref[k]];
+					}
+				}
+			if (i-parms->sidelo[ic][i] > parms->sidereach) parms->sidereach = i-parms->sidelo[ic][i];
+			if (parms->sidehi[ic][i]-i > parms->sidereach) parms->sidereach = parms->sidehi[ic][i]-i;
+		}
+	}
+	free(owner);
+}
+
+/********************************************************************
+ Extend the range [a,b] of residues of chain ip (of nback residues) that
+ a move rebuilds and recomputes, to all the residues whose sidechain is
+ built from residues in [m0,m1], those whose backbone the move changed
+ ********************************************************************/
+void SideRange(struct s_mc_parms *parms, int ip, int nback, int m0, int m1, int *a, int *b)
+{
+	int k,k0=m0-parms->sidereach,k1=m1+parms->sidereach;
+
+	if (k0<0) k0 = 0;
+	if (k1>nback-1) k1 = nback-1;
+	for (k=k0;k<=k1;++k)
+		if (parms->sidelo[ip][k] <= m1 && parms->sidehi[ip][k] >= m0)
+		{
+			if (k < *a) *a = k;
+			if (k > *b) *b = k;
+		}
+}
+
+/********************************************************************
+ How far (in backbone units) the positions that the energy of a unit
+ depends on can be from it: the reference atoms of the rotamers of its
+ sidechain and, with hydrogen bonds, the atoms preceding its donors and
+ acceptors. A pivot move rotates rigidly the units farther than this
+ from the end of the rotated part, if their sidechains were consistent
+ with their rotamers (see RigidFlags in mc.c). -1 if some reference is
+ not found (pivot moves then compute all the pairs).
+ ********************************************************************/
+int RigidMargin(struct s_polymer *p, struct s_potential *u, int npol, int nat, int hb, int nosidechains)
+{
+	int ic,i,is,ir,k,d=0,ref[4],nref,*owner;
+	struct s_back *b;
+	struct s_rotamers *r;
+
+	owner = (int *) malloc(nat*sizeof(int));
+	if (!owner) Error("Cannot allocate in RigidMargin");
+	for (ic=0;ic<npol;++ic)
+	{
+		for (k=0;k<nat;++k) owner[k] = -1;
+		for (i=0;i<(p+ic)->nback;++i)
+		{
+			b = ((p+ic)->back)+i;
+			if (b->ia>=0 && b->ia<nat) owner[b->ia] = i;
+			for (is=0;is<b->nside;++is)
+				if (b->side[is].ia>=0 && b->side[is].ia<nat) owner[b->side[is].ia] = i;
+		}
+		for (i=0;i<(p+ic)->nback;++i)
+		{
+			b = ((p+ic)->back)+i;
+			for (is=0;is<b->nside && !nosidechains;++is)
+				for (ir=0;ir<b->nrot;++ir)
+				{
+					r = b->side[is].rot+ir;
+					ref[0] = r->b1; ref[1] = r->b2; ref[2] = r->b3; nref = 3;
+					if (hb && b->side[is].ia>=0 && b->side[is].ia<nat && u->hb[b->side[is].ia]) ref[nref++] = u->hb_iam[b->side[is].ia];
+					for (k=0;k<nref;++k)
+					{
+						if (ref[k]<0 || ref[k]>=nat || owner[ref[k]]<0) { free(owner); return -1; }
+						if (Abs(owner[ref[k]]-i) > d) d = Abs(owner[ref[k]]-i);
+					}
+				}
+			if (hb && b->ia>=0 && b->ia<nat && u->hb[b->ia])
+			{
+				k = u->hb_iam[b->ia];
+				if (k<0 || k>=nat || owner[k]<0) { free(owner); return -1; }
+				if (Abs(owner[k]-i) > d) d = Abs(owner[k]-i);
+			}
+		}
+	}
+	free(owner);
+	return d;
 }
 
 /********************************************************************
@@ -613,6 +1220,14 @@ double GetEnergyMonomer(struct s_polymer *p, int ip, int iw)
  ********************************************************************/
 double GetEnergyMonomerRange(struct s_polymer *p, int from, int to, int ip)
 {
+	return GetEnergyMonomerRangeRigid(p,from,to,ip,NULL);
+}
+
+/********************************************************************
+ The same without the pairs of residues of chain ip with rig[i]=1
+ ********************************************************************/
+double GetEnergyMonomerRangeRigid(struct s_polymer *p, int from, int to, int ip, const char *rig)
+{
 	double e=0;
 	int i,iw,j,cj;
 	
@@ -624,7 +1239,8 @@ double GetEnergyMonomerRange(struct s_polymer *p, int from, int to, int ip)
 			{
 				j = ((((p+ip)->back)+iw)->contacts)[i];
 				cj = ((((p+ip)->back)+iw)->contacts_p)[i];
-				if (ip!=cj || j<from || j>to || iw<j)				// count only once contacts in [from,to] of the same chain
+				if ( (ip!=cj || j<from || j>to || iw<j)				// count only once contacts in [from,to] of the same chain
+					&& !(rig && ip==cj && rig[iw] && rig[j]) )
 					e += ((((p+ip)->back)+iw)->e)[i];
 			}
 		}
@@ -636,16 +1252,29 @@ double GetEnergyMonomerRange(struct s_polymer *p, int from, int to, int ip)
  Read the H Fields interaction energy
  from its energy structure
  ********************************************************************/
-double GetHFields(struct s_polymer *p, int ip)
+double GetHFields(struct s_polymer *p, int npol)
 {
 	double e=0.;
-	int iw;
-	
-	for (iw=0;iw<(p+ip)->nback;++iw)
-	{
-	e += (((p+ip)->back)+iw)->e_hfs;
-	
-	}
+	int ic,iw;
+
+	// a move changes the number of contacts also of residues of other chains
+	for (ic=0;ic<npol;++ic)
+		for (iw=0;iw<(p+ic)->nback;++iw)
+			e += (((p+ic)->back)+iw)->e_hfs;
+	return e;
+}
+
+/********************************************************************
+ Calculate (and store) the H fields energy of all the chains
+ ********************************************************************/
+double EnergyHFieldsAll(struct s_polymer *p, struct s_potential *u, struct s_mc_parms *parms)
+{
+	double e=0.;
+	int ic,iw;
+
+	for (ic=0;ic<parms->npol;++ic)
+		for (iw=0;iw<(p+ic)->nback;++iw)
+			e += EnergyHFields(p,u,parms,iw,ic,1);
 	return e;
 }
 
@@ -706,7 +1335,9 @@ void CountContacts(FILE *fp,struct s_polymer *polymer,struct s_mc_parms *parms,u
 
 void SetTrueShellFlags(struct s_polymer *p,struct s_mc_parms *parms){
  int ip,i;
+ #ifdef _OPENMP
  #pragma omp parallel for
+ #endif
  for(ip=0;ip<parms->npol;++ip)
    for(i=0;i<(p+ip)->nback;++i)
       (((p+ip)->back)+i)->shellflag=true;
@@ -715,7 +1346,9 @@ void SetTrueShellFlags(struct s_polymer *p,struct s_mc_parms *parms){
 
 void SetFalseShellFlags(struct s_polymer *p,struct s_mc_parms *parms){
  int ip,i;
+ #ifdef _OPENMP
  #pragma omp parallel for
+ #endif
  for(ip=0;ip<parms->npol;++ip)
    for(i=0;i<(p+ip)->nback;++i)
       (((p+ip)->back)+i)->shellflag=false;
@@ -726,7 +1359,9 @@ void SetFalseShellFlags(struct s_polymer *p,struct s_mc_parms *parms){
 void UpdateShellFlags(struct s_polymer *p,int ip,int ifrom,int ito){
 
   int i;
+  #ifdef _OPENMP
   #pragma omp parallel for
+  #endif
   for(i=ifrom;i<ito;i++)
 	(((p+ip)->back)+i)->shellflag=true;
 
@@ -845,7 +1480,9 @@ void UpdateShell(struct s_polymer *p, struct s_mc_parms *parms)
 
 
 	//  double loop
+	#ifdef _OPENMP
 	#pragma omp parallel for private(cj,i,j,r2,js,is)
+	#endif
 	for (ci=0;ci<parms->npol;++ci)
 	{
 		for (cj=ci;cj<parms->npol;++cj)
@@ -1134,6 +1771,7 @@ int CheckOverlaps(struct s_polymer *p, struct s_potential *u, struct s_mc_parms 
 	char atom1[5],am1[5];
 	char atom2[5],am2[5];
 	double r2,r02;
+	struct vector sh={0.,0.,0.};		// periodic box: image of j nearest to i
 
 	if (pr) fprintf(fproc,"\nChecking overlaps... r0hard = %lf\n",u->g_r0hard);
 	// backbone loop
@@ -1147,6 +1785,7 @@ int CheckOverlaps(struct s_polymer *p, struct s_potential *u, struct s_mc_parms 
 				{
 					if (ci!=cj || (i<j && (((p+ci)->back)+i)->iaa != (((p+cj)->back)+j)->iaa))                      // in the same polymer, do not count twice a contact
 					{
+						if (u->boxtype=='p') sh = ImageShift( (((p+ci)->back)+i)->pos, (((p+cj)->back)+j)->pos, u->lbox );
 						tooclose = 0;
 						if (ci==cj && j-i <= u->g_imin ) tooclose = 1;
 
@@ -1155,7 +1794,7 @@ int CheckOverlaps(struct s_polymer *p, struct s_potential *u, struct s_mc_parms 
 						{
 							a1 = (((p+ci)->back)+i)->itype;
 							a2 = (((p+cj)->back)+j)->itype;
-							r2 = Dist2( (((p+ci)->back)+i)->pos, (((p+cj)->back)+j)->pos );
+							r2 = Dist2S( (((p+ci)->back)+i)->pos, (((p+cj)->back)+j)->pos, sh );
 							if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
 							else r02 = (u->r0_2)[a1][a2];
 							if ( r2 < r02 )
@@ -1180,7 +1819,7 @@ int CheckOverlaps(struct s_polymer *p, struct s_potential *u, struct s_mc_parms 
 							// interaction backbone-sidechain (i-js)
 							a1 = (((p+ci)->back)+i)->itype;
 							a2 = (((((p+cj)->back)+j)->side)+js)->itype;
-							r2 = Dist2( (((p+ci)->back)+i)->pos, (((((p+cj)->back)+j)->side)+js)->pos );
+							r2 = Dist2S( (((p+ci)->back)+i)->pos, (((((p+cj)->back)+j)->side)+js)->pos, sh );
 							if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
 							else r02 = (u->r0_2)[a1][a2];
 							if ( r2 < r02 )
@@ -1204,7 +1843,7 @@ int CheckOverlaps(struct s_polymer *p, struct s_potential *u, struct s_mc_parms 
 								// interaction sidechain-sidechain (is-js)
 								a1 = (((((p+ci)->back)+i)->side)+is)->itype;
 								a2 = (((((p+cj)->back)+j)->side)+js)->itype;
-								r2 = Dist2( (((((p+ci)->back)+i)->side)+is)->pos, (((((p+cj)->back)+j)->side)+js)->pos );
+								r2 = Dist2S( (((((p+ci)->back)+i)->side)+is)->pos, (((((p+cj)->back)+j)->side)+js)->pos, sh );
 								if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
 								else r02 = (u->r0_2)[a1][a2];
 								if ( r2 < r02 )
@@ -1233,7 +1872,7 @@ int CheckOverlaps(struct s_polymer *p, struct s_potential *u, struct s_mc_parms 
 						{
 							a1 = (((p+cj)->back)+j)->itype;
 							a2 = (((((p+ci)->back)+i)->side)+is)->itype;
-							r2 = Dist2( (((p+cj)->back)+j)->pos, (((((p+ci)->back)+i)->side)+is)->pos );
+							r2 = Dist2S( (((((p+ci)->back)+i)->side)+is)->pos, (((p+cj)->back)+j)->pos, sh );
 							if (tooclose) r02 = u->g_r0hard * u->g_r0hard;
 							else r02 = (u->r0_2)[a1][a2];
 							if ( r2 < r02 )
@@ -1270,6 +1909,8 @@ int CheckOverlaps(struct s_polymer *p, struct s_potential *u, struct s_mc_parms 
  ********************************************************************/
 int EnergyBox(struct s_polymer *p, struct s_potential *u, int iw, int ic)
 {
+	if (u->boxtype == 'p') return 0;				// periodic box: no walls
+
 	double d2;
 
 	// cubic box

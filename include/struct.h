@@ -447,12 +447,13 @@ struct s_cells
 	int npol,nres;			// chains and residues of the system
 	int *offset;			// global index of residue i of chain ic is offset[ic]+i
 	int *chain,*res;		// ... and back
-	double rcut,extcap;		// interaction range and bound on sidechain extents
+	double rcut,extcap;		// interaction range and bound on the radii of the spheres (srad)
 	double L,invL;			// cell side
 	int hsize,mask;			// buckets of the hash table (a power of 2)
 	int *head;			// first residue in each bucket
 	int *next,*prev,*bucket;	// linked lists, bucket of each residue
 	int *cand;			// candidates returned by CellsCandidates
+	unsigned long long *mark;	// ... collected as bits (one per residue, all 0 between calls) to sort them
 	double *x,*y,*z,*ext;		// compact copy of backbone positions and sidechain extents (always kept)
 	double *sx,*sy,*sz,*srad;	// sphere containing all the atoms of each residue (centre and radius, at most ext)
 	int *aoff;			// atoms of residue g: aoff[g] (backbone) .. aoff[g+1]-1 (sidechain, in order)

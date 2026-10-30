@@ -161,6 +161,13 @@ Speed:
    (the potentials with hydrogen bonds keep the previous function). In
    all, the Monte Carlo of 1PGB is 2 times faster than at the start of
    these changes.
+ - Cell list (systems of many chains): a residue is in the cell of the
+   centre of the sphere containing its atoms instead of its backbone atom,
+   so the cells only need to span the radius of those spheres (about half
+   the extent of the sidechains) and contain fewer candidates; the
+   candidates are put in order through a bitmap instead of an insertion
+   sort. Same trajectory, 16 all-atom TTR(105-115) chains in a periodic
+   box 2.2 times faster.
 
 Restart:
  - A checkpoint is written by default every 10 minutes (keyword

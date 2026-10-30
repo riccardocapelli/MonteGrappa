@@ -684,11 +684,11 @@ static inline int CandidatesRange(struct s_cells *c, int g0, int g1, double xi, 
 
 	if (u->boxtype=='p')
 	{
-		double box=u->lbox;
+		double box=u->lbox,invbox=1./box;			// (the image only decides which far pairs are skipped)
 		for (g=g0;g<g1;++g)
 		{
 			dx = c->sx[g]-xi; dy = c->sy[g]-yi; dz = c->sz[g]-zi;
-			dx -= box*round(dx/box); dy -= box*round(dy/box); dz -= box*round(dz/box);
+			dx -= box*round(dx*invbox); dy -= box*round(dy*invbox); dz -= box*round(dz*invbox);
 			rmax = ri + c->srad[g];
 			c->cand[nhit] = g;
 			nhit += ( dx*dx + dy*dy + dz*dz <= rmax*rmax );
@@ -753,7 +753,7 @@ double EnergyMonomerRangeRigid(struct s_polymer *p, struct s_potential *u, int f
 	if (shell == 0 && p->cells && p->cells->active)
 	{
 		struct s_cells *c = p->cells;
-		double rmax,dx,dy,dz;
+		double rmax,dx,dy,dz,invbox = c->box > 0 ? 1./c->box : 0.;	// (the image only decides which far pairs are skipped)
 		int ncand,k,g,gi;
 
 		for (i=from;i<=to;++i)
@@ -772,7 +772,7 @@ double EnergyMonomerRangeRigid(struct s_polymer *p, struct s_potential *u, int f
 				j = c->res[g];
 				rmax = u->rcut + c->srad[gi] + c->srad[g];				// spheres of the residues (see CellsSphere)
 				dx = c->sx[g]-c->sx[gi]; dy = c->sy[g]-c->sy[gi]; dz = c->sz[g]-c->sz[gi];
-				if (c->box > 0) { dx -= c->box*round(dx/c->box); dy -= c->box*round(dy/c->box); dz -= c->box*round(dz/c->box); }
+				if (c->box > 0) { dx -= c->box*round(dx*invbox); dy -= c->box*round(dy*invbox); dz -= c->box*round(dz*invbox); }
 				if ( dx*dx + dy*dy + dz*dz > rmax*rmax ) continue;
 
 				if ( ( ip!=cj || j<from || j>to || i<j ) && !( rig && ip==cj && rig[i] && rig[j] ) )	// j in [from,to] of the same chain: i<j to count once; skip rigid pairs

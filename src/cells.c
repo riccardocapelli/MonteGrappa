@@ -35,9 +35,10 @@
  * the whole system.
  *
  * The space is divided in cubic cells of side L >= rcut + 2*extcap, where
- * rcut is the interaction range of the potential and extcap bounds the extent
- * of the sidechains (s_back.ext), so that two residues in non-neighbouring
- * cells cannot interact. Cells are hashed into a table of buckets (the system
+ * rcut is the interaction range of the potential and extcap bounds the radius
+ * of the spheres containing the atoms of each residue (CellsSphere); a residue
+ * is in the cell of the centre of its sphere, so that two residues in
+ * non-neighbouring cells cannot interact. Cells are hashed into a table of buckets (the system
  * has no box); a bucket can contain residues of far cells, which are then
  * discarded by the distance test of the caller. Each bucket is a doubly
  * linked list of residues, indexed globally as offset[chain]+residue.
@@ -45,7 +46,7 @@
  * The list follows the coordinates lazily: EnergyMonomerRange updates the
  * residues it is going to evaluate, UpdateChainRanges the residues restored
  * after a rejected move and TotalEnergy rebuilds it after bulk changes. A
- * sidechain whose extent exceeds extcap marks the list for a rebuild.
+ * sphere whose radius exceeds extcap marks the list for a rebuild.
  *
  * Candidates are visited in the same order as the plain loop over all
  * residues, so the energies (and trajectories) are identical with and
@@ -126,6 +127,8 @@ void CellsAlloc(struct s_polymer *p, struct s_polymer *topo, int npol, int force
 	c->chain = (int *) malloc(c->nres*sizeof(int));
 	c->res = (int *) malloc(c->nres*sizeof(int));
 	c->cand = (int *) malloc(c->nres*sizeof(int));
+	c->mark = (unsigned long long *) calloc(c->nres/64+1,sizeof(unsigned long long));
+	if (!c->mark) Error("Cannot allocate cell list");
 	c->x = (double *) malloc(c->nres*sizeof(double));
 	c->y = (double *) malloc(c->nres*sizeof(double));
 	c->z = (double *) malloc(c->nres*sizeof(double));
@@ -181,7 +184,7 @@ void CellsFree(struct s_polymer *p)
 
 	if (!c) return;
 	free(c->offset); free(c->head); free(c->next); free(c->prev);
-	free(c->bucket); free(c->chain); free(c->res); free(c->cand);
+	free(c->bucket); free(c->chain); free(c->res); free(c->cand); free(c->mark);
 	free(c->x); free(c->y); free(c->z); free(c->ext);
 	free(c->sx); free(c->sy); free(c->sz); free(c->srad);
 	free(c->aoff); free(c->iaa); free(c->ax); free(c->ay); free(c->az); free(c->at);
@@ -204,6 +207,12 @@ static inline int CellBucket(struct s_cells *c, int ix, int iy, int iz)
 		return (ix*c->ncell + iy)*c->ncell + iz;
 	}
 	return (int) ( ( (unsigned) ix * 73856093u ^ (unsigned) iy * 19349663u ^ (unsigned) iz * 83492791u ) & (unsigned) c->mask );
+}
+
+// bucket of the cell of the centre of the sphere of residue g
+static inline int SphereBucket(struct s_cells *c, int g)
+{
+	return CellBucket(c,CellCoord(c->sx[g],c->invL),CellCoord(c->sy[g],c->invL),CellCoord(c->sz[g],c->invL));
 }
 
 static inline void CellsUnlink(struct s_cells *c, int g)
@@ -237,7 +246,7 @@ void CellsBuild(struct s_polymer *p, double rcut, double box)
 		b = ((p+c->chain[g])->back)+c->res[g];
 		c->x[g] = b->pos.x; c->y[g] = b->pos.y; c->z[g] = b->pos.z; c->ext[g] = b->ext;
 		CellsSphere(c,g,b);
-		if (b->ext > extmax) extmax = b->ext;
+		if (c->srad[g] > extmax) extmax = c->srad[g];
 		v[0] = b->pos.x; v[1] = b->pos.y; v[2] = b->pos.z;
 		for (d=0;d<3;++d)
 		{
@@ -252,7 +261,7 @@ void CellsBuild(struct s_polymer *p, double rcut, double box)
 	c->box = box;
 	if (box > 0)
 	{
-		if (box < 2.*c->L) Error("The periodic box must be larger than twice the interaction range of two residues (cutoff + 2 x sidechain extent)");
+		if (box < 2.*c->L) Error("The periodic box must be larger than twice the interaction range of two residues (cutoff + 2 x radius of a residue)");
 		c->ncell = (int) floor(box/c->L);
 		c->L = box/c->ncell;					// cells exactly tile the box
 		c->invL = 1./c->L;
@@ -274,10 +283,23 @@ void CellsBuild(struct s_polymer *p, double rcut, double box)
 	if (!c->active) return;
 
 	for (h=0;h<c->hsize;++h) c->head[h] = -1;
-	for (g=0;g<c->nres;++g)
+	for (g=0;g<c->nres;++g) CellsLink(c,g,SphereBucket(c,g));
+}
+
+/*****************************************************************************
+ Move residue g to the cell of the centre of its sphere (if the list is in
+ use), or mark the list for a rebuild if its radius exceeds extcap
+ *****************************************************************************/
+static inline void CellsRelink(struct s_cells *c, int g)
+{
+	int h;
+
+	if (!c->active || c->dirty) return;
+	if (c->srad[g] > c->extcap) { c->dirty = 1; return; }
+	h = SphereBucket(c,g);
+	if (h != c->bucket[g])
 	{
-		b = ((p+c->chain[g])->back)+c->res[g];
-		h = CellBucket(c,CellCoord(b->pos.x,c->invL),CellCoord(b->pos.y,c->invL),CellCoord(b->pos.z,c->invL));
+		CellsUnlink(c,g);
 		CellsLink(c,g,h);
 	}
 }
@@ -288,6 +310,7 @@ void CellsBuild(struct s_polymer *p, double rcut, double box)
 void CellsUpdateSphere(struct s_polymer *p, int ic, int i)
 {
 	CellsSphere(p->cells,p->cells->offset[ic]+i,((p+ic)->back)+i);
+	CellsRelink(p->cells,p->cells->offset[ic]+i);
 }
 
 /*****************************************************************************
@@ -297,7 +320,7 @@ void CellsUpdateRange(struct s_polymer *p, int ic, int from, int to)
 {
 	struct s_cells *c = p->cells;
 	struct s_back *b;
-	int i,g,h;
+	int i,g;
 
 	if (c->dirty) return;					// will be rebuilt before use
 	if (from<0) from=0;
@@ -309,14 +332,8 @@ void CellsUpdateRange(struct s_polymer *p, int ic, int from, int to)
 		g = c->offset[ic]+i;
 		c->x[g] = b->pos.x; c->y[g] = b->pos.y; c->z[g] = b->pos.z; c->ext[g] = b->ext;
 		CellsSphere(c,g,b);
-		if (!c->active) continue;					// only the compact copy
-		if (b->ext > c->extcap) { c->dirty = 1; return; }
-		h = CellBucket(c,CellCoord(b->pos.x,c->invL),CellCoord(b->pos.y,c->invL),CellCoord(b->pos.z,c->invL));
-		if (h != c->bucket[g])
-		{
-			CellsUnlink(c,g);
-			CellsLink(c,g,h);
-		}
+		CellsRelink(c,g);
+		if (c->dirty) return;
 	}
 }
 
@@ -328,12 +345,13 @@ void CellsUpdateRange(struct s_polymer *p, int ic, int from, int to)
 int CellsCandidates(struct s_polymer *p, int ic, int i)
 {
 	struct s_cells *c = p->cells;
-	struct s_back *b = ((p+ic)->back)+i;
-	int ix,iy,iz,dx,dy,dz,h,k,n=0,nb=0,seen,buckets[27],g,t;
+	int ix,iy,iz,dx,dy,dz,h,k,n=0,nb=0,seen,buckets[27],g,w,wmin,wmax;
+	unsigned long long bits;
 
-	ix = CellCoord(b->pos.x,c->invL);
-	iy = CellCoord(b->pos.y,c->invL);
-	iz = CellCoord(b->pos.z,c->invL);
+	g = c->offset[ic]+i;
+	ix = CellCoord(c->sx[g],c->invL);
+	iy = CellCoord(c->sy[g],c->invL);
+	iz = CellCoord(c->sz[g],c->invL);
 
 	for (dx=-1;dx<=1;++dx)
 		for (dy=-1;dy<=1;++dy)
@@ -344,17 +362,25 @@ int CellsCandidates(struct s_polymer *p, int ic, int i)
 				for (k=0;k<nb;++k) if (buckets[k]==h) seen = 1;
 				if (seen) continue;
 				buckets[nb++] = h;
-				for (g=c->head[h];g>=0;g=c->next[g]) c->cand[n++] = g;
+				for (g=c->head[h];g>=0;g=c->next[g]) n++;
 			}
 
 	if (4*n > c->nres) return -1;
 
-	// increasing order, as the plain loop over chains and residues (same sums)
-	for (k=1;k<n;++k)
+	// increasing order, as the plain loop over chains and residues (same sums): mark them, then read the marks in order
+	wmin = c->nres/64; wmax = 0;
+	for (k=0;k<nb;++k)
+		for (g=c->head[buckets[k]];g>=0;g=c->next[g])
+		{
+			c->mark[g>>6] |= 1ULL << (g&63);
+			if ((g>>6) < wmin) wmin = g>>6;
+			if ((g>>6) > wmax) wmax = g>>6;
+		}
+	n = 0;
+	for (w=wmin;w<=wmax;++w)
 	{
-		t = c->cand[k];
-		for (g=k-1;g>=0 && c->cand[g]>t;--g) c->cand[g+1] = c->cand[g];
-		c->cand[g+1] = t;
+		for (bits=c->mark[w]; bits; bits &= bits-1) c->cand[n++] = (w<<6) + __builtin_ctzll(bits);
+		c->mark[w] = 0;
 	}
 	return n;
 }
@@ -367,7 +393,7 @@ int CellsCheck(struct s_polymer *p)
 {
 	struct s_cells *c = p->cells;
 	struct s_back *b;
-	int g,h,k,nbad=0;
+	int g,k,nbad=0;
 	double sx,sy,sz,srad;
 
 	if (!c || c->dirty) return 0;
@@ -384,8 +410,7 @@ int CellsCheck(struct s_polymer *p)
 		if (sx!=c->sx[g] || sy!=c->sy[g] || sz!=c->sz[g] || srad!=c->srad[g]) { nbad++; continue; }
 		if (c->active)
 		{
-			h = CellBucket(c,CellCoord(b->pos.x,c->invL),CellCoord(b->pos.y,c->invL),CellCoord(b->pos.z,c->invL));
-			if (h != c->bucket[g]) nbad++;
+			if (SphereBucket(c,g) != c->bucket[g]) nbad++;
 		}
 	}
 	return nbad;

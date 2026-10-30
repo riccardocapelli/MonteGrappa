@@ -110,6 +110,14 @@ The tools can be compiled alone, with the commands
 See tests/README.md.
 
 
+(7) Manual
+
+The reference manual of all programs, input files and keywords is
+docs/manual.tex; compile it with
+
+	$ cd docs && latexmk -pdf manual.tex
+
+
 ================ NEW IN THIS REVISION ===================================
 
 Results:

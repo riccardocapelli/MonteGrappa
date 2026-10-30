@@ -38,7 +38,7 @@ Now have a look at 1YPC-CA.in, the input file for Grappino:
 
 - "imin" is used to exclude interactions between atoms being too close in the
   sequence. In this particular case, interactions are neglected if the
-  distance on the sequence is lesser than 4. 
+  distance on the sequence is 4 or less (see docs/manual.tex).
 - the potential we use is a go-model with a hardcore distance interaction of
   4.0 Angstrom and a maximum distance of 6.0 Angstrom. If present, each
   interaction between two atoms has a negative energy of -1.5.
@@ -117,10 +117,13 @@ the starting .pdb are missing (e.g. nitrogen or oxygen, this depending on
 the particular model used in the simulation). 
 
 
-You can find in the subdirectory "results" the output of Gromacs 4.5.5 routine 
-	echo 3 3 | g_rms -f traj.pdb -s check.pdb -o unfolded.xvg 
-where check.pdb is exactly the first frame of traj.pdb, cut and pasted in a 
-new file.
+You can find in the subdirectory "results" the rmsd of the CA atoms (in nm),
+computed with
+	../../tools/rmsd.py traj.pdb check.pdb rmsd.unf.xvg
+(the same as "gmx rms" of Gromacs), where check.pdb is the first frame of
+traj.pdb of the unfolding run, cut and pasted in a new file. The results were
+obtained with this version of MonteGrappa; with seed 42 the chain refolds only
+partially in 5 million steps (other seeds refold completely or not at all).
 
 
 Finally, run 

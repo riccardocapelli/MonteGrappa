@@ -37,7 +37,7 @@ go-energy       -1.5            # potential depth
 
 				# that means: considering our protein to be made only 
 				# of CA atoms, if the distance on the sequence 
-				# between two of them is >=4 and if their distance 
+				# between two of them is >4 and  if their distance 
 				# in real space is between 4 and 6 Angstrom, then it 
 				# sets a potential well with energy -1.5
 
